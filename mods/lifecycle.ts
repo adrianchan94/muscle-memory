@@ -1,9 +1,10 @@
 // muscle-memory · lifecycle module (split from index.ts — behavior-preserving).
 import { mkdirSync, readFileSync, existsSync, writeFileSync, readdirSync, renameSync } from "node:fs";
 import { join } from "node:path";
-import { Row, USAGE_PATH, appendMeshFeed, appendUiEvent, autonomousShelves, ensureDir, isManaged, listSkillNames, loadRows, readSkill, scanDirs, skillDesc, slug, writeUiState } from "./core";
+import { Row, USAGE_PATH, appendMeshFeed, appendUiEvent, autonomousShelves, ensureDir, isManaged, listSkillNames, loadExperience, loadRows, readSkill, scanDirs, skillDesc, slug, writeUiState } from "./core";
 import { buildCrossConversationEvidence, detectRepairChains, isDurableLesson, stepSig } from "./detect";
 import { pickUpdateTarget, searchSkills } from "./autopilot";
+import { nonRegressionGuard } from "./efficacy";
 
 
 export function managedSkillUsage(name: string, rows: Row[] = loadRows()): number {
@@ -53,6 +54,7 @@ export function runAutonomousPrune(ctx?: any, opts: { maxRetire?: number } = {})
   const maxRetire = Math.max(0, opts.maxRetire ?? 1);
   const usage = loadUsage();
   const now = Date.now();
+  const expRows = loadExperience();
   const retired: string[] = [];
   const retiredPaths: string[] = [];
   const flagged: string[] = [];
@@ -70,6 +72,15 @@ export function runAutonomousPrune(ctx?: any, opts: { maxRetire?: number } = {})
       const created = u.created || now;
       const ageDays = Math.floor((now - created) / 86400000);
       if (ageDays > 30 && retired.length < maxRetire) {
+        // Non-regression guard (misevolution): even a 0-use skill is KEPT if removing it would drop coverage
+        // of a STILL-RECURRING failure class — a tidy-up must never lower aggregate coverage. 0 uses ≠ useless.
+        const shelf = listSkillNames(d).filter((s) => isManaged(d, s)).map((s) => ({ name: s, body: readSkill(d, s), description: skillDesc(d, s) }));
+        const guard = nonRegressionGuard(expRows, shelf, shelf.filter((s) => s.name !== n));
+        if (!guard.ok) {
+          flagged.push(n);
+          appendUiEvent({ phase: "skill_review", summary: `kept '${n}' (0 uses, ${ageDays}d) — still covers ${guard.lost.join(", ")}`, skill: n, action: "review", route: "non-regression-guard" });
+          continue;
+        }
         const reason = `auto-prune: 0 uses in ${ageDays}d — not earning context (reversible quarantine)`;
         const target = retireManagedSkill(n, reason, ctx, undefined, [d]); // restrict to THIS agent shelf — never global
         retired.push(n);

@@ -7,6 +7,7 @@ import { dedupCheck, draftWithRepair, effectivenessVerdict, findCandidate, lintS
 import { publishPlan, publishSkillToCatalog, publishTier } from "./publish";
 import { ENGRAM, engramConsolidate } from "./engram";
 import { loadUsage, retireManagedSkill, skillVerbs, specDrift } from "./lifecycle";
+import { blendRoute, semanticRoute } from "./embed";
 
 export type AutopilotMode = "off" | "staged" | "auto";
 
@@ -183,6 +184,44 @@ export async function consumeStreamBounded(stream: AsyncIterable<unknown>): Prom
 }
 
 
+export type ReviewRuntime = { routed: boolean; model?: string; provider?: string };
+
+/** Resolve the OPT-IN cheap-model routing for the distillation fork (mirrors Hermes's
+ * `auxiliary.background_review`). Pure given env. Default: NOT routed → the fork inherits the parent's
+ * model + warm prefix cache (cheap cache reads), exactly as before. When `MM_REVIEW_MODEL` names a model
+ * the fork is routed to it (a cheaper model for the background self-review); since a different model can't
+ * reuse the parent's cache, the caller replays a compact DIGEST to bound cold-write cost. Default off. */
+export function resolveReviewRuntime(env: NodeJS.ProcessEnv = process.env): ReviewRuntime {
+  const model = String(env.MM_REVIEW_MODEL ?? "").trim();
+  if (!model) return { routed: false };
+  const provider = String(env.MM_REVIEW_PROVIDER ?? "").trim() || undefined;
+  return { routed: true, model, provider };
+}
+
+/** Compact a long evidence digest for the routed (different-model) fork: keep the head + tail verbatim,
+ * elide the middle. A cheaper review model gets a cold cache regardless, so fewer cold-written tokens is a
+ * pure win; head+tail preserve the most salient signal. Returns the input unchanged when within `maxChars`. */
+export function digestEvidence(text: string, maxChars = 4000): string {
+  const s = String(text ?? "");
+  if (s.length <= maxChars) return s;
+  const head = Math.floor(maxChars * 0.6);
+  const tail = maxChars - head;
+  return `${s.slice(0, head)}\n\n[… ${s.length - maxChars} chars of mid-evidence elided to bound the routed review's cold-write cost …]\n\n${s.slice(s.length - tail)}`;
+}
+
+/** Route the forked conversation to the configured cheap review model. Best-effort + guarded: a missing
+ * `updateLlmConfig` (older surface) or any failure is a silent no-op — the fork stays on the parent model.
+ * The `updateLlmConfig({ model, scope:"conversation" })` API is conversation-scoped (Letta 0.27.18), so it
+ * never changes the agent's default model. */
+async function applyReviewRuntime(forked: unknown, rt: ReviewRuntime = resolveReviewRuntime()): Promise<void> {
+  if (!rt.routed || !rt.model) return;
+  if (!forked || typeof forked !== "object" || !("updateLlmConfig" in forked)) return;
+  const update = forked.updateLlmConfig;
+  if (typeof update !== "function") return;
+  try { await (update as (cfg: { model: string; scope: string }) => Promise<void>).call(forked, { model: rt.model, scope: "conversation" }); } catch { /* fork stays on the parent model */ }
+}
+
+
 /** Optional model-fork author: the model writes a richer SKILL.md body in a hidden conversation.
  * Fully guarded — ANY failure returns null and the executor falls back to the deterministic drafter,
  * so the autopilot loop can never break. (Live-only path; the deterministic fallback is what's unit-tested.) */
@@ -192,6 +231,7 @@ export async function forkAuthor(ctx: any, c: Candidate, repair?: RepairChain): 
     const det = draftWithRepair(c, repair);
     const prompt = `You are muscle-memory's skill author. Write ONLY the markdown BODY (no YAML frontmatter) of a SKILL.md capturing this recurring real workflow. Keep it under 120 lines. Required sections in order: "## Trigger", "## Observed pattern" (include the exact pattern in a code block), "## Procedure" (numbered, concrete, adaptable), ${repair ? `"## Pitfalls" (the observed error "${repair.errClass}" and its fix "${repair.fixStep}"), ` : ""}"## Verification". Pattern: ${c.key}. Reps: ${c.count} across ${c.convs} conversation(s). Output ONLY the markdown body, nothing else.`;
     const forked = await ctx.conversation.fork({ hidden: true });
+    await applyReviewRuntime(forked);
     const stream = await forked.sendMessageStream([{ role: "user", content: prompt }]);
     let body = await consumeStreamBounded(stream as AsyncIterable<unknown>);
     body = body.trim().replace(/^```(?:markdown|md)?\n?|\n?```$/g, "");
@@ -381,10 +421,25 @@ export function compareSkillSections(oldContent?: string, newContent?: string) {
 
 export type ReviewResult = { action: "create" | "update" | "none" | "reject"; name?: string; description?: string; body?: string; content?: string; reason?: string; updateTarget?: string; matches?: Array<{ name: string; score: number; matched: number }>; degraded?: string; wrote?: string };
 
+/** UPDATE-FIRST candidate routing: lexical search, then — when an embedding backend is configured — blend
+ * in semantic similarity so a semantically-equivalent skill the lexical router missed still surfaces as a
+ * routable UPDATE target (Voyager-style retrieval), closing the duplicate the lexical-only router would
+ * have created. With `semRanked` null (semantic disabled / backend failed) this is exactly
+ * `searchSkills(dirs, query, k)` — lexical behavior preserved byte-for-byte. */
+export function routeMatches(dirs: string[], query: string, semRanked: Array<{ name: string; sim: number }> | null | undefined, k = 3): Array<{ name: string; description: string; dir?: string; score: number; matched: number }> {
+  const lex = searchSkills(dirs, query, 5);
+  if (!semRanked || semRanked.length === 0) return lex.slice(0, k);
+  return blendRoute(lex, semRanked).slice(0, 5).map((m) => {
+    const dir = "dir" in m && typeof m.dir === "string" ? m.dir : dirs.find((d) => existsSync(join(d, m.name, "SKILL.md")));
+    const description = "description" in m && m.description ? m.description : (dir ? skillDesc(dir, m.name) : "");
+    return { name: m.name, description, dir, score: m.score, matched: m.matched };
+  });
+}
+
 /** Author + gate a skill from evidence, with MemFS update-first routing. authorFn(system,user)->text injectable. */
-export async function reviewAndAuthor(evidence: string, dirs: string[], authorFn: (sys: string, user: string) => Promise<string>, opts: { updateThreshold?: number } = {}): Promise<ReviewResult> {
+export async function reviewAndAuthor(evidence: string, dirs: string[], authorFn: (sys: string, user: string) => Promise<string>, opts: { updateThreshold?: number; semRanked?: Array<{ name: string; sim: number }> } = {}): Promise<ReviewResult> {
   // MemFS update-first: does a skill SAFELY cover this domain? (distinctive overlap + clearLead, not generic words)
-  const matches = searchSkills(dirs, evidence, 3);
+  const matches = routeMatches(dirs, evidence, opts.semRanked);
   const threshold = opts.updateThreshold ?? 18;
   const updTarget = pickUpdateTarget(matches, threshold);
   const slimEarly = matches.map((m) => ({ name: m.name, score: m.score, matched: m.matched }));
@@ -601,7 +656,10 @@ export function reviewForkAuthor(ctx: any): (sys: string, user: string) => Promi
     try {
       if (typeof ctx?.conversation?.fork !== "function") return "";
       const forked = await ctx.conversation.fork({ hidden: true });
-      const stream = await forked.sendMessageStream([{ role: "user", content: `${sys}\n\n${user}` }]);
+      const rt = resolveReviewRuntime();
+      await applyReviewRuntime(forked, rt);
+      const content = rt.routed ? `${sys}\n\n${digestEvidence(user)}` : `${sys}\n\n${user}`;
+      const stream = await forked.sendMessageStream([{ role: "user", content }]);
       const out = await consumeStreamBounded(stream as AsyncIterable<unknown>);
       return out.trim();
     } catch { return ""; }
@@ -627,8 +685,13 @@ export async function runReflectiveReview(ctx: any, config: { mode?: "staged" | 
   // PERSONALIZED PATCHING: retrieve the user's actual preferences from memory and inject them.
   const prefs = retrievePreferences(ev.digest, process.env.MEMORY_DIR);
   const digest = `${engram.digest}\n\n${ev.digest}` + (prefs.length ? `\n\nUSER PREFERENCES (from this agent's memory — bake the relevant ones into the skill's guidance):\n${prefs.map((p) => `- ${p}`).join("\n")}` : "");
+  // L1 — OPT-IN semantic routing (one embedding index): re-rank the update-first candidates by MEANING so a
+  // semantically-equivalent skill the lexical router missed still routes to UPDATE instead of spawning a
+  // near-duplicate. Default OFF (MM_EMBED unset) → semRanked is null → lexical routing only, unchanged.
+  const semCands = managedView(reviewDirs).map((m) => ({ name: m.name, text: `${m.name}. ${m.description}` }));
+  const semRanked = await semanticRoute(digest, semCands);
   // LIVE MIRROR: surface the route + writing phase during the (long) author call, so the panel animates.
-  const preTgt = pickUpdateTarget(searchSkills(reviewDirs, digest, 3), 18);
+  const preTgt = pickUpdateTarget(routeMatches(reviewDirs, digest, semRanked), 18);
   const routeKey = preTgt ? `UPDATE:${preTgt.name}` : "CREATE";
   const sig = reflectSignature(ev);
   if (loadHandledReflects()[sig]) {
@@ -643,7 +706,7 @@ export async function runReflectiveReview(ctx: any, config: { mode?: "staged" | 
   const author = config.authorFn || reviewForkAuthor(ctx);
   let res: ReviewResult;
   try {
-    res = await reviewAndAuthor(digest, reviewDirs, author);
+    res = await reviewAndAuthor(digest, reviewDirs, author, { semRanked });
   } catch (e: any) {
     // author/review threw — never leave the panel stuck on "writing…"; write a terminal state.
     appendUiEvent({ phase: "reflect_error", summary: `author failed: ${String(e?.message ?? e).slice(0, 80)}` });

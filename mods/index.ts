@@ -42,6 +42,9 @@ import { Defense, ENGRAM, GuardMode, buildDefenses, buildNeocortexBlock, capture
 import { CURATOR, aggregateTelemetry, buildRegistry, bumpUsage, churnSignal, coverageMap, curateManagedSkills, curatorPass, isPinned, lifecycleTransition, managedSkillUsage, restoreManagedSkill, retireManagedSkill, runAutonomousPrune, setPinned, skillVerbs, specDrift } from "./lifecycle";
 import { AUTOPILOT_DEFAULT, AutopilotMode, REVIEW_PROMPT, autopilotPlan, buildEvidenceManifest, executeAutopilotPlan, forkAuthor, graduateStagedSkill, isHighConfidenceCreate, loadHandledReflects, managedView, pickUpdateTarget, reflectSignature, retrievePreferences, reviewAndAuthor, runAutopilot, runReflectiveReview, searchSkills, streamChunkText } from "./autopilot";
 import { renderMuscleMemoryPanel, summarizeReflectActions } from "./ui";
+import { blendRoute, cosine, embedConfig, rankByVector, semanticDuplicatePairs, semanticRoute } from "./embed";
+import { efficacyReport, nonRegressionGuard, recurringFailureClasses, skillCovers } from "./efficacy";
+import { digestEvidence, resolveReviewRuntime, routeMatches } from "./autopilot";
 
 
 // Test hook (deterministic validation without live data).
@@ -57,7 +60,9 @@ export const __mm = { commandTemplate, fingerprint, redactFragment, buildDiffFra
   writeSkill, isManaged, listSkillNames, readSkill, retireManagedSkill, agentSkillsDir, scanDirs, MM_TAG,
   // v5 ENGRAM — CLS loop core (pure)
   ENGRAM, expectationFor, predictionError, tagExperience, captureTagged, skillRetrieved, labileSkills, replayQueue, reverseReplay, interleave, engramConsolidate, renderEngramDigest,
-  guardDecision, buildNeocortexBlock, nativeEnabled, NEOCORTEX_BLOCK };
+  guardDecision, buildNeocortexBlock, nativeEnabled, NEOCORTEX_BLOCK,
+  // L1 semantic routing + SemDeDup, L2 cheap-fork routing, L3 measured efficacy + non-regression guard (2026-06-29)
+  cosine, rankByVector, semanticDuplicatePairs, blendRoute, embedConfig, semanticRoute, routeMatches, resolveReviewRuntime, digestEvidence, efficacyReport, nonRegressionGuard, recurringFailureClasses, skillCovers };
 
 
 export default function activate(letta: any) {

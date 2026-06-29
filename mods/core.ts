@@ -235,22 +235,80 @@ export const NEOCORTEX_BLOCK = "muscle_memory";
 // Real key formats: separator-prefixed (sk-/pk-/ghp_/xoxb-…), Anthropic sk-ant- (internal hyphen),
 // AWS AKIA + 16 (NO separator), Google AIza + 20+ (NO separator). The old single `[-_]` rule silently
 // missed AKIA/AIza/sk-ant real keys — found by the adversarial safety tests; hardened, not benchmark-tuned.
-export const SECRET_TOKEN_RE = /\b(?:(?:sk|pk|ghp|gho|ghu|ghs|xox[baprs])[-_][A-Za-z0-9]{12,}|sk-ant-[A-Za-z0-9-]{12,}|AKIA[0-9A-Z]{16}|AIza[A-Za-z0-9_-]{20,})\b/;
+export const SECRET_TOKEN_RE = /\b(?:(?:sk|pk|ghp|gho|ghu|ghs|xox[baprs])[-_][A-Za-z0-9]{12,}|sk-ant-[A-Za-z0-9-]{12,}|sk-proj-[A-Za-z0-9_-]{12,}|(?:sk|pk)_(?:live|test)_[A-Za-z0-9]{12,}|glpat-[A-Za-z0-9_-]{12,}|npm_[A-Za-z0-9]{20,}|SG\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}|AKIA[0-9A-Z]{16}|AIza[A-Za-z0-9_-]{20,}|AC[a-fA-F0-9]{32})\b/;
+
+function defensivelyDocumented(content: string): boolean {
+  return /\b(?:defensive|defense|example\s+of\s+what\s+not\s+to\s+do|do\s+not|don't|never|warning:?|should\s+block|placeholder|redacted)\b/i.test(content);
+}
+
+function splitLiteralJoin(content: string): string {
+  const literals = [...String(content || "").matchAll(/["'`]([^"'`\n]{1,160})["'`]/g)].map((m) => m[1]);
+  return literals.join("");
+}
+
+function compactForSplitSecretScan(content: string): string {
+  return String(content || "").replace(/[\s"'`+,[\]();]/g, "");
+}
+
+function decodedBase64Candidates(content: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const m of String(content || "").matchAll(/\b[A-Za-z0-9+/]{24,}={0,2}\b/g)) {
+    const token = m[0];
+    if (seen.has(token) || token.length > 512) continue;
+    seen.add(token);
+    try {
+      const decoded = Buffer.from(token, "base64").toString("utf8");
+      if (/^[\x09\x0a\x0d\x20-\x7e]{8,}$/.test(decoded)) out.push(decoded);
+    } catch { /* ignore malformed base64 */ }
+  }
+  return out;
+}
+
+function shannonEntropy(s: string): number {
+  const counts = new Map<string, number>();
+  for (const ch of s) counts.set(ch, (counts.get(ch) || 0) + 1);
+  let h = 0;
+  for (const n of counts.values()) { const p = n / s.length; h -= p * Math.log2(p); }
+  return h;
+}
+
+function hasHighEntropyCredential(content: string): boolean {
+  const c = String(content || "");
+  const credentialContext = /\b(?:credential|secret|token|api[_-]?key|password|auth|bearer|endpoint\s+asks)\b/i.test(c);
+  for (const m of c.matchAll(/\b[A-Za-z0-9_+=/@#$%.-]{28,}\b/g)) {
+    const token = m[0];
+    if (/^(?:https?:|shopify:|file:)/i.test(token)) continue;
+    const hasUpper = /[A-Z]/.test(token), hasLower = /[a-z]/.test(token), hasDigit = /\d/.test(token);
+    const mixed = [hasUpper, hasLower, hasDigit].filter(Boolean).length >= 2;
+    if ((credentialContext || token.length >= 40) && mixed && shannonEntropy(token) >= 3.8) return true;
+  }
+  return false;
+}
 
 export function scanSkillContent(content: string): { ok: boolean; issues: string[] } {
   const c = String(content || "");
   const issues: string[] = [];
-  if (SECRET_TOKEN_RE.test(c) || /\b(?:authorization|api[_-]?key|secret|password)\s*[:=]\s*["']?[^\s"'<>]{6,}/i.test(c) || /-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(c)) issues.push("secret-looking credential");
-  if (/\bcurl\b[^\n|]*\|\s*(?:sudo\s+)?(?:ba)?sh\b/i.test(c) || /\bwget\b[^\n|]*\|\s*(?:ba)?sh\b/i.test(c)) issues.push("pipe-to-shell (curl|sh)");
-  if (/\brm\s+-[rf]{1,2}\s+(?:["']?[~/]|\$HOME|\*)/.test(c)) issues.push("naked rm -rf on root/home/glob");
-  if (/(?:^|[\s;&|])sudo\s+\S/i.test(c)) issues.push("sudo command");
+  const defensive = defensivelyDocumented(c);
+  const splitJoined = splitLiteralJoin(c);
+  const compacted = compactForSplitSecretScan(c);
+  const decoded = decodedBase64Candidates(c);
+  const decodedHasSecret = decoded.some((d) => SECRET_TOKEN_RE.test(d) || /\b(?:authorization|api[_-]?key|secret|password|token)\s*[:=]\s*["']?[^\s"'<>]{6,}/i.test(d));
+  if (SECRET_TOKEN_RE.test(c) || SECRET_TOKEN_RE.test(splitJoined) || SECRET_TOKEN_RE.test(compacted) || decodedHasSecret || hasHighEntropyCredential(c)
+      || /\b(?:authorization|api[_-]?key|secret|password|token|private[_-]?token|access[_-]?token|client[_-]?secret|oauth[_-]?client[_-]?secret|database_url|redis_url|pgpassword|db_password)\s*[:=]\s*["']?(?!(?:Bearer\s+)?<[^>]+>|(?:Bearer\s+)?\$\{?[A-Z0-9_]+\}?\b)[^\s"'<>]{6,}/i.test(c)
+      || /\b(?:postgres|postgresql|mysql|redis):\/\/[^\s:@]+:[^\s:@]{4,}@/i.test(c)
+      || /-----BEGIN [A-Z ]*(?:PRIVATE KEY|PRIVATE KEY BLOCK)-----/.test(c)) issues.push("secret-looking credential");
+  if ((/\b(?:curl|wget)\b[^\n|]*\|\s*(?:sudo\s+)?(?:ba)?(?:sh|zsh)\b/i.test(c) || /\bpython3?\b[^\n]*(?:urllib|requests)[^\n]*(?:exec|os\.system|subprocess)/i.test(c)) && !defensive) issues.push("pipe-to-shell (curl|sh)");
+  if (/\brm\s+-[rf]{1,2}\s+(?:["']?[~/]|\$HOME|\*)/.test(c) && !defensive) issues.push("naked rm -rf on root/home/glob");
+  if (/(?:^|[\s;&|])sudo\s+\S/i.test(c) && !defensive) issues.push("sudo command");
+  if (/(:\s*\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:)|\bdd\s+if=\/dev\/(?:zero|random)\s+of=\/dev\//i.test(c)) issues.push("destructive command pattern");
   // NOTE: force-push / reset --hard / rm etc. are NOT security threats — they are legitimate workflow ops a
   // skill may need to teach (git rebase, deploy rollback). Hard-blocking them here made mm unable to distil
   // entire domains (git/rebase/deploy). The real concern — "use them with a safety net" — is the SAFE-FIRST
   // QUALITY gate's job (sotaQualityGaps), which flags destructive ops lacking a backup/--force-with-lease/
   // dry-run and regenerates. Security scanner = true threats (secrets, exfil, pipe-to-shell, injection) only.
   if (Math.ceil(c.length / 4) > 5000) issues.push("body > 5000 tokens (decompose into references/)");
-  if (/\bignore\s+(?:all\s+|the\s+)?(?:previous|prior|above)\s+(?:instructions|messages|prompts|rules)\b/i.test(c) || /\b(?:disregard|override)\s+(?:your\s+|the\s+)?(?:system|previous)\s+(?:prompt|instructions)\b/i.test(c)) issues.push("prompt-injection phrasing");
+  if (!defensive && (/\bignore\s+(?:all\s+|the\s+)?(?:previous|prior|above)\s+(?:instructions|messages|prompts|rules)\b/i.test(c) || /\b(?:disregard|override)\s+(?:your\s+|the\s+)?(?:system|previous)\s+(?:prompt|instructions)\b/i.test(c))) issues.push("prompt-injection phrasing");
   // context-escape / role-injection: skill content that closes the mod's own skill wrapper, or impersonates
   // a system/role turn to issue agent instructions (publish anyway, approve, new instructions). A SKILL.md
   // body never legitimately contains these — they are attempts to subvert the publish/write gate.
@@ -260,7 +318,10 @@ export function scanSkillContent(content: string): { ok: boolean; issues: string
   // concrete hardcoded API-key/token formats (QA-hardened)
   if (/\b(?:sk-ant-[a-zA-Z0-9-]{8,}|sk-[a-zA-Z0-9]{20,}|ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|xox[baprs]-[A-Za-z0-9-]{10,})\b/.test(c)) issues.push("hardcoded API key/token");
   // credential exfiltration: command-substitution reading secrets, or piping creds to the network
-  if (/\$\([^)]*(?:cat|head|tail|less)[^)]*(?:\.ssh|id_rsa|\.env|\.aws|credentials|\.netrc|passwd|secret|token)/i.test(c) || /(?:curl|wget|nc|ncat)\b[^\n]*(?:\$\(|`)[^\n]*(?:cat|\.ssh|\.env|credentials|secret)/i.test(c)) issues.push("credential exfiltration pattern");
+  if (/\$\([^)]*(?:cat|head|tail|less|env|printenv)[^)]*(?:\.ssh|id_rsa|\.env|\.aws|credentials|\.netrc|passwd|secret|token)/i.test(c)
+      || /(?:curl|wget|nc|ncat)\b[^\n]*(?:\$\(|`)[^\n]*(?:cat|env|printenv|\.ssh|\.env|\.aws|credentials|secret|token|\.netrc)/i.test(c)
+      || /(?:cat|tar\s+\w*|env|printenv)[^\n|]*(?:\.ssh|id_rsa|\.env|\.aws|credentials|\.netrc|passwd|secret|token|gh)[^\n|]*\|\s*(?:nc|ncat)\b/i.test(c)
+      || /(?:nc|ncat)\b[^\n]*(?:<|--send-only)[^\n]*(?:\.ssh|id_rsa|\.env|\.aws|credentials|\.netrc|passwd|secret|token|gh)/i.test(c)) issues.push("credential exfiltration pattern");
   // obfuscated code execution
   if (/\beval\s*\(\s*(?:atob|Buffer\.from|decodeURIComponent|unescape)\s*\(/i.test(c) || /\bbase64\s+-d\b[^\n]*\|\s*(?:ba)?sh\b/i.test(c) || /\b(?:python3?|node|ruby|perl)\b[^\n]*\s-[ec]\b[^\n]*(?:atob|base64|exec\(|eval)/i.test(c)) issues.push("obfuscated code execution");
   return { ok: issues.length === 0, issues };

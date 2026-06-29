@@ -37,7 +37,7 @@ export function commandTemplate(cmd: string): string {
 }
 
 
-export const HIGH_SIGNAL_TOOL_SET = new Set(["visual_receipt", "im8_claims_lint", "no_cap_gate_check", "repo_radar_evidence", "kev_final_buzzer_gate", "im8_theme_done_gate", "im8_product_intel", "im8_write_plan"]);
+export const HIGH_SIGNAL_TOOL_SET = new Set(["visual_receipt", "claims_lint", "no_cap_gate_check", "repo_radar_evidence", "final_buzzer_gate", "theme_done_gate", "product_intel", "write_plan"]);
 
 
 export function hostOrToken(s: unknown): string {
@@ -66,20 +66,20 @@ export function fingerprint(tool: string, args: Record<string, unknown>): { fp: 
     tmpl = `Skill ${slug(String(args.skill))}`;
   } else if (tool === "visual_receipt") {
     tmpl = `visual_receipt ${hostOrToken(args?.url)} ${countMaybeArray(args?.viewports)} viewports ${countMaybeArray(args?.selectors)} selectors`;
-  } else if (tool === "im8_claims_lint") {
-    tmpl = `im8_claims_lint supplement-copy ${countMaybeArray(args?.files)} files`;
+  } else if (tool === "claims_lint") {
+    tmpl = `claims_lint supplement-copy ${countMaybeArray(args?.files)} files`;
   } else if (tool === "no_cap_gate_check") {
     tmpl = `no_cap_gate_check high-trust-claim`;
   } else if (tool === "repo_radar_evidence" && typeof args?.kind === "string") {
     tmpl = `repo_radar_evidence ${slug(String(args.kind))}`;
-  } else if (tool === "kev_final_buzzer_gate") {
-    tmpl = `kev_final_buzzer_gate final-readiness`;
-  } else if (tool === "im8_theme_done_gate") {
-    tmpl = `im8_theme_done_gate theme-readiness`;
-  } else if (tool === "im8_product_intel") {
-    tmpl = `im8_product_intel ${slug(String(args?.mode || "lookup"))}`;
-  } else if (tool === "im8_write_plan") {
-    tmpl = `im8_write_plan ${slug(String(args?.operation || "write-plan"))}`;
+  } else if (tool === "final_buzzer_gate") {
+    tmpl = `final_buzzer_gate final-readiness`;
+  } else if (tool === "theme_done_gate") {
+    tmpl = `theme_done_gate theme-readiness`;
+  } else if (tool === "product_intel") {
+    tmpl = `product_intel ${slug(String(args?.mode || "lookup"))}`;
+  } else if (tool === "write_plan") {
+    tmpl = `write_plan ${slug(String(args?.operation || "write-plan"))}`;
   }
   const shape = keys.filter((k) => !SECRETISH.test(k)).join(",");
   const fp = `${tool}(${shape})${tmpl ? " :: " + tmpl : ""}`;
