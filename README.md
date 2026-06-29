@@ -420,16 +420,18 @@ Every session becomes practice film.
 
 ## Source of truth
 
-Standalone public install repo:
+Standalone public repo — post-hackathon v0.7 artifact:
 
 ```txt
 https://github.com/adrianchan94/muscle-memory
 ```
 
-Canonical Letta Mods submission branch:
+This repo is the current public artifact for the autonomous-distillation framing, Pass 1 deterministic safety hardening, and 84-test verification surface described above.
+
+Frozen Letta Mods submission:
 
 ```txt
-https://github.com/adrianchan94/mods/tree/mm-v4-ace/packages/muscle-memory
+https://github.com/letta-ai/mods/pull/19
 ```
 
-Until the package is accepted upstream, the fork branch is the integration source of truth.
+PR #19 is the original contest submission and is intentionally left unchanged. Do not read the v0.7 safety numbers in this README as claims about the frozen PR branch.
