@@ -1,6 +1,6 @@
 // mods/index.ts
-import { mkdirSync as mkdirSync5, readFileSync as readFileSync6, existsSync as existsSync6, writeFileSync as writeFileSync5, readdirSync as readdirSync4 } from "node:fs";
-import { join as join7 } from "node:path";
+import { mkdirSync as mkdirSync6, readFileSync as readFileSync8, existsSync as existsSync8, writeFileSync as writeFileSync8, readdirSync as readdirSync4 } from "node:fs";
+import { join as join10 } from "node:path";
 
 // mods/core.ts
 import { appendFileSync, mkdirSync, readFileSync, existsSync, writeFileSync, readdirSync, renameSync } from "node:fs";
@@ -1985,6 +1985,18 @@ function reachFn(root, path) {
   }
   return typeof cur === "function" ? cur.bind(receiver) : null;
 }
+function pageItems(resp) {
+  if (Array.isArray(resp))
+    return resp;
+  if (!resp || typeof resp !== "object")
+    return [];
+  const rec = resp;
+  if (Array.isArray(rec.items))
+    return rec.items;
+  if (Array.isArray(rec.data))
+    return rec.data;
+  return [];
+}
 async function syncNeocortexBlock(client, agentId, content) {
   if (!agentId || !nativeEnabled("blocks"))
     return false;
@@ -3150,6 +3162,289 @@ function renderWins(w, now = Date.now()) {
 `);
 }
 
+// mods/history.ts
+import { existsSync as existsSync6, readFileSync as readFileSync6, writeFileSync as writeFileSync5 } from "node:fs";
+import { join as join7 } from "node:path";
+var MINE_WATERMARK_PATH = join7(STATE_DIR, "mined-watermark.json");
+function loadWatermarks() {
+  try {
+    if (!existsSync6(MINE_WATERMARK_PATH))
+      return {};
+    const parsed = JSON.parse(readFileSync6(MINE_WATERMARK_PATH, "utf8"));
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+function saveWatermark(agentId, id, ts) {
+  try {
+    ensureDir();
+    const all = loadWatermarks();
+    all[agentId] = { id, ts };
+    writeFileSync5(MINE_WATERMARK_PATH, JSON.stringify(all, null, 2));
+  } catch {}
+}
+function parseHistoryMessage(m) {
+  if (!m || typeof m !== "object")
+    return [];
+  const msg = m;
+  const ts = typeof msg.date === "string" ? Date.parse(msg.date) || Date.now() : Date.now();
+  const conv = typeof msg.conversation_id === "string" ? msg.conversation_id : null;
+  const out = [];
+  const mtype = typeof msg.message_type === "string" ? msg.message_type : "";
+  if (mtype === "tool_call_message") {
+    const calls = Array.isArray(msg.tool_calls) ? msg.tool_calls : msg.tool_call ? [msg.tool_call] : [];
+    for (const c of calls) {
+      if (!c || typeof c !== "object")
+        continue;
+      const call = c;
+      const tool = typeof call.name === "string" ? call.name : "";
+      const id = typeof call.tool_call_id === "string" ? call.tool_call_id : "";
+      if (!tool || !id)
+        continue;
+      let args = {};
+      if (typeof call.arguments === "string") {
+        try {
+          const parsed = JSON.parse(call.arguments);
+          if (parsed && typeof parsed === "object")
+            args = parsed;
+        } catch {}
+      }
+      out.push({ kind: "call", ts, id, conv, tool, args });
+    }
+  } else if (mtype === "tool_return_message") {
+    const id = typeof msg.tool_call_id === "string" ? msg.tool_call_id : "";
+    if (id) {
+      const status = typeof msg.status === "string" ? msg.status : "";
+      const ret = msg.tool_return;
+      const text = typeof ret === "string" ? ret : Array.isArray(ret) ? ret.map((p) => p && typeof p === "object" && ("text" in p) && typeof p.text === "string" ? String(p.text) : "").join(`
+`) : "";
+      out.push({ kind: "return", ts, id, conv, tool: typeof msg.name === "string" ? msg.name : null, ok: status === "success", text });
+    }
+  }
+  return out;
+}
+function minedRecords(events) {
+  const rows = [];
+  const outcomes = [];
+  for (const e of events) {
+    if (e.kind === "call") {
+      const { fp, tmpl } = fingerprint2(e.tool, e.args);
+      rows.push({ ts: e.ts, conv: e.conv, tool: e.tool, fp, tmpl, h: hash(fp), id: e.id, mined: true });
+    } else {
+      outcomes.push({ ts: e.ts, id: e.id, tool: e.tool, conv: e.conv, ok: e.ok, err: e.ok ? null : classifyError(e.text, false), mined: true });
+    }
+  }
+  return { rows, outcomes };
+}
+async function mineAgentHistory(client, agentId, opts) {
+  const empty = { rows: 0, outcomes: 0, scanned: 0, newestId: null, newestTs: 0 };
+  if (!agentId)
+    return empty;
+  const list = reachFn(client, ["agents", "messages", "list"]);
+  if (!list)
+    return empty;
+  const mark = loadWatermarks()[agentId];
+  const maxPages = opts?.maxPages ?? 10;
+  const pageSize = opts?.pageSize ?? 100;
+  const logPath = opts?.stateDirOverride?.log ?? LOG_PATH;
+  const outPath = opts?.stateDirOverride?.outcomes ?? OUTCOME_PATH;
+  let scanned = 0, rowsWritten = 0, outcomesWritten = 0;
+  let newestId = null, newestTs = 0;
+  let after;
+  if (mark)
+    after = mark.id;
+  try {
+    for (let page = 0;page < maxPages; page++) {
+      const resp = await list(agentId, { limit: pageSize, ...after ? { after } : {}, order: "asc" });
+      const items = pageItems(resp);
+      if (!items.length)
+        break;
+      for (const m of items) {
+        scanned++;
+        const events = parseHistoryMessage(m);
+        const { rows, outcomes } = minedRecords(events);
+        for (const r of rows) {
+          appendJsonl(logPath, r);
+          rowsWritten++;
+        }
+        for (const o of outcomes) {
+          appendJsonl(outPath, o);
+          outcomesWritten++;
+        }
+        const mid = m && typeof m === "object" && "id" in m && typeof m.id === "string" ? String(m.id) : null;
+        const mts = m && typeof m === "object" && "date" in m && typeof m.date === "string" ? Date.parse(String(m.date)) || 0 : 0;
+        if (mid) {
+          newestId = mid;
+          newestTs = mts;
+        }
+      }
+      const last = items[items.length - 1];
+      const cursor = last && typeof last === "object" && "id" in last && typeof last.id === "string" ? String(last.id) : undefined;
+      if (!cursor || items.length < pageSize) {
+        after = cursor;
+        break;
+      }
+      after = cursor;
+    }
+  } catch {}
+  if (newestId && !opts?.stateDirOverride)
+    saveWatermark(agentId, newestId, newestTs);
+  return { rows: rowsWritten, outcomes: outcomesWritten, scanned, newestId, newestTs };
+}
+
+// mods/referee.ts
+import { existsSync as existsSync7, readFileSync as readFileSync7, writeFileSync as writeFileSync6 } from "node:fs";
+import { join as join8 } from "node:path";
+var PLUSMINUS_PATH = join8(STATE_DIR, "skill-plusminus.json");
+function loadPlusMinus() {
+  try {
+    if (!existsSync7(PLUSMINUS_PATH))
+      return {};
+    const parsed = JSON.parse(readFileSync7(PLUSMINUS_PATH, "utf8"));
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+function recordPlusMinus(skillName, up, stepId) {
+  const ledger = loadPlusMinus();
+  const cur = ledger[skillName] ?? { plus: 0, minus: 0, lastTs: 0, lastStepId: null };
+  const next = { plus: cur.plus + (up ? 1 : 0), minus: cur.minus + (up ? 0 : 1), lastTs: Date.now(), lastStepId: stepId ?? null };
+  ledger[skillName] = next;
+  try {
+    ensureDir();
+    writeFileSync6(PLUSMINUS_PATH, JSON.stringify(ledger, null, 2));
+  } catch {}
+  return next;
+}
+async function rateSkill(client, skillName, up, stepId) {
+  if (!isValidSkillName(skillName))
+    return { skill: skillName, rating: { plus: 0, minus: 0, lastTs: 0, lastStepId: null }, nativePosted: false, reason: `invalid skill name '${skillName}'` };
+  const rating = recordPlusMinus(skillName, up, stepId);
+  let nativePosted = false;
+  if (stepId) {
+    const post = reachFn(client, ["steps", "feedback", "create"]);
+    if (post) {
+      try {
+        await post(stepId, { feedback: up ? "positive" : "negative" });
+        nativePosted = true;
+      } catch {}
+    }
+  }
+  return { skill: skillName, rating, nativePosted, reason: nativePosted ? "ledger + native steps.feedback" : stepId ? "ledger only (native post unavailable/failed)" : "ledger only (no step id)" };
+}
+function renderPlusMinus(ledger) {
+  const rows = Object.entries(ledger).sort((a, b) => b[1].plus - b[1].minus - (a[1].plus - a[1].minus));
+  if (!rows.length)
+    return "(no skill ratings yet — rate with /muscle-memory rate <skill> up|down [step-id])";
+  return rows.map(([name, r]) => {
+    const net = r.plus - r.minus;
+    return `  ${net >= 0 ? "+" : ""}${net}  ${name}  (+${r.plus}/-${r.minus})`;
+  }).join(`
+`);
+}
+
+// mods/shelf.ts
+import { mkdirSync as mkdirSync5, writeFileSync as writeFileSync7 } from "node:fs";
+import { join as join9 } from "node:path";
+var SQUAD_ARCHIVE_NAME = process.env.MM_SQUAD_ARCHIVE || "mm-squad-shelf";
+var SHELF_DOC_TAG = "mm:shelf-doc";
+async function ensureSquadArchive(client, opts) {
+  const list = reachFn(client, ["archives", "list"]);
+  const create = reachFn(client, ["archives", "create"]);
+  if (!create)
+    return null;
+  try {
+    if (list) {
+      const resp = await list({ name: SQUAD_ARCHIVE_NAME, limit: 5 });
+      const items = pageItems(resp);
+      for (const a of items) {
+        if (a && typeof a === "object" && "id" in a && typeof a.id === "string" && "name" in a && a.name === SQUAD_ARCHIVE_NAME) {
+          return String(a.id);
+        }
+      }
+    }
+    const created = await create({ name: SQUAD_ARCHIVE_NAME, description: "muscle-memory squad shelf — sanitized, provenance-tagged skills published for cross-agent inheritance (pull-only, staged-first)", ...opts?.embedding ? { embedding: opts.embedding } : {} });
+    return created && typeof created === "object" && "id" in created && typeof created.id === "string" ? String(created.id) : null;
+  } catch {
+    return null;
+  }
+}
+var SHELF_MARKER_RE = /<!-- mm:shelf skill=([a-z0-9-]+) publisher=([A-Za-z0-9_-]+) published=([0-9T:.Z-]+) -->/;
+function shelfMarker(skillName, publisher, publishedAt) {
+  return `<!-- mm:shelf skill=${skillName} publisher=${publisher} published=${publishedAt} -->`;
+}
+async function publishSkillToShelf(client, archiveId, skillName, sanitizedContent, publisher) {
+  if (!archiveId)
+    return { ok: false, archiveId: null, reason: "no archive id" };
+  if (!isValidSkillName(skillName))
+    return { ok: false, archiveId, reason: `invalid skill name '${skillName}'` };
+  if (SECRET_TOKEN_RE.test(sanitizedContent))
+    return { ok: false, archiveId, reason: "secret-shaped value in content — publish blocked (run the sanitizer)" };
+  const create = reachFn(client, ["archives", "passages", "create"]);
+  if (!create)
+    return { ok: false, archiveId, reason: "client lacks archives.passages.create" };
+  try {
+    const marker = shelfMarker(skillName, publisher, new Date().toISOString());
+    await create(archiveId, {
+      text: `${marker}
+${sanitizedContent.slice(0, 40000)}`,
+      tags: [SKILL_PASSAGE_TAG, skillPassageTag(skillName), SHELF_DOC_TAG, `mm:src:${publisher}`],
+      metadata: { publisher, skill: skillName, publishedAt: new Date().toISOString(), format: "SKILL.md" }
+    });
+    return { ok: true, archiveId, reason: "published" };
+  } catch (e) {
+    return { ok: false, archiveId, reason: `publish failed: ${e instanceof Error ? e.message : "unknown"}` };
+  }
+}
+async function attachSquadShelf(client, agentId, archiveId) {
+  const attach = reachFn(client, ["agents", "archives", "attach"]);
+  if (!attach || !agentId || !archiveId)
+    return false;
+  try {
+    await attach(archiveId, { agent_id: agentId });
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function pullShelfSkill(client, agentId, skillName) {
+  if (!isValidSkillName(skillName))
+    return { ok: false, stagedPath: null, publisher: null, reason: `invalid skill name '${skillName}'` };
+  const search = reachFn(client, ["agents", "passages", "search"]);
+  if (!search || !agentId)
+    return { ok: false, stagedPath: null, publisher: null, reason: "client lacks agents.passages.search" };
+  try {
+    const resp = await search(agentId, { query: skillName.replace(/-/g, " "), top_k: 10 });
+    const results = resp && typeof resp === "object" && "results" in resp && Array.isArray(resp.results) ? resp.results : [];
+    let best = null;
+    for (const r of results) {
+      if (!r || typeof r !== "object" || !("content" in r) || typeof r.content !== "string")
+        continue;
+      const content = String(r.content);
+      const m = content.match(SHELF_MARKER_RE);
+      if (!m || m[1] !== skillName)
+        continue;
+      if (!best || m[3] > best.publishedAt)
+        best = { content, publisher: m[2], publishedAt: m[3] };
+    }
+    if (!best)
+      return { ok: false, stagedPath: null, publisher: null, reason: `no shelf doc found for '${skillName}' (is the shelf attached to this agent?)` };
+    if (SECRET_TOKEN_RE.test(best.content))
+      return { ok: false, stagedPath: null, publisher: best.publisher, reason: "shelf content failed the secret gate — refused" };
+    const dir = join9(PUBLISH_STAGED_DIR, skillName);
+    mkdirSync5(dir, { recursive: true });
+    const staged = join9(dir, "SKILL.md");
+    const header = `<!-- muscle-memory shelf pull · publisher: ${best.publisher} · published: ${best.publishedAt} · pulled: ${new Date().toISOString()} · REVIEW BEFORE PROMOTION -->
+`;
+    writeFileSync7(staged, header + best.content);
+    return { ok: true, stagedPath: staged, publisher: best.publisher, reason: "staged for review" };
+  } catch (e) {
+    return { ok: false, stagedPath: null, publisher: null, reason: `pull failed: ${e instanceof Error ? e.message : "unknown"}` };
+  }
+}
+
 // mods/index.ts
 var __mm = {
   commandTemplate: commandTemplate2,
@@ -3274,7 +3569,7 @@ var __mm = {
 function activate(letta) {
   const disposers = [];
   let panel = null;
-  const DEFENSE_HITS = join7(STATE_DIR, "defense-hits.jsonl");
+  const DEFENSE_HITS = join10(STATE_DIR, "defense-hits.jsonl");
   let defensesCache = [];
   const refreshDefenses = () => {
     try {
@@ -3373,8 +3668,8 @@ function activate(letta) {
         const span2 = { tokensIn: event?.usage?.promptTokens ?? event?.tokensIn, tokensOut: event?.usage?.completionTokens ?? event?.tokensOut, ms: Date.now() - started, stop: event?.stopReason };
         let t = {};
         try {
-          if (existsSync6(TELEMETRY_PATH))
-            t = JSON.parse(readFileSync6(TELEMETRY_PATH, "utf8"));
+          if (existsSync8(TELEMETRY_PATH))
+            t = JSON.parse(readFileSync8(TELEMETRY_PATH, "utf8"));
         } catch {}
         const agg = aggregateTelemetry([span2]);
         t.calls = (t.calls || 0) + agg.calls;
@@ -3383,25 +3678,37 @@ function activate(letta) {
         t.ms = (t.ms || 0) + agg.ms;
         try {
           ensureDir();
-          writeFileSync5(TELEMETRY_PATH, JSON.stringify(t));
+          writeFileSync8(TELEMETRY_PATH, JSON.stringify(t));
         } catch {}
       } catch {}
     }));
   }
   if (letta.capabilities?.events?.compact) {
-    disposers.push(letta.events.on("compact_start", (event) => {
+    let compactReflectInFlight = false;
+    disposers.push(letta.events.on("compact_start", (event, ctx) => {
       try {
         ensureDir();
-        mkdirSync5(RECEIPTS_DIR, { recursive: true });
+        mkdirSync6(RECEIPTS_DIR, { recursive: true });
         const { candidates } = detect(loadExperience());
-        writeFileSync5(join7(RECEIPTS_DIR, `compact-${Date.now()}.json`), JSON.stringify({ phase: "start", conv: event?.conversationId ?? null, candidatesPreserved: candidates.length, ts: Date.now() }));
+        writeFileSync8(join10(RECEIPTS_DIR, `compact-${Date.now()}.json`), JSON.stringify({ phase: "start", conv: event?.conversationId ?? null, trigger: event?.trigger ?? null, candidatesPreserved: candidates.length, ts: Date.now() }));
       } catch {}
+      const rfMode = process.env.MM_REFLECT;
+      if (rfMode !== "staged" && rfMode !== "auto" || compactReflectInFlight)
+        return;
+      compactReflectInFlight = true;
+      runReflectiveReview(ctx ?? { agentId: event?.agentId }, { mode: rfMode, semanticFn: semanticFnFor(event?.agentId ?? ctx?.agent?.id) }).then(() => {
+        try {
+          panel?.update();
+        } catch {}
+      }).catch(() => {}).finally(() => {
+        compactReflectInFlight = false;
+      });
     }));
     disposers.push(letta.events.on("compact_end", (event) => {
       try {
         ensureDir();
-        mkdirSync5(RECEIPTS_DIR, { recursive: true });
-        writeFileSync5(join7(RECEIPTS_DIR, `compact-end-${Date.now()}.json`), JSON.stringify({ phase: "end", conv: event?.conversationId ?? null, trigger: event?.trigger ?? null, messagesBefore: event?.messagesBefore ?? null, messagesAfter: event?.messagesAfter ?? null, contextTokensBefore: event?.contextTokensBefore ?? null, contextTokensAfter: event?.contextTokensAfter ?? null, ts: Date.now() }));
+        mkdirSync6(RECEIPTS_DIR, { recursive: true });
+        writeFileSync8(join10(RECEIPTS_DIR, `compact-end-${Date.now()}.json`), JSON.stringify({ phase: "end", conv: event?.conversationId ?? null, trigger: event?.trigger ?? null, messagesBefore: event?.messagesBefore ?? null, messagesAfter: event?.messagesAfter ?? null, contextTokensBefore: event?.contextTokensBefore ?? null, contextTokensAfter: event?.contextTokensAfter ?? null, ts: Date.now() }));
       } catch {}
     }));
   }
@@ -3511,7 +3818,7 @@ function activate(letta) {
         if (sub === "staged") {
           let s = [];
           try {
-            s = existsSync6(STAGED_DIR) ? readdirSync4(STAGED_DIR).filter((n) => existsSync6(join7(STAGED_DIR, n, "SKILL.md"))) : [];
+            s = existsSync8(STAGED_DIR) ? readdirSync4(STAGED_DIR).filter((n) => existsSync8(join10(STAGED_DIR, n, "SKILL.md"))) : [];
           } catch {}
           return { type: "output", output: s.length ? `staged skills (1-tap to graduate):
 ` + s.map((n) => `  · ${n}`).join(`
@@ -3622,6 +3929,62 @@ issues:
 ${issues}${reps}${dupline}
 (dry-run — nothing published.)` };
         }
+        if (sub === "mine") {
+          const agentId = String(argv?.[1] || ctx?.agent?.id || ctx?.agentId || "").trim();
+          if (!agentId)
+            return { type: "output", output: "usage: /muscle-memory mine [agent-id]  (defaults to the current agent)" };
+          const batch = await mineAgentHistory(letta.client, agentId);
+          const chains = detectRepairChains(loadExperience());
+          return { type: "output", output: `⛏️ mined ${batch.scanned} messages → ${batch.rows} steps + ${batch.outcomes} outcomes (watermark ${batch.newestId ? "advanced" : "unchanged"})
+  repair chains in experience now: ${chains.length}` };
+        }
+        if (sub === "shelf") {
+          const v1 = String(argv?.[1] || "").toLowerCase();
+          const agentId = String(ctx?.agent?.id || ctx?.agentId || "");
+          if (v1 === "publish") {
+            const target = String(argv?.[2] || "").trim();
+            if (!target)
+              return { type: "output", output: "usage: /muscle-memory shelf publish <skill>  (publishes the SANITIZED staged copy — run `publish stage <skill>` first)" };
+            const stagedPath = join10(STATE_DIR, "publish-staged", slug(target), "SKILL.md");
+            if (!existsSync8(stagedPath))
+              return { type: "output", output: `\uD83D\uDEAB no sanitized staged copy for '${target}' — run \`/muscle-memory publish stage ${target}\` first (the shelf only ever receives sanitized content)` };
+            const archiveId = await ensureSquadArchive(letta.client);
+            if (!archiveId)
+              return { type: "output", output: "\uD83D\uDEAB could not ensure the squad shelf archive (client lacks the archives surface?)" };
+            const res = await publishSkillToShelf(letta.client, archiveId, slug(target), readFileSync8(stagedPath, "utf8"), String(process.env.MM_AGENT || "agent"));
+            return { type: "output", output: res.ok ? `\uD83D\uDCE1 shelf-published '${target}' → ${SQUAD_ARCHIVE_NAME} (${archiveId})
+  squad agents: attach once, then \`/muscle-memory shelf pull ${target}\`` : `\uD83D\uDEAB shelf publish failed — ${res.reason}` };
+          }
+          if (v1 === "attach") {
+            const archiveId = await ensureSquadArchive(letta.client);
+            if (!archiveId || !agentId)
+              return { type: "output", output: "\uD83D\uDEAB shelf attach needs an agent context + archives surface" };
+            const ok = await attachSquadShelf(letta.client, agentId, archiveId);
+            return { type: "output", output: ok ? `\uD83D\uDD17 squad shelf attached (${SQUAD_ARCHIVE_NAME} → this agent)` : "\uD83D\uDEAB attach failed" };
+          }
+          if (v1 === "pull") {
+            const target = String(argv?.[2] || "").trim();
+            if (!target)
+              return { type: "output", output: "usage: /muscle-memory shelf pull <skill>" };
+            const res = await pullShelfSkill(letta.client, agentId, slug(target));
+            return { type: "output", output: res.ok ? `\uD83D\uDCE5 pulled '${target}' from ${res.publisher ?? "?"} → STAGED (review before promotion):
+  ${res.stagedPath}` : `\uD83D\uDEAB pull failed — ${res.reason}` };
+          }
+          return { type: "output", output: "usage: /muscle-memory shelf publish <skill> | shelf attach | shelf pull <skill>  (pull-only + staged-first by design)" };
+        }
+        if (sub === "rate") {
+          const target = String(argv?.[1] || "").trim();
+          const dir = String(argv?.[2] || "").toLowerCase();
+          const stepId = String(argv?.[3] || "").trim() || null;
+          if (!target || dir !== "up" && dir !== "down")
+            return { type: "output", output: "usage: /muscle-memory rate <skill> up|down [step-id]" };
+          const res = await rateSkill(letta.client, slug(target), dir === "up", stepId);
+          const net = res.rating.plus - res.rating.minus;
+          return { type: "output", output: `\uD83C\uDFC0 ${res.skill}: ${net >= 0 ? "+" : ""}${net} (+${res.rating.plus}/-${res.rating.minus}) — ${res.reason}
+
+plus-minus board:
+${renderPlusMinus(loadPlusMinus())}` };
+        }
         if (sub === "engram") {
           const dirs = scanDirs(ctx);
           const plan = engramConsolidate(loadExperience(), managedView(dirs).map((m) => ({ name: m.name, body: m.body })));
@@ -3635,7 +3998,7 @@ ${plan.digest}` };
           const reg = buildRegistry(dirs);
           let staged2 = [];
           try {
-            staged2 = existsSync6(STAGED_DIR) ? readdirSync4(STAGED_DIR).filter((n) => existsSync6(join7(STAGED_DIR, n, "SKILL.md"))) : [];
+            staged2 = existsSync8(STAGED_DIR) ? readdirSync4(STAGED_DIR).filter((n) => existsSync8(join10(STAGED_DIR, n, "SKILL.md"))) : [];
           } catch {}
           const used = reg.skills.filter((s) => s.uses > 0);
           const idle = reg.skills.filter((s) => s.uses === 0 && s.state !== "archived");
@@ -3677,7 +4040,7 @@ ${plan.digest}` };
                 managed++;
         } catch {}
         try {
-          staged = existsSync6(STAGED_DIR) ? readdirSync4(STAGED_DIR).filter((n) => existsSync6(join7(STAGED_DIR, n, "SKILL.md"))).length : 0;
+          staged = existsSync8(STAGED_DIR) ? readdirSync4(STAGED_DIR).filter((n) => existsSync8(join10(STAGED_DIR, n, "SKILL.md"))).length : 0;
         } catch {}
         const cov = (() => {
           try {
@@ -3745,7 +4108,7 @@ ${plan.digest}` };
     const readRun = async (ctx) => {
       const a = ctx?.args || {};
       const dirs = scanDirs(ctx);
-      const findSkillDir = (name) => dirs.find((d) => existsSync6(join7(d, name, "SKILL.md")));
+      const findSkillDir = (name) => dirs.find((d) => existsSync8(join10(d, name, "SKILL.md")));
       try {
         if (a.action === "candidates") {
           const rows = loadExperience();
@@ -3770,8 +4133,8 @@ ${plan.digest}` };
         }
         if (a.action === "defense_hits") {
           const hits = [];
-          if (existsSync6(DEFENSE_HITS))
-            for (const l of readFileSync6(DEFENSE_HITS, "utf8").trim().split(`
+          if (existsSync8(DEFENSE_HITS))
+            for (const l of readFileSync8(DEFENSE_HITS, "utf8").trim().split(`
 `).slice(-20)) {
               if (l)
                 try {
@@ -3862,7 +4225,7 @@ ${d.body}` };
       const a = ctx?.args || {};
       const dir = agentSkillsDir(ctx);
       const dirs = scanDirs(ctx);
-      const findSkillDir = (name) => dirs.find((d) => existsSync6(join7(d, name, "SKILL.md")));
+      const findSkillDir = (name) => dirs.find((d) => existsSync8(join10(d, name, "SKILL.md")));
       try {
         if (a.action === "autopilot_run") {
           const cfg = { ...AUTOPILOT_DEFAULT, mode: a.mode === "auto" ? "auto" : "staged" };

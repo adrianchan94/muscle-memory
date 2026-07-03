@@ -244,6 +244,11 @@ MM_PUBLISH=off
 /muscle-memory publish <skill>         read-only preflight
 /muscle-memory publish stage <skill>   sanitized staged copy
 /muscle-memory publish approve <skill> approved shared Custom Skill
+/muscle-memory mine [agent-id]         retroactive mining: distill from history the mod never saw (read-only, watermarked)
+/muscle-memory rate <skill> up|down [step-id]  skill plus-minus → local ledger + native steps.feedback
+/muscle-memory shelf publish <skill>   publish the SANITIZED staged copy to the shared squad shelf archive
+/muscle-memory shelf attach            attach the squad shelf to this agent
+/muscle-memory shelf pull <skill>      pull a squad skill → STAGED for review (never the active shelf)
 ```
 
 Agent-callable tools:
@@ -343,6 +348,9 @@ mods/publish.ts     publishability, sanitization, staged approve flow
 mods/lifecycle.ts   registry, graduation, retirement, visibility helpers
 mods/autopilot.ts   reflection routing, update-first policy, evidence manifests
 mods/ui.ts          panel rendering
+mods/history.ts     E6 retroactive mining: message history → the same experience pipeline
+mods/referee.ts     E7 plus-minus ledger + native steps.feedback posting
+mods/shelf.ts       E8 squad shelf: cross-agent inheritance over a shared archive
 mods/index.ts       Letta mod entrypoint: tools, commands, events, activation
 ```
 

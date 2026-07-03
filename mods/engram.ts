@@ -330,6 +330,18 @@ export function reachFn(root: unknown, path: readonly string[]): ((...args: unkn
   return typeof cur === "function" ? (cur as (...args: unknown[]) => unknown).bind(receiver) : null;
 }
 
+/** Unwrap a list-style SDK response into its item array. The letta-client returns three shapes
+ * across surfaces: a plain array (REST-ish), a Stainless Page with `.items` (verified live:
+ * agents.messages.list), or `.data`. Anything else → empty. Pure. */
+export function pageItems(resp: unknown): unknown[] {
+  if (Array.isArray(resp)) return resp;
+  if (!resp || typeof resp !== "object") return [];
+  const rec = resp as Record<string, unknown>;
+  if (Array.isArray(rec.items)) return rec.items;
+  if (Array.isArray(rec.data)) return rec.data;
+  return [];
+}
+
 
 /** Best-effort: upsert the neocortex index into the agent's core memory block. Opt-in (MM_NATIVE has "blocks"). Never throws. */
 export async function syncNeocortexBlock(client: unknown, agentId: string | null | undefined, content: string): Promise<boolean> {

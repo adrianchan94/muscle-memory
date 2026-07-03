@@ -5,6 +5,39 @@ All notable changes to `@letta-ai/muscle-memory`. Format loosely follows [Keep a
 ## [Unreleased]
 
 ### Added
+- **E6 · Retroactive mining (`/muscle-memory mine [agent-id]`)** — trace-to-skill from history the
+  mod never saw live (`mods/history.ts`). The agent's message history (tool_call_message /
+  tool_return_message pairs) is replayed through the SAME deterministic pipeline as live capture
+  (`fingerprint()` step identity, `classifyError()` payload-free error classes) into the same
+  experience/outcome streams — repair-chain detection and reflection consume mined tape with zero
+  new pipeline code. Read-only on the server; per-agent watermark prevents re-mining; records carry
+  `mined: true` for auditability. Day-one value: install on an old agent, its first reflection has
+  months of tape. Live receipt (Letta Cloud, GLM 5.2 BYOK throwaway agent): 20 messages scanned →
+  3 step rows + 3 outcomes correlated through `loadExperience()`; chain thresholds correctly refused
+  an n=1 pattern from history (the same born-hard gate as live).
+- **E7 · Referee hook (`/muscle-memory rate <skill> up|down [step-id]`)** — skill plus-minus over
+  Letta's NATIVE rating primitive (`mods/referee.ts`): every rating lands in a local plus-minus
+  ledger (per-skill +/- counts, timestamps) the lifecycle can consume for utility-weighted pruning,
+  and — when a step id is given — is ALSO posted to `steps.feedback.create` so the signal lives in
+  Letta's own surface. Honest v1: ratings come from the agent/user; automatic outcome attribution
+  over step windows is v0.8 work and is not faked with guessing heuristics. Absence of ratings is
+  never treated as a minus (`skillUtility` returns null on no evidence).
+- **E8 · Squad shelf (`/muscle-memory shelf publish|attach|pull`)** — cross-agent skill inheritance
+  over a shared Letta archive (`mods/shelf.ts`, archive `mm-squad-shelf`): archives are
+  multi-agent-attachable, so one agent's sanitized, provenance-tagged skill becomes pullable by the
+  whole squad. Non-negotiables built in: shelf publish only accepts the SANITIZED staged copy
+  (publish-stage first), pulls land STAGED-FIRST (publish-staged dir, provenance header, "REVIEW
+  BEFORE PROMOTION") and never touch an active shelf, and secret-shaped content is hard-blocked in
+  both directions. Wire-truth note: tags on archive-created passages do not survive the wire
+  (verified live 2026-07-03 — search returns them tagless and tag filters match nothing), so shelf
+  identity + provenance ride IN THE TEXT via a canonical marker; multiple published versions resolve
+  to the newest marker timestamp. Live receipt: full publish → attach → pull → staged loop green on
+  Letta Cloud, provenance + content integrity + staged-first boundary all verified.
+- **E9 · Distill at the moment of forgetting** — `compact_start` now triggers the opt-in reflective
+  review (MM_REFLECT=staged|auto), not just a receipt: compaction is when evicted evidence dies, so
+  the reflect fires while the experience log still holds the full tape. Fire-and-forget with an
+  in-flight guard; can never delay or break compaction. (Local-backend event; guarded by the compact
+  capability as before.)
 - **E5 · The Reflex (opt-in `MM_REFLEX=on`)** — learned scar tissue now fires **in context**, not in a
   log. When a tool FAILS and both the step signature and the error class match a learned repair chain
   (`coachOnFailure`, kind `fix`, observed ≥2×), the known fix is appended to the failing tool's own

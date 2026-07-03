@@ -43,6 +43,9 @@ import { CURATOR, aggregateTelemetry, buildRegistry, bumpUsage, churnSignal, cov
 import { AUTOPILOT_DEFAULT, AutopilotMode, REVIEW_PROMPT, SemanticFn, applySemanticEvidence, autopilotPlan, buildEvidenceManifest, executeAutopilotPlan, forkAuthor, graduateStagedSkill, isHighConfidenceCreate, loadHandledReflects, managedView, pickUpdateTarget, reflectSignature, retrievePreferences, reviewAndAuthor, runAutopilot, runReflectiveReview, searchSkills, streamChunkText } from "./autopilot";
 import { renderMuscleMemoryPanel, summarizeReflectActions } from "./ui";
 import { collectWins, renderWins } from "./wins";
+import { mineAgentHistory } from "./history";
+import { loadPlusMinus, rateSkill, renderPlusMinus } from "./referee";
+import { attachSquadShelf, ensureSquadArchive, publishSkillToShelf, pullShelfSkill, SQUAD_ARCHIVE_NAME } from "./shelf";
 
 
 // Test hook (deterministic validation without live data).
@@ -173,12 +176,24 @@ export default function activate(letta: any) {
   }
 
   // v2: COMPACTION hooks — flush + write a tiny receipt. Guarded by the compact event capability.
+  // E9 upgrade: compaction is the moment evidence DIES — messages evicted at compact_start are
+  // gone from context forever. So opt-in reflection (MM_REFLECT=staged|auto) fires HERE too, not
+  // only at session end: distill at the moment of forgetting, while the experience log still
+  // holds the full tape. Fire-and-forget; a reflect can never delay or break compaction.
   if (letta.capabilities?.events?.compact) {
-    disposers.push(letta.events.on("compact_start", (event: any) => {
+    let compactReflectInFlight = false;
+    disposers.push(letta.events.on("compact_start", (event: any, ctx: any) => {
       try { ensureDir(); mkdirSync(RECEIPTS_DIR, { recursive: true });
         const { candidates } = detect(loadExperience());
-        writeFileSync(join(RECEIPTS_DIR, `compact-${Date.now()}.json`), JSON.stringify({ phase: "start", conv: event?.conversationId ?? null, candidatesPreserved: candidates.length, ts: Date.now() }));
+        writeFileSync(join(RECEIPTS_DIR, `compact-${Date.now()}.json`), JSON.stringify({ phase: "start", conv: event?.conversationId ?? null, trigger: event?.trigger ?? null, candidatesPreserved: candidates.length, ts: Date.now() }));
       } catch {}
+      const rfMode = process.env.MM_REFLECT;
+      if ((rfMode !== "staged" && rfMode !== "auto") || compactReflectInFlight) return;
+      compactReflectInFlight = true;
+      runReflectiveReview(ctx ?? { agentId: event?.agentId }, { mode: rfMode, semanticFn: semanticFnFor(event?.agentId ?? ctx?.agent?.id) })
+        .then(() => { try { panel?.update(); } catch { /* */ } })
+        .catch(() => { /* reflection must never break compaction */ })
+        .finally(() => { compactReflectInFlight = false; });
     }));
     disposers.push(letta.events.on("compact_end", (event: any) => {
       try { ensureDir(); mkdirSync(RECEIPTS_DIR, { recursive: true });
@@ -338,6 +353,55 @@ export default function activate(letta: any) {
           const dupline = dups.length ? `\n⚠ similar Custom Skills (consider merge/update): ${dups.map((d) => d.name).join(", ")}` : "";
           const act = plan.recommended === "publish" ? "✅ publish as-is (clean)" : plan.recommended === "stage-sanitized" ? "📦 stage SANITIZED (run `publish stage`)" : "🚫 block";
           return { type: "output", output: `🚢 publish preflight — ${plan.skill}\n  ${plan.currentShelf} → ${plan.recommendedShelf}  ·  tier: ${tier}  ·  publishability ${plan.publishability}/100  ·  ${act}${blocks}\nissues:\n${issues}${reps}${dupline}\n(dry-run — nothing published.)` };
+        }
+        if (sub === "mine") {
+          // E6 RETROACTIVE MINING: replay this agent's message history through the live pipeline —
+          // repair chains from sessions the mod never saw. Read-only on the server; watermarked.
+          const agentId = String(argv?.[1] || ctx?.agent?.id || ctx?.agentId || "").trim();
+          if (!agentId) return { type: "output", output: "usage: /muscle-memory mine [agent-id]  (defaults to the current agent)" };
+          const batch = await mineAgentHistory(letta.client, agentId);
+          const chains = detectRepairChains(loadExperience());
+          return { type: "output", output: `⛏️ mined ${batch.scanned} messages → ${batch.rows} steps + ${batch.outcomes} outcomes (watermark ${batch.newestId ? "advanced" : "unchanged"})\n  repair chains in experience now: ${chains.length}` };
+        }
+        if (sub === "shelf") {
+          // E8 SQUAD SHELF: cross-agent inheritance over a shared archive. Pull-only + staged-first:
+          // a pulled skill lands in publish-staged for review; promotion uses the normal approve gate.
+          const v1 = String(argv?.[1] || "").toLowerCase();
+          const agentId = String(ctx?.agent?.id || ctx?.agentId || "");
+          if (v1 === "publish") {
+            const target = String(argv?.[2] || "").trim();
+            if (!target) return { type: "output", output: "usage: /muscle-memory shelf publish <skill>  (publishes the SANITIZED staged copy — run `publish stage <skill>` first)" };
+            const stagedPath = join(STATE_DIR, "publish-staged", slug(target), "SKILL.md");
+            if (!existsSync(stagedPath)) return { type: "output", output: `🚫 no sanitized staged copy for '${target}' — run \`/muscle-memory publish stage ${target}\` first (the shelf only ever receives sanitized content)` };
+            const archiveId = await ensureSquadArchive(letta.client);
+            if (!archiveId) return { type: "output", output: "🚫 could not ensure the squad shelf archive (client lacks the archives surface?)" };
+            const res = await publishSkillToShelf(letta.client, archiveId, slug(target), readFileSync(stagedPath, "utf8"), String(process.env.MM_AGENT || "agent"));
+            return { type: "output", output: res.ok ? `📡 shelf-published '${target}' → ${SQUAD_ARCHIVE_NAME} (${archiveId})\n  squad agents: attach once, then \`/muscle-memory shelf pull ${target}\`` : `🚫 shelf publish failed — ${res.reason}` };
+          }
+          if (v1 === "attach") {
+            const archiveId = await ensureSquadArchive(letta.client);
+            if (!archiveId || !agentId) return { type: "output", output: "🚫 shelf attach needs an agent context + archives surface" };
+            const ok = await attachSquadShelf(letta.client, agentId, archiveId);
+            return { type: "output", output: ok ? `🔗 squad shelf attached (${SQUAD_ARCHIVE_NAME} → this agent)` : "🚫 attach failed" };
+          }
+          if (v1 === "pull") {
+            const target = String(argv?.[2] || "").trim();
+            if (!target) return { type: "output", output: "usage: /muscle-memory shelf pull <skill>" };
+            const res = await pullShelfSkill(letta.client, agentId, slug(target));
+            return { type: "output", output: res.ok ? `📥 pulled '${target}' from ${res.publisher ?? "?"} → STAGED (review before promotion):\n  ${res.stagedPath}` : `🚫 pull failed — ${res.reason}` };
+          }
+          return { type: "output", output: "usage: /muscle-memory shelf publish <skill> | shelf attach | shelf pull <skill>  (pull-only + staged-first by design)" };
+        }
+        if (sub === "rate") {
+          // E7 REFEREE: skill plus-minus — ledger always; Letta-native steps.feedback when a step id
+          // is given. The learner does not grade its own homework: ratings come from outcomes you saw.
+          const target = String(argv?.[1] || "").trim();
+          const dir = String(argv?.[2] || "").toLowerCase();
+          const stepId = String(argv?.[3] || "").trim() || null;
+          if (!target || (dir !== "up" && dir !== "down")) return { type: "output", output: "usage: /muscle-memory rate <skill> up|down [step-id]" };
+          const res = await rateSkill(letta.client, slug(target), dir === "up", stepId);
+          const net = res.rating.plus - res.rating.minus;
+          return { type: "output", output: `🏀 ${res.skill}: ${net >= 0 ? "+" : ""}${net} (+${res.rating.plus}/-${res.rating.minus}) — ${res.reason}\n\nplus-minus board:\n${renderPlusMinus(loadPlusMinus())}` };
         }
         if (sub === "engram") {
           // The CLS loop, observable (read-only): salience-ranked replay + reverse-replay credit +
