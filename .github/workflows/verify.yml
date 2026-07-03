@@ -1,0 +1,23 @@
+name: muscle-memory verify
+
+# Runs the full muscle-memory gate (transpile + unit tests + bench + eval + lifecycle demo)
+# only when the package changes, so it never adds noise to the rest of the monorepo.
+on:
+  push:
+    paths: ["**"]
+  pull_request:
+    paths: ["**"]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: verify (transpile + 60 tests + bench + eval + lifecycle demo)
+        run: npm run verify
