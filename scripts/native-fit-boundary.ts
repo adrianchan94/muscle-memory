@@ -1,8 +1,8 @@
 // Block N adversarial boundary proof — autonomous prune must NEVER retire a shared global Custom Skill.
 // Run with a distinct global shelf (GLOBAL_SKILLS is a module-load const):
 //   MM_GLOBAL_SKILLS_DIR=$(mktemp -d) MEMORY_DIR=$(mktemp -d) MM_STATE_DIR=$(mktemp -d) bun run scripts/native-fit-boundary.ts
-import { writeSkill, agentSkillsDir, GLOBAL_SKILLS, MM_TAG, autonomousShelves } from "/Users/chan2saucy/work/kevos-lab/mack/mods-repo/packages/muscle-memory/mods/core.ts";
-import { saveUsage, runAutonomousPrune } from "/Users/chan2saucy/work/kevos-lab/mack/mods-repo/packages/muscle-memory/mods/lifecycle.ts";
+import { writeSkill, agentSkillsDir, GLOBAL_SKILLS, MM_TAG, autonomousShelves } from "../mods/core";
+import { saveUsage, runAutonomousPrune } from "../mods/lifecycle";
 import { existsSync } from "node:fs"; import { join } from "node:path";
 const agent = agentSkillsDir({});
 const managed = (n: string) => `---\nname: ${n}\ndescription: Use when ${n} happens, do the thing\n---\n## Procedure\n1. do it\n<!-- ${MM_TAG}: adversarial-test -->`;
