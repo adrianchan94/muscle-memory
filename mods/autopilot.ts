@@ -386,6 +386,72 @@ export function routeSkill<T extends { name: string; score: number; matched: num
   return { route: "create", target: null, matches, suspect };
 }
 
+// ── RERANK V2 · LLM precision judge — design: docs/reranker-v2-design.md; frozen spec:
+// docs/prereg-reranker-holdout.md. A bi-encoder embeds evidence and skill separately and can
+// never reason about the PAIR; the judge reads both texts together and answers one question:
+// same job-to-be-done? That asymmetry is what separates a zero-overlap paraphrase twin (park)
+// from a domain-adjacent novel (create) — no recall-boundary tweak can do both.
+//
+// DECISION TREE (explicit, resolves the design doc's canary/judge ambiguity):
+//   MM_RERANK=on  → the judge is the SOLE precision gate for suspect parking. Canary status is
+//                   advisory (logged in receipts, never gating). Lexical update routing and the
+//                   C-class corroboration boost are untouched — the judge only ever fires after
+//                   lexical failed to route.
+//   MM_RERANK off → shipped behavior: canary-calibrated suspect gate (routeSkill, live 15/16).
+//   judge error   → graceful fallback to the shipped canary-gated suspect (never guess on a
+//                   dead judge; a transport failure must not change routing semantics).
+export type RerankJudgement = { same_job: boolean; confidence: number };
+export type JudgeFn = (evidence: string, skill: { name: string; description: string }) => Promise<RerankJudgement | null>;
+export const RERANK_CONF_FLOOR = 0.6;
+export const RERANK_SYSTEM_PROMPT = `You are a precision gate for a skill library. Decide whether a coding-session incident should be filed UNDER an existing skill (same underlying job-to-be-done, so the skill's procedure would actually resolve THIS incident) or logged as a NEW skill. Be strict: same_job=true ONLY if a good engineer would say 'that existing skill already covers this.' Reply STRICT JSON only: {"same_job": true|false, "confidence": 0.0-1.0}.`;
+
+export function rerankUserPrompt(evidence: string, name: string, description: string): string {
+  return `Incident: ${evidence}\nExisting skill — name: ${name}; description: ${description}\nSame job?`;
+}
+
+/** Tolerant STRICT-JSON extractor: accepts bare JSON, fenced JSON, or JSON embedded in prose;
+ * rejects anything without a boolean same_job. Confidence clamped to [0,1]. */
+export function parseJudgement(raw: string): RerankJudgement | null {
+  const text = String(raw || "").replace(/<\/?think>/gi, "");
+  const m = text.match(/\{[^{}]*"same_job"[^{}]*\}/);
+  if (!m) return null;
+  try {
+    const o = JSON.parse(m[0]);
+    if (typeof o.same_job !== "boolean") return null;
+    const conf = typeof o.confidence === "number" && Number.isFinite(o.confidence) ? Math.min(1, Math.max(0, o.confidence)) : 0;
+    return { same_job: o.same_job, confidence: conf };
+  } catch { return null; }
+}
+
+/** The rerank-lane decision head. Steps 1–3 are byte-identical to routeSkill (update /
+ * park-ambiguous short-circuit BEFORE the judge — it never sees cases lexical already routed).
+ * Stage B judges the top-1 ON-SHELF semantic hit, canary-agnostic (recall stays wide; precision
+ * lives here). Pure given an injected judge; the live bench calls THIS function, so the
+ * benchmark cannot drift from shipped behavior. */
+export async function routeSkillReranked<T extends { name: string; score: number; matched: number }>(
+  evidence: string, lexical: T[], hits: SemanticSkillHit[], onShelf: (name: string) => boolean,
+  describe: (name: string) => string, judge: JudgeFn, threshold = 18,
+): Promise<{ route: SkillRoute; target: (T & { confidence: "high" }) | null; matches: T[]; suspect: string | null; judged: ({ name: string } & RerankJudgement) | null }> {
+  const { matches, suspect } = applySemanticEvidence(lexical, hits, onShelf, threshold);
+  const target = pickUpdateTarget(matches, threshold);
+  if (target) return { route: "update", target, matches, suspect, judged: null };
+  if (isAmbiguousExistingRoute(matches, threshold)) return { route: "park-ambiguous", target: null, matches, suspect, judged: null };
+  // Stage B: top-1 on-shelf candidate regardless of canary line (stale off-shelf hits transparent).
+  const candidate = hits.find((h) => onShelf(h.name)) ?? null;
+  if (candidate) {
+    const j = await judge(evidence, { name: candidate.name, description: describe(candidate.name) }).catch(() => null);
+    if (j) {
+      if (j.same_job === true && j.confidence >= RERANK_CONF_FLOOR) {
+        return { route: "park-semantic", target: null, matches, suspect: candidate.name, judged: { name: candidate.name, ...j } };
+      }
+      return { route: "create", target: null, matches, suspect: null, judged: { name: candidate.name, ...j } };
+    }
+  }
+  // Judge unavailable/failed (or no on-shelf candidate) → shipped canary-gated behavior.
+  if (suspect) return { route: "park-semantic", target: null, matches, suspect, judged: null };
+  return { route: "create", target: null, matches, suspect: null, judged: null };
+}
+
 export function frontmatterOf(content: string): string {
   return (String(content || "").match(/^---\n([\s\S]*?)\n---\s*/)?.[1] || "").trimEnd();
 }
@@ -437,13 +503,22 @@ export function compareSkillSections(oldContent?: string, newContent?: string) {
 export type ReviewResult = { action: "create" | "update" | "none" | "reject"; name?: string; description?: string; body?: string; content?: string; reason?: string; updateTarget?: string; matches?: Array<{ name: string; score: number; matched: number }>; degraded?: string; wrote?: string };
 
 /** Author + gate a skill from evidence, with MemFS update-first routing. authorFn(system,user)->text injectable. */
-export async function reviewAndAuthor(evidence: string, dirs: string[], authorFn: (sys: string, user: string) => Promise<string>, opts: { updateThreshold?: number; semanticFn?: SemanticFn } = {}): Promise<ReviewResult> {
+export async function reviewAndAuthor(evidence: string, dirs: string[], authorFn: (sys: string, user: string) => Promise<string>, opts: { updateThreshold?: number; semanticFn?: SemanticFn; judgeFn?: JudgeFn } = {}): Promise<ReviewResult> {
   // MemFS update-first: does a skill SAFELY cover this domain? (distinctive overlap + clearLead, not generic words)
   const threshold = opts.updateThreshold ?? 18;
   // E4 hybrid lane: semantic recall widens/boosts, lexical gates keep precision. Best-effort —
   // a dead client or disabled MM_NATIVE degrades to pure lexical routing (today's behavior).
-  const hits = opts.semanticFn ? await opts.semanticFn(evidence, 3).catch(() => []) : [];
-  const d = routeSkill(searchSkills(dirs, evidence, 3), hits, (n) => dirs.some((x) => existsSync(join(x, n, "SKILL.md"))), threshold);
+  // Rerank lane needs a wider recall window (precision moves to the judge); shipped lane keeps k=3.
+  const useRerank = process.env.MM_RERANK === "on" && !!opts.judgeFn && !!opts.semanticFn;
+  const hits = opts.semanticFn ? await opts.semanticFn(evidence, useRerank ? 12 : 3).catch(() => []) : [];
+  const onShelfFn = (n: string) => dirs.some((x) => existsSync(join(x, n, "SKILL.md")));
+  const descOf = (n: string) => {
+    for (const x of dirs) { try { if (existsSync(join(x, n, "SKILL.md"))) return (readSkill(x, n).match(/^description:\s*(.+)$/im)?.[1] || "").trim(); } catch { /* next dir */ } }
+    return "";
+  };
+  const d = useRerank
+    ? await routeSkillReranked(evidence, searchSkills(dirs, evidence, 3), hits, onShelfFn, descOf, opts.judgeFn as JudgeFn, threshold)
+    : { ...routeSkill(searchSkills(dirs, evidence, 3), hits, onShelfFn, threshold), judged: null as ({ name: string } & RerankJudgement) | null };
   const { matches } = d;
   const updTarget = d.target;
   const slimEarly = matches.map((m) => ({ name: m.name, score: m.score, matched: m.matched }));
@@ -455,7 +530,8 @@ export async function reviewAndAuthor(evidence: string, dirs: string[], authorFn
   // support is too weak to ever route — exactly the paraphrase-duplicate class lexical misses.
   // Too uncertain to auto-patch (no absolute similarity score), too suspicious to auto-create.
   if (d.route === "park-semantic") {
-    return { action: "none", reason: `possible semantic duplicate of '${d.suspect}' (embedding match without distinctive lexical overlap); refusing autonomous create — review or absorb manually`, matches: slimEarly };
+    const how = d.judged ? `LLM job-match confirmed, confidence ${d.judged.confidence.toFixed(2)}` : "embedding match without distinctive lexical overlap";
+    return { action: "none", reason: `possible semantic duplicate of '${d.suspect}' (${how}); refusing autonomous create — review or absorb manually`, matches: slimEarly };
   }
   // On UPDATE, show the model the existing proven skill so it PATCHES rather than rewrites from scratch.
   const existingForUpdate = updTarget ? (() => { try { const d = dirs.find((x) => existsSync(join(x, updTarget.name, "SKILL.md"))); return d ? readSkill(d, updTarget.name) : ""; } catch { return ""; } })() : "";
