@@ -1,0 +1,1156 @@
+{
+  "ts": "2026-07-05T12:56:30.811Z",
+  "agentId": "agent-fd0b5c09-bf59-4404-9dfc-707d4de86e2d",
+  "prereg": "docs/prereg-reranker-holdout.md",
+  "judges": {
+    "strong": "glm-5.2",
+    "cheap": "glm-5-turbo",
+    "endpoint": "https://api.z.ai/api/anthropic/v1/messages"
+  },
+  "criteria": {
+    "dev_rerank_ge_15": true,
+    "dev_B1_parked_correct": true,
+    "holdout_A": "1/1",
+    "holdout_A_pass": true,
+    "holdout_B": "4/4",
+    "holdout_B_pass": true,
+    "holdout_D": "3/3",
+    "holdout_D_pass": true,
+    "stability_identical_runs": true,
+    "judge_errors": {},
+    "blocked": false
+  },
+  "pass": true,
+  "rows": [
+    {
+      "id": "A1-pytest-verbatim",
+      "set": "dev",
+      "cls": "A-strong-lexical",
+      "lex": "update",
+      "canary": "update",
+      "strong1": "update",
+      "strong2": "update",
+      "cheap": "update",
+      "lexOk": true,
+      "canaryOk": true,
+      "strong1Ok": true,
+      "strong2Ok": true,
+      "cheapOk": true,
+      "strongTarget": "debugging-failing-pytest-runs",
+      "conf1": null,
+      "conf2": null,
+      "confCheap": null,
+      "searchMs": 1447,
+      "liveTop": [
+        "debugging-failing-pytest-runs",
+        "keeping-suites-healthy",
+        "fixing-tsc-type-errors",
+        "reconciling-terraform-state-drift"
+      ]
+    },
+    {
+      "id": "A2-tsc-verbatim",
+      "set": "dev",
+      "cls": "A-strong-lexical",
+      "lex": "update",
+      "canary": "update",
+      "strong1": "update",
+      "strong2": "update",
+      "cheap": "update",
+      "lexOk": true,
+      "canaryOk": true,
+      "strong1Ok": true,
+      "strong2Ok": true,
+      "cheapOk": true,
+      "strongTarget": "fixing-tsc-type-errors",
+      "conf1": null,
+      "conf2": null,
+      "confCheap": null,
+      "searchMs": 2451,
+      "liveTop": [
+        "fixing-tsc-type-errors",
+        "debugging-failing-pytest-runs",
+        "reconciling-terraform-state-drift",
+        "keeping-suites-healthy"
+      ]
+    },
+    {
+      "id": "A3-docker-build",
+      "set": "dev",
+      "cls": "A-strong-lexical",
+      "lex": "update",
+      "canary": "update",
+      "strong1": "update",
+      "strong2": "update",
+      "cheap": "update",
+      "lexOk": true,
+      "canaryOk": true,
+      "strong1Ok": true,
+      "strong2Ok": true,
+      "cheapOk": true,
+      "strongTarget": "optimizing-docker-build-cache",
+      "conf1": null,
+      "conf2": null,
+      "confCheap": null,
+      "searchMs": 3801,
+      "liveTop": [
+        "optimizing-docker-build-cache",
+        "shrinking-runtime-footprints",
+        "reconciling-terraform-state-drift",
+        "debugging-failing-pytest-runs"
+      ]
+    },
+    {
+      "id": "B1-migration-paraphrase",
+      "set": "dev",
+      "cls": "B-paraphrase-dupe",
+      "lex": "create",
+      "canary": "create",
+      "strong1": "park-semantic",
+      "strong2": "park-semantic",
+      "cheap": "park-semantic",
+      "lexOk": false,
+      "canaryOk": false,
+      "strong1Ok": true,
+      "strong2Ok": true,
+      "cheapOk": true,
+      "strongTarget": "handling-broken-schema-changes",
+      "conf1": 0.95,
+      "conf2": 0.95,
+      "confCheap": 0.95,
+      "searchMs": 1351,
+      "liveTop": [
+        "reconciling-terraform-state-drift",
+        "recovering-wedged-service-deployments",
+        "debugging-failing-pytest-runs",
+        "restoring-failed-data-migrations"
+      ]
+    },
+    {
+      "id": "B2-flaky-retry-paraphrase",
+      "set": "dev",
+      "cls": "B-paraphrase-dupe",
+      "lex": "create",
+      "canary": "park-semantic",
+      "strong1": "park-semantic",
+      "strong2": "park-semantic",
+      "cheap": "park-semantic",
+      "lexOk": false,
+      "canaryOk": true,
+      "strong1Ok": true,
+      "strong2Ok": true,
+      "cheapOk": true,
+      "strongTarget": "stabilizing-nondeterministic-checks",
+      "conf1": 0.98,
+      "conf2": 0.98,
+      "confCheap": 0.98,
+      "searchMs": 2664,
+      "liveTop": [
+        "recovering-wedged-service-deployments",
+        "debugging-failing-pytest-runs",
+        "restoring-failed-data-migrations",
+        "taming-memory-hungry-compilations"
+      ]
+    },
+    {
+      "id": "B3-oom-paraphrase",
+      "set": "dev",
+      "cls": "B-paraphrase-dupe",
+      "lex": "create",
+      "canary": "park-semantic",
+      "strong1": "park-semantic",
+      "strong2": "park-semantic",
+      "cheap": "park-semantic",
+      "lexOk": false,
+      "canaryOk": true,
+      "strong1Ok": true,
+      "strong2Ok": true,
+      "cheapOk": true,
+      "strongTarget": "taming-memory-hungry-compilations",
+      "conf1": 0.98,
+      "conf2": 0.98,
+      "confCheap": 0.98,
+      "searchMs": 1348,
+      "liveTop": [
+        "taming-memory-hungry-compilations",
+        "shrinking-runtime-footprints",
+        "recovering-wedged-service-deployments",
+        "optimizing-docker-build-cache"
+      ]
+    },
+    {
+      "id": "B4-lockfile-paraphrase",
+      "set": "dev",
+      "cls": "B-paraphrase-dupe",
+      "lex": "create",
+      "canary": "park-semantic",
+      "strong1": "park-semantic",
+      "strong2": "park-semantic",
+      "cheap": "park-semantic",
+      "lexOk": false,
+      "canaryOk": true,
+      "strong1Ok": true,
+      "strong2Ok": true,
+      "cheapOk": true,
+      "strongTarget": "reconciling-dependency-manifests",
+      "conf1": 0.98,
+      "conf2": 0.98,
+      "confCheap": 0.95,
+      "searchMs": 2446,
+      "liveTop": [
+        "reconciling-dependency-manifests",
+        "optimizing-docker-build-cache",
+        "restoring-failed-data-migrations",
+        "recovering-wedged-service-deployments"
+      ]
+    },
+    {
+      "id": "B5-cors-paraphrase",
+      "set": "dev",
+      "cls": "B-paraphrase-dupe",
+      "lex": "create",
+      "canary": "create",
+      "strong1": "park-semantic",
+      "strong2": "park-semantic",
+      "cheap": "park-semantic",
+      "lexOk": false,
+      "canaryOk": false,
+      "strong1Ok": true,
+      "strong2Ok": true,
+      "cheapOk": true,
+      "strongTarget": "unblocking-cross-site-request-policies",
+      "conf1": 0.98,
+      "conf2": 0.98,
+      "confCheap": 0.98,
+      "searchMs": 1492,
+      "liveTop": [
+        "provisioning-pipeline-credentials",
+        "rotating-api-credentials",
+        "recovering-wedged-service-deployments",
+        "unblocking-cross-site-request-policies"
+      ]
+    },
+    {
+      "id": "B6-secrets-paraphrase",
+      "set": "dev",
+      "cls": "B-paraphrase-dupe",
+      "lex": "create",
+      "canary": "park-semantic",
+      "strong1": "park-semantic",
+      "strong2": "park-semantic",
+      "cheap": "park-semantic",
+      "lexOk": false,
+      "canaryOk": true,
+      "strong1Ok": true,
+      "strong2Ok": true,
+      "cheapOk": true,
+      "strongTarget": "provisioning-pipeline-credentials",
+      "conf1": 0.9,
+      "conf2": 0.95,
+      "confCheap": 0.95,
+      "searchMs": 1337,
+      "liveTop": [
+        "provisioning-pipeline-credentials",
+        "rotating-api-credentials",
+        "repairing-media-conversion-jobs",
+        "recovering-wedged-service-deployments"
+      ]
+    },
+    {
+      "id": "C1-pytest-fixture-drift",
+      "set": "dev",
+      "cls": "C-borderline",
+      "lex": "create",
+      "canary": "update",
+      "strong1": "update",
+      "strong2": "update",
+      "cheap": "update",
+      "lexOk": false,
+      "canaryOk": true,
+      "strong1Ok": true,
+      "strong2Ok": true,
+      "cheapOk": true,
+      "strongTarget": "keeping-suites-healthy",
+      "conf1": null,
+      "conf2": null,
+      "confCheap": null,
+      "searchMs": 1346,
+      "liveTop": [
+        "keeping-suites-healthy",
+        "debugging-failing-pytest-runs",
+        "restoring-failed-data-migrations",
+        "recovering-wedged-service-deployments"
+      ]
+    },
+    {
+      "id": "C2-worktree-detached",
+      "set": "dev",
+      "cls": "C-borderline",
+      "lex": "create",
+      "canary": "update",
+      "strong1": "update",
+      "strong2": "update",
+      "cheap": "update",
+      "lexOk": false,
+      "canaryOk": true,
+      "strong1Ok": true,
+      "strong2Ok": true,
+      "cheapOk": true,
+      "strongTarget": "juggling-parallel-branch-copies",
+      "conf1": null,
+      "conf2": null,
+      "confCheap": null,
+      "searchMs": 1386,
+      "liveTop": [
+        "managing-git-worktrees",
+        "juggling-parallel-branch-copies",
+        "recovering-wedged-service-deployments",
+        "restoring-failed-data-migrations"
+      ]
+    },
+    {
+      "id": "C3-docker-multistage",
+      "set": "dev",
+      "cls": "C-borderline",
+      "lex": "create",
+      "canary": "update",
+      "strong1": "update",
+      "strong2": "update",
+      "cheap": "update",
+      "lexOk": false,
+      "canaryOk": true,
+      "strong1Ok": true,
+      "strong2Ok": true,
+      "cheapOk": true,
+      "strongTarget": "shrinking-runtime-footprints",
+      "conf1": null,
+      "conf2": null,
+      "confCheap": null,
+      "searchMs": 2552,
+      "liveTop": [
+        "shrinking-runtime-footprints",
+        "optimizing-docker-build-cache",
+        "taming-memory-hungry-compilations",
+        "recovering-wedged-service-deployments"
+      ]
+    },
+    {
+      "id": "D1-novel-webgl",
+      "set": "dev",
+      "cls": "D-novel",
+      "lex": "create",
+      "canary": "create",
+      "strong1": "create",
+      "strong2": "create",
+      "cheap": "create",
+      "lexOk": true,
+      "canaryOk": true,
+      "strong1Ok": true,
+      "strong2Ok": true,
+      "cheapOk": true,
+      "strongTarget": null,
+      "conf1": 0.98,
+      "conf2": 1,
+      "confCheap": 1,
+      "searchMs": 1395,
+      "liveTop": [
+        "recovering-wedged-service-deployments",
+        "restoring-failed-data-migrations",
+        "taming-memory-hungry-compilations",
+        "restoring-broken-reverse-proxy-links"
+      ]
+    },
+    {
+      "id": "D2-novel-stale-passage",
+      "set": "dev",
+      "cls": "D-novel",
+      "lex": "create",
+      "canary": "create",
+      "strong1": "create",
+      "strong2": "create",
+      "cheap": "create",
+      "lexOk": true,
+      "canaryOk": true,
+      "strong1Ok": true,
+      "strong2Ok": true,
+      "cheapOk": true,
+      "strongTarget": null,
+      "conf1": null,
+      "conf2": null,
+      "confCheap": null,
+      "searchMs": 2586,
+      "liveTop": [
+        "rotating-api-credentials",
+        "debugging-failing-pytest-runs",
+        "restoring-failed-data-migrations",
+        "reconciling-terraform-state-drift"
+      ]
+    },
+    {
+      "id": "D3-novel-empty-shelf",
+      "set": "dev",
+      "cls": "D-novel",
+      "lex": "create",
+      "canary": "create",
+      "strong1": "create",
+      "strong2": "create",
+      "cheap": "create",
+      "lexOk": true,
+      "canaryOk": true,
+      "strong1Ok": true,
+      "strong2Ok": true,
+      "cheapOk": true,
+      "strongTarget": null,
+      "conf1": null,
+      "conf2": null,
+      "confCheap": null,
+      "searchMs": 3710,
+      "liveTop": [
+        "reconciling-dependency-manifests",
+        "debugging-failing-pytest-runs",
+        "shrinking-runtime-footprints",
+        "fixing-tsc-type-errors"
+      ]
+    },
+    {
+      "id": "D4-novel-weak-neighbor",
+      "set": "dev",
+      "cls": "D-novel",
+      "lex": "create",
+      "canary": "create",
+      "strong1": "create",
+      "strong2": "create",
+      "cheap": "create",
+      "lexOk": true,
+      "canaryOk": true,
+      "strong1Ok": true,
+      "strong2Ok": true,
+      "cheapOk": true,
+      "strongTarget": null,
+      "conf1": 0.98,
+      "conf2": 0.98,
+      "confCheap": 1,
+      "searchMs": 1320,
+      "liveTop": [
+        "handling-broken-schema-changes",
+        "recovering-wedged-service-deployments",
+        "restoring-failed-data-migrations",
+        "restoring-broken-reverse-proxy-links"
+      ]
+    },
+    {
+      "id": "HA1-terraform-drift",
+      "set": "holdout",
+      "cls": "A-strong-lexical",
+      "lex": "update",
+      "canary": "update",
+      "strong1": "update",
+      "strong2": "update",
+      "cheap": "update",
+      "lexOk": true,
+      "canaryOk": true,
+      "strong1Ok": true,
+      "strong2Ok": true,
+      "cheapOk": true,
+      "strongTarget": "reconciling-terraform-state-drift",
+      "conf1": null,
+      "conf2": null,
+      "confCheap": null,
+      "searchMs": 1383,
+      "liveTop": [
+        "reconciling-terraform-state-drift",
+        "handling-broken-schema-changes",
+        "recovering-wedged-service-deployments",
+        "restoring-failed-data-migrations"
+      ]
+    },
+    {
+      "id": "HB1-k8s-rollout",
+      "set": "holdout",
+      "cls": "B-paraphrase-dupe",
+      "lex": "create",
+      "canary": "park-semantic",
+      "strong1": "park-semantic",
+      "strong2": "park-semantic",
+      "cheap": "park-semantic",
+      "lexOk": false,
+      "canaryOk": true,
+      "strong1Ok": true,
+      "strong2Ok": true,
+      "cheapOk": true,
+      "strongTarget": "recovering-wedged-service-deployments",
+      "conf1": 0.95,
+      "conf2": 0.95,
+      "confCheap": 0.95,
+      "searchMs": 2773,
+      "liveTop": [
+        "handling-broken-schema-changes",
+        "reconciling-dependency-manifests",
+        "shrinking-runtime-footprints",
+        "restoring-broken-reverse-proxy-links"
+      ]
+    },
+    {
+      "id": "HB2-nginx-502",
+      "set": "holdout",
+      "cls": "B-paraphrase-dupe",
+      "lex": "create",
+      "canary": "park-semantic",
+      "strong1": "park-semantic",
+      "strong2": "park-semantic",
+      "cheap": "park-semantic",
+      "lexOk": false,
+      "canaryOk": true,
+      "strong1Ok": true,
+      "strong2Ok": true,
+      "cheapOk": true,
+      "strongTarget": "restoring-broken-reverse-proxy-links",
+      "conf1": 0.98,
+      "conf2": 0.98,
+      "confCheap": 0.95,
+      "searchMs": 1590,
+      "liveTop": [
+        "restoring-broken-reverse-proxy-links",
+        "recovering-wedged-service-deployments",
+        "restoring-failed-data-migrations",
+        "rotating-api-credentials"
+      ]
+    },
+    {
+      "id": "HB3-ffmpeg-encoder",
+      "set": "holdout",
+      "cls": "B-paraphrase-dupe",
+      "lex": "create",
+      "canary": "park-semantic",
+      "strong1": "park-semantic",
+      "strong2": "park-semantic",
+      "cheap": "park-semantic",
+      "lexOk": false,
+      "canaryOk": true,
+      "strong1Ok": true,
+      "strong2Ok": true,
+      "cheapOk": true,
+      "strongTarget": "repairing-media-conversion-jobs",
+      "conf1": 0.97,
+      "conf2": 0.98,
+      "confCheap": 0.98,
+      "searchMs": 1306,
+      "liveTop": [
+        "repairing-media-conversion-jobs",
+        "optimizing-docker-build-cache",
+        "recovering-wedged-service-deployments",
+        "fixing-tsc-type-errors"
+      ]
+    },
+    {
+      "id": "HB4-cron-dst",
+      "set": "holdout",
+      "cls": "B-paraphrase-dupe",
+      "lex": "create",
+      "canary": "park-semantic",
+      "strong1": "park-semantic",
+      "strong2": "park-semantic",
+      "cheap": "park-semantic",
+      "lexOk": false,
+      "canaryOk": true,
+      "strong1Ok": true,
+      "strong2Ok": true,
+      "cheapOk": true,
+      "strongTarget": "running-clock-safe-recurring-tasks",
+      "conf1": 0.98,
+      "conf2": 0.98,
+      "confCheap": 1,
+      "searchMs": 1438,
+      "liveTop": [
+        "handling-broken-schema-changes",
+        "restoring-failed-data-migrations",
+        "repairing-media-conversion-jobs",
+        "recovering-wedged-service-deployments"
+      ]
+    },
+    {
+      "id": "HD1-codesign-profile",
+      "set": "holdout",
+      "cls": "D-novel",
+      "lex": "create",
+      "canary": "create",
+      "strong1": "create",
+      "strong2": "create",
+      "cheap": "create",
+      "lexOk": true,
+      "canaryOk": true,
+      "strong1Ok": true,
+      "strong2Ok": true,
+      "cheapOk": true,
+      "strongTarget": null,
+      "conf1": 0.95,
+      "conf2": 0.95,
+      "confCheap": 1,
+      "searchMs": 1339,
+      "liveTop": [
+        "provisioning-pipeline-credentials",
+        "recovering-wedged-service-deployments",
+        "restoring-failed-data-migrations",
+        "fixing-tsc-type-errors"
+      ]
+    },
+    {
+      "id": "HD2-autovacuum-bloat",
+      "set": "holdout",
+      "cls": "D-novel",
+      "lex": "create",
+      "canary": "park-semantic",
+      "strong1": "create",
+      "strong2": "create",
+      "cheap": "create",
+      "lexOk": true,
+      "canaryOk": false,
+      "strong1Ok": true,
+      "strong2Ok": true,
+      "cheapOk": true,
+      "strongTarget": null,
+      "conf1": 0.95,
+      "conf2": 0.95,
+      "confCheap": 1,
+      "searchMs": 2812,
+      "liveTop": [
+        "recovering-wedged-service-deployments",
+        "handling-broken-schema-changes",
+        "shrinking-runtime-footprints",
+        "restoring-failed-data-migrations"
+      ]
+    },
+    {
+      "id": "HD3-lfs-pointers",
+      "set": "holdout",
+      "cls": "D-novel",
+      "lex": "create",
+      "canary": "create",
+      "strong1": "create",
+      "strong2": "create",
+      "cheap": "create",
+      "lexOk": true,
+      "canaryOk": true,
+      "strong1Ok": true,
+      "strong2Ok": true,
+      "cheapOk": true,
+      "strongTarget": null,
+      "conf1": null,
+      "conf2": null,
+      "confCheap": null,
+      "searchMs": 1357,
+      "liveTop": [
+        "reconciling-dependency-manifests",
+        "managing-git-worktrees",
+        "juggling-parallel-branch-copies",
+        "reconciling-terraform-state-drift"
+      ]
+    }
+  ],
+  "traces": [
+    {
+      "model": "glm-5.2",
+      "served": "glm-5.2",
+      "caseId": "B1-migration-paraphrase#s1",
+      "skill": "handling-broken-schema-changes",
+      "ms": 4058,
+      "raw": "```json\n{\"same_job\": true, \"confidence\": 0.95}\n```",
+      "parsed": {
+        "same_job": true,
+        "confidence": 0.95
+      }
+    },
+    {
+      "model": "glm-5.2",
+      "served": "glm-5.2",
+      "caseId": "B1-migration-paraphrase#s2",
+      "skill": "handling-broken-schema-changes",
+      "ms": 4584,
+      "raw": "```json\n{\"same_job\": true, \"confidence\": 0.95}\n```",
+      "parsed": {
+        "same_job": true,
+        "confidence": 0.95
+      }
+    },
+    {
+      "model": "glm-5-turbo",
+      "served": "glm-5-turbo",
+      "caseId": "B1-migration-paraphrase#c",
+      "skill": "handling-broken-schema-changes",
+      "ms": 1528,
+      "raw": "{\"same_job\": true, \"confidence\": 0.95}",
+      "parsed": {
+        "same_job": true,
+        "confidence": 0.95
+      }
+    },
+    {
+      "model": "glm-5.2",
+      "served": "glm-5.2",
+      "caseId": "B2-flaky-retry-paraphrase#s1",
+      "skill": "stabilizing-nondeterministic-checks",
+      "ms": 3470,
+      "raw": "```json\n{\"same_job\": true, \"confidence\": 0.98}\n```",
+      "parsed": {
+        "same_job": true,
+        "confidence": 0.98
+      }
+    },
+    {
+      "model": "glm-5.2",
+      "served": "glm-5.2",
+      "caseId": "B2-flaky-retry-paraphrase#s2",
+      "skill": "stabilizing-nondeterministic-checks",
+      "ms": 1730,
+      "raw": "```json\n{\"same_job\": true, \"confidence\": 0.98}\n```",
+      "parsed": {
+        "same_job": true,
+        "confidence": 0.98
+      }
+    },
+    {
+      "model": "glm-5-turbo",
+      "served": "glm-5-turbo",
+      "caseId": "B2-flaky-retry-paraphrase#c",
+      "skill": "stabilizing-nondeterministic-checks",
+      "ms": 1583,
+      "raw": "{\"same_job\": true, \"confidence\": 0.98}",
+      "parsed": {
+        "same_job": true,
+        "confidence": 0.98
+      }
+    },
+    {
+      "model": "glm-5.2",
+      "served": "glm-5.2",
+      "caseId": "B3-oom-paraphrase#s1",
+      "skill": "taming-memory-hungry-compilations",
+      "ms": 2418,
+      "raw": "```json\n{\"same_job\": true, \"confidence\": 0.98}\n```",
+      "parsed": {
+        "same_job": true,
+        "confidence": 0.98
+      }
+    },
+    {
+      "model": "glm-5.2",
+      "served": "glm-5.2",
+      "caseId": "B3-oom-paraphrase#s2",
+      "skill": "taming-memory-hungry-compilations",
+      "ms": 2562,
+      "raw": "```json\n{\"same_job\": true, \"confidence\": 0.98}\n```",
+      "parsed": {
+        "same_job": true,
+        "confidence": 0.98
+      }
+    },
+    {
+      "model": "glm-5-turbo",
+      "served": "glm-5-turbo",
+      "caseId": "B3-oom-paraphrase#c",
+      "skill": "taming-memory-hungry-compilations",
+      "ms": 1297,
+      "raw": "{\"same_job\": true, \"confidence\": 0.98}",
+      "parsed": {
+        "same_job": true,
+        "confidence": 0.98
+      }
+    },
+    {
+      "model": "glm-5.2",
+      "served": "glm-5.2",
+      "caseId": "B4-lockfile-paraphrase#s1",
+      "skill": "reconciling-dependency-manifests",
+      "ms": 4812,
+      "raw": "```json\n{\"same_job\": true, \"confidence\": 0.98}\n```",
+      "parsed": {
+        "same_job": true,
+        "confidence": 0.98
+      }
+    },
+    {
+      "model": "glm-5.2",
+      "served": "glm-5.2",
+      "caseId": "B4-lockfile-paraphrase#s2",
+      "skill": "reconciling-dependency-manifests",
+      "ms": 2454,
+      "raw": "```json\n{\"same_job\": true, \"confidence\": 0.98}\n```",
+      "parsed": {
+        "same_job": true,
+        "confidence": 0.98
+      }
+    },
+    {
+      "model": "glm-5-turbo",
+      "served": "glm-5-turbo",
+      "caseId": "B4-lockfile-paraphrase#c",
+      "skill": "reconciling-dependency-manifests",
+      "ms": 1407,
+      "raw": "{\"same_job\": true, \"confidence\": 0.95}",
+      "parsed": {
+        "same_job": true,
+        "confidence": 0.95
+      }
+    },
+    {
+      "model": "glm-5.2",
+      "served": "glm-5.2",
+      "caseId": "B5-cors-paraphrase#s1",
+      "skill": "unblocking-cross-site-request-policies",
+      "ms": 2503,
+      "raw": "```json\n{\"same_job\": true, \"confidence\": 0.98}\n```",
+      "parsed": {
+        "same_job": true,
+        "confidence": 0.98
+      }
+    },
+    {
+      "model": "glm-5.2",
+      "served": "glm-5.2",
+      "caseId": "B5-cors-paraphrase#s2",
+      "skill": "unblocking-cross-site-request-policies",
+      "ms": 2716,
+      "raw": "```json\n{\"same_job\": true, \"confidence\": 0.98}\n```",
+      "parsed": {
+        "same_job": true,
+        "confidence": 0.98
+      }
+    },
+    {
+      "model": "glm-5-turbo",
+      "served": "glm-5-turbo",
+      "caseId": "B5-cors-paraphrase#c",
+      "skill": "unblocking-cross-site-request-policies",
+      "ms": 1427,
+      "raw": "{\"same_job\": true, \"confidence\": 0.98}",
+      "parsed": {
+        "same_job": true,
+        "confidence": 0.98
+      }
+    },
+    {
+      "model": "glm-5.2",
+      "served": "glm-5.2",
+      "caseId": "B6-secrets-paraphrase#s1",
+      "skill": "provisioning-pipeline-credentials",
+      "ms": 2339,
+      "raw": "```json\n{\"same_job\": true, \"confidence\": 0.9}\n```",
+      "parsed": {
+        "same_job": true,
+        "confidence": 0.9
+      }
+    },
+    {
+      "model": "glm-5.2",
+      "served": "glm-5.2",
+      "caseId": "B6-secrets-paraphrase#s2",
+      "skill": "provisioning-pipeline-credentials",
+      "ms": 5574,
+      "raw": "```json\n{\"same_job\": true, \"confidence\": 0.95}\n```",
+      "parsed": {
+        "same_job": true,
+        "confidence": 0.95
+      }
+    },
+    {
+      "model": "glm-5-turbo",
+      "served": "glm-5-turbo",
+      "caseId": "B6-secrets-paraphrase#c",
+      "skill": "provisioning-pipeline-credentials",
+      "ms": 1243,
+      "raw": "{\"same_job\": true, \"confidence\": 0.95}",
+      "parsed": {
+        "same_job": true,
+        "confidence": 0.95
+      }
+    },
+    {
+      "model": "glm-5.2",
+      "served": "glm-5.2",
+      "caseId": "D1-novel-webgl#s1",
+      "skill": "debugging-failing-pytest-runs",
+      "ms": 1568,
+      "raw": "{\"same_job\": false, \"confidence\": 0.98}",
+      "parsed": {
+        "same_job": false,
+        "confidence": 0.98
+      }
+    },
+    {
+      "model": "glm-5.2",
+      "served": "glm-5.2",
+      "caseId": "D1-novel-webgl#s2",
+      "skill": "debugging-failing-pytest-runs",
+      "ms": 2291,
+      "raw": "{\"same_job\": false, \"confidence\": 1.0}",
+      "parsed": {
+        "same_job": false,
+        "confidence": 1
+      }
+    },
+    {
+      "model": "glm-5-turbo",
+      "served": "glm-5-turbo",
+      "caseId": "D1-novel-webgl#c",
+      "skill": "debugging-failing-pytest-runs",
+      "ms": 1724,
+      "raw": "{\"same_job\": false, \"confidence\": 1.0}",
+      "parsed": {
+        "same_job": false,
+        "confidence": 1
+      }
+    },
+    {
+      "model": "glm-5.2",
+      "served": "glm-5.2",
+      "caseId": "D4-novel-weak-neighbor#s1",
+      "skill": "reconciling-dependency-manifests",
+      "ms": 2548,
+      "raw": "```json\n{\"same_job\": false, \"confidence\": 0.98}\n```",
+      "parsed": {
+        "same_job": false,
+        "confidence": 0.98
+      }
+    },
+    {
+      "model": "glm-5.2",
+      "served": "glm-5.2",
+      "caseId": "D4-novel-weak-neighbor#s2",
+      "skill": "reconciling-dependency-manifests",
+      "ms": 1595,
+      "raw": "```json\n{\"same_job\": false, \"confidence\": 0.98}\n```",
+      "parsed": {
+        "same_job": false,
+        "confidence": 0.98
+      }
+    },
+    {
+      "model": "glm-5-turbo",
+      "served": "glm-5-turbo",
+      "caseId": "D4-novel-weak-neighbor#c",
+      "skill": "reconciling-dependency-manifests",
+      "ms": 1288,
+      "raw": "{\"same_job\": false, \"confidence\": 1.0}",
+      "parsed": {
+        "same_job": false,
+        "confidence": 1
+      }
+    },
+    {
+      "model": "glm-5.2",
+      "served": "glm-5.2",
+      "caseId": "HB1-k8s-rollout#s1",
+      "skill": "recovering-wedged-service-deployments",
+      "ms": 2311,
+      "raw": "```json\n{\"same_job\": true, \"confidence\": 0.95}\n```",
+      "parsed": {
+        "same_job": true,
+        "confidence": 0.95
+      }
+    },
+    {
+      "model": "glm-5.2",
+      "served": "glm-5.2",
+      "caseId": "HB1-k8s-rollout#s2",
+      "skill": "recovering-wedged-service-deployments",
+      "ms": 3293,
+      "raw": "```json\n{\"same_job\": true, \"confidence\": 0.95}\n```",
+      "parsed": {
+        "same_job": true,
+        "confidence": 0.95
+      }
+    },
+    {
+      "model": "glm-5-turbo",
+      "served": "glm-5-turbo",
+      "caseId": "HB1-k8s-rollout#c",
+      "skill": "recovering-wedged-service-deployments",
+      "ms": 1255,
+      "raw": "{\"same_job\": true, \"confidence\": 0.95}",
+      "parsed": {
+        "same_job": true,
+        "confidence": 0.95
+      }
+    },
+    {
+      "model": "glm-5.2",
+      "served": "glm-5.2",
+      "caseId": "HB2-nginx-502#s1",
+      "skill": "restoring-broken-reverse-proxy-links",
+      "ms": 2597,
+      "raw": "```json\n{\"same_job\": true, \"confidence\": 0.98}\n```",
+      "parsed": {
+        "same_job": true,
+        "confidence": 0.98
+      }
+    },
+    {
+      "model": "glm-5.2",
+      "served": "glm-5.2",
+      "caseId": "HB2-nginx-502#s2",
+      "skill": "restoring-broken-reverse-proxy-links",
+      "ms": 2715,
+      "raw": "```json\n{\"same_job\": true, \"confidence\": 0.98}\n```",
+      "parsed": {
+        "same_job": true,
+        "confidence": 0.98
+      }
+    },
+    {
+      "model": "glm-5-turbo",
+      "served": "glm-5-turbo",
+      "caseId": "HB2-nginx-502#c",
+      "skill": "restoring-broken-reverse-proxy-links",
+      "ms": 1254,
+      "raw": "{\"same_job\": true, \"confidence\": 0.95}",
+      "parsed": {
+        "same_job": true,
+        "confidence": 0.95
+      }
+    },
+    {
+      "model": "glm-5.2",
+      "served": "glm-5.2",
+      "caseId": "HB3-ffmpeg-encoder#s1",
+      "skill": "repairing-media-conversion-jobs",
+      "ms": 2656,
+      "raw": "```json\n{\"same_job\": true, \"confidence\": 0.97}\n```",
+      "parsed": {
+        "same_job": true,
+        "confidence": 0.97
+      }
+    },
+    {
+      "model": "glm-5.2",
+      "served": "glm-5.2",
+      "caseId": "HB3-ffmpeg-encoder#s2",
+      "skill": "repairing-media-conversion-jobs",
+      "ms": 1666,
+      "raw": "```json\n{\"same_job\": true, \"confidence\": 0.98}\n```",
+      "parsed": {
+        "same_job": true,
+        "confidence": 0.98
+      }
+    },
+    {
+      "model": "glm-5-turbo",
+      "served": "glm-5-turbo",
+      "caseId": "HB3-ffmpeg-encoder#c",
+      "skill": "repairing-media-conversion-jobs",
+      "ms": 1349,
+      "raw": "{\"same_job\": true, \"confidence\": 0.98}",
+      "parsed": {
+        "same_job": true,
+        "confidence": 0.98
+      }
+    },
+    {
+      "model": "glm-5.2",
+      "served": "glm-5.2",
+      "caseId": "HB4-cron-dst#s1",
+      "skill": "running-clock-safe-recurring-tasks",
+      "ms": 2857,
+      "raw": "```json\n{\"same_job\": true, \"confidence\": 0.98}\n```",
+      "parsed": {
+        "same_job": true,
+        "confidence": 0.98
+      }
+    },
+    {
+      "model": "glm-5.2",
+      "served": "glm-5.2",
+      "caseId": "HB4-cron-dst#s2",
+      "skill": "running-clock-safe-recurring-tasks",
+      "ms": 2858,
+      "raw": "```json\n{\"same_job\": true, \"confidence\": 0.98}\n```",
+      "parsed": {
+        "same_job": true,
+        "confidence": 0.98
+      }
+    },
+    {
+      "model": "glm-5-turbo",
+      "served": "glm-5-turbo",
+      "caseId": "HB4-cron-dst#c",
+      "skill": "running-clock-safe-recurring-tasks",
+      "ms": 1180,
+      "raw": "{\"same_job\": true, \"confidence\": 1.0}",
+      "parsed": {
+        "same_job": true,
+        "confidence": 1
+      }
+    },
+    {
+      "model": "glm-5.2",
+      "served": "glm-5.2",
+      "caseId": "HD1-codesign-profile#s1",
+      "skill": "repairing-media-conversion-jobs",
+      "ms": 2134,
+      "raw": "```json\n{\"same_job\": false, \"confidence\": 0.95}\n```",
+      "parsed": {
+        "same_job": false,
+        "confidence": 0.95
+      }
+    },
+    {
+      "model": "glm-5.2",
+      "served": "glm-5.2",
+      "caseId": "HD1-codesign-profile#s2",
+      "skill": "repairing-media-conversion-jobs",
+      "ms": 4587,
+      "raw": "```json\n{\"same_job\": false, \"confidence\": 0.95}\n```",
+      "parsed": {
+        "same_job": false,
+        "confidence": 0.95
+      }
+    },
+    {
+      "model": "glm-5-turbo",
+      "served": "glm-5-turbo",
+      "caseId": "HD1-codesign-profile#c",
+      "skill": "repairing-media-conversion-jobs",
+      "ms": 1184,
+      "raw": "{\"same_job\": false, \"confidence\": 1.0}",
+      "parsed": {
+        "same_job": false,
+        "confidence": 1
+      }
+    },
+    {
+      "model": "glm-5.2",
+      "served": "glm-5.2",
+      "caseId": "HD2-autovacuum-bloat#s1",
+      "skill": "restoring-failed-data-migrations",
+      "ms": 2492,
+      "raw": "```json\n{\"same_job\": false, \"confidence\": 0.95}\n```",
+      "parsed": {
+        "same_job": false,
+        "confidence": 0.95
+      }
+    },
+    {
+      "model": "glm-5.2",
+      "served": "glm-5.2",
+      "caseId": "HD2-autovacuum-bloat#s2",
+      "skill": "restoring-failed-data-migrations",
+      "ms": 2818,
+      "raw": "{\"same_job\": false, \"confidence\": 0.95}",
+      "parsed": {
+        "same_job": false,
+        "confidence": 0.95
+      }
+    },
+    {
+      "model": "glm-5-turbo",
+      "served": "glm-5-turbo",
+      "caseId": "HD2-autovacuum-bloat#c",
+      "skill": "restoring-failed-data-migrations",
+      "ms": 1208,
+      "raw": "{\"same_job\": false, \"confidence\": 1.0}",
+      "parsed": {
+        "same_job": false,
+        "confidence": 1
+      }
+    }
+  ]
+}
