@@ -54,6 +54,14 @@ restored to the original pins: strong `glm-5.2` ×2, cheap `glm-4.5-air` ×1, vi
 account recharge. Gemini fallback retired unused. Levers untouched. The scoring run happens
 only after this amendment is committed.
 
+**AMENDMENT 3 (2026-07-05, pre-observation — endpoint lane correction):** the ZAI key is a
+CODING-PLAN subscription, not pay-as-you-go: the `/paas/v4/chat/completions` lane bills wallet
+balance (empty → 1113) but `/api/anthropic/v1/messages` rides the plan (probe HTTP 200).
+Probe-verified model mapping: `glm-5.2` serves VERBATIM (original strong pin intact);
+`glm-4.5-air` is not servable on the plan (silently remaps to glm-4.7), so the cheap lane is
+re-pinned to `glm-5-turbo` (serves verbatim). Receipts record the SERVED model per call.
+Still zero case verdicts observed from any judge family. Levers untouched.
+
 ## Data sets
 
 1. **Original 16** (`test/routing-cases.ts`) — dev set. Purpose: does the evaporated 16/16

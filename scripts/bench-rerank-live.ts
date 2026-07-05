@@ -25,10 +25,12 @@ import { canaryPassages, parseSkillHits, semanticSkillCandidates, skillPassageTa
 import { CASES, intentSatisfied, materialize, type RoutingCase } from "../test/routing-cases";
 import { HOLDOUT_CASES } from "../test/routing-holdout";
 
-// Judges per prereg AMENDMENT 2: GLM restored (product owner's call; Gemini run killed unread).
+// Judges per prereg AMENDMENT 3: ZAI CODING-PLAN endpoint (anthropic-compatible). glm-5.2
+// serves verbatim (probe-verified); cheap lane pinned to glm-5-turbo (4.5-air not servable on
+// the plan — silently remaps to 4.7). Receipts record the SERVED model per call.
 const STRONG_MODEL = "glm-5.2";
-const CHEAP_MODEL = "glm-4.5-air";
-const ZAI_URL = "https://api.z.ai/api/paas/v4/chat/completions";
+const CHEAP_MODEL = "glm-5-turbo";
+const ZAI_URL = "https://api.z.ai/api/anthropic/v1/messages";
 
 if (!process.env.LETTA_API_KEY) { console.error("LETTA_API_KEY not set"); process.exit(2); }
 if (!process.env.ZAI_API_KEY) { console.error("ZAI_API_KEY not set"); process.exit(2); }
@@ -53,7 +55,7 @@ async function loadClientCtor(): Promise<new (opts?: { apiKey?: string | null })
 
 // ── Judge over ZAI chat completions (GLM). Raw text + latency recorded for the receipt. Errors throw —
 // routeSkillReranked catches them (graceful fallback), and we ALSO tally them per prereg. ──
-type JudgeTrace = { model: string; caseId: string; skill: string; ms: number; raw: string; parsed: { same_job: boolean; confidence: number } | null; error?: string };
+type JudgeTrace = { model: string; served?: string; caseId: string; skill: string; ms: number; raw: string; parsed: { same_job: boolean; confidence: number } | null; error?: string };
 const traces: JudgeTrace[] = [];
 let judgeErrors: Record<string, number> = {};
 
@@ -78,13 +80,11 @@ function makeJudge(model: string, caseId: () => string): JudgeFn {
         await paced();
         const res = await fetch(ZAI_URL, {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.ZAI_API_KEY}` },
+          headers: { "Content-Type": "application/json", "x-api-key": String(process.env.ZAI_API_KEY), "anthropic-version": "2023-06-01" },
           body: JSON.stringify({
             model, temperature: 0, max_tokens: 400,
-            messages: [
-              { role: "system", content: RERANK_SYSTEM_PROMPT },
-              { role: "user", content: rerankUserPrompt(evidence, skill.name, skill.description) },
-            ],
+            system: RERANK_SYSTEM_PROMPT,
+            messages: [{ role: "user", content: rerankUserPrompt(evidence, skill.name, skill.description) }],
           }),
           signal: AbortSignal.timeout(90_000),
         });
@@ -94,10 +94,10 @@ function makeJudge(model: string, caseId: () => string): JudgeFn {
           throw new Error(lastErr);
         }
         if (!res.ok) throw new Error(`http ${res.status}`);
-        const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
-        const raw = String(data?.choices?.[0]?.message?.content ?? "");
+        const data = (await res.json()) as { model?: string; content?: Array<{ type?: string; text?: string }> };
+        const raw = (data?.content ?? []).map((c) => (c?.type === "text" ? c?.text ?? "" : "")).join("");
         const parsed = parseJudgement(raw);
-        traces.push({ model, caseId: caseId(), skill: skill.name, ms: Date.now() - t0, raw: raw.slice(0, 500), parsed });
+        traces.push({ model, served: data?.model, caseId: caseId(), skill: skill.name, ms: Date.now() - t0, raw: raw.slice(0, 500), parsed });
         if (!parsed) { judgeErrors[model] = (judgeErrors[model] ?? 0) + 1; }
         return parsed;
       } catch (e) {
