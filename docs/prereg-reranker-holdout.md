@@ -46,6 +46,14 @@ verdicts were ever observed from any model, so no judge-selection information ex
 the swap to Gemini is infrastructure substitution recorded BEFORE the first scoring run.
 Prompt, threshold, top-k, recall, and decision logic unchanged.
 
+**AMENDMENT 2 (2026-07-05, pre-observation — judge family restored by product owner):**
+Adrian's call: GLM judges preferred over Gemini. The in-flight Gemini run was KILLED UNREAD
+mid-flight (no judge verdicts from any family have been observed by any decision-maker at the
+time of this amendment — the only completed run remains the fully-BLOCKED 429 run). Judges
+restored to the original pins: strong `glm-5.2` ×2, cheap `glm-4.5-air` ×1, via ZAI, pending
+account recharge. Gemini fallback retired unused. Levers untouched. The scoring run happens
+only after this amendment is committed.
+
 ## Data sets
 
 1. **Original 16** (`test/routing-cases.ts`) — dev set. Purpose: does the evaporated 16/16
