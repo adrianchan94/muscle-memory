@@ -31,6 +31,7 @@ import { execFileSync } from "node:child_process";
 // Everything else stays internal to its module.
 export type { Row } from "./core";
 export type { Defense } from "./engram";
+import { loadPlusMinus, rateSkill, renderPlusMinus } from "./referee";
 export { detect, detectRepairChains, isSkillWorthy } from "./detect";
 export { draftWithRepair } from "./gate";
 export { preserveExistingFrontmatterMetadata, isAmbiguousExistingRoute, compareSkillSections } from "./autopilot";
@@ -338,6 +339,20 @@ export default function activate(letta: any) {
           const dupline = dups.length ? `\n⚠ similar Custom Skills (consider merge/update): ${dups.map((d) => d.name).join(", ")}` : "";
           const act = plan.recommended === "publish" ? "✅ publish as-is (clean)" : plan.recommended === "stage-sanitized" ? "📦 stage SANITIZED (run `publish stage`)" : "🚫 block";
           return { type: "output", output: `🚢 publish preflight — ${plan.skill}\n  ${plan.currentShelf} → ${plan.recommendedShelf}  ·  tier: ${tier}  ·  publishability ${plan.publishability}/100  ·  ${act}${blocks}\nissues:\n${issues}${reps}${dupline}\n(dry-run — nothing published.)` };
+        }
+        if (sub === "rate") {
+          // E7 REFEREE: skill plus-minus — ledger always; Letta-native steps.feedback when a step id
+          // is given. The learner does not grade its own homework: ratings come from outcomes you saw.
+          const target = String(argv?.[1] || "").trim();
+          const dir = String(argv?.[2] || "").toLowerCase();
+          const stepId = String(argv?.[3] || "").trim() || null;
+          if (!target || (dir !== "up" && dir !== "down")) return { type: "output", output: "usage: /muscle-memory rate <skill> up|down [step-id]" };
+          const res = await rateSkill(letta.client, slug(target), dir === "up", stepId);
+          const net = res.rating.plus - res.rating.minus;
+          return { type: "output", output: `🏀 ${res.skill}: ${net >= 0 ? "+" : ""}${net} (+${res.rating.plus}/-${res.rating.minus}) — ${res.reason}
+
+plus-minus board:
+${renderPlusMinus(loadPlusMinus())}` };
         }
         if (sub === "engram") {
           // The CLS loop, observable (read-only): salience-ranked replay + reverse-replay credit +
