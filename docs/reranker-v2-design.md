@@ -1,9 +1,29 @@
 # muscle-memory v2 · LLM Reranker (the live 16/16 fix)
 
-**Status:** proven in live prototype, NOT built, NOT pushed. This doc is the durable record so the result isn't lost (the /tmp prototype scripts are gone).
-**Date:** 2026-07-04
+**Status (updated 2026-07-05): BUILT + RE-MATERIALIZED WITH DURABLE RECEIPTS.** The original
+/tmp prototype result reproduced AND generalized under prereg discipline
+(`docs/prereg-reranker-holdout.md`, sealed blind holdout, judges pinned, criteria computed by
+the instrument — `scripts/bench-rerank-live.ts`, receipts committed in `receipts/`):
+
+| Lane | Dev 16 | Sealed holdout 8 |
+|---|---|---|
+| lexical-only | 7/16 | 4/8 |
+| canary hybrid (shipped, live) | 14/16 | 7/8 |
+| **rerank · glm-5.2 ×2 (stability: byte-identical)** | **16/16** | **8/8** |
+| **rerank · glm-5-turbo (cheap, caveat 6.2a)** | **16/16** | **8/8** |
+
+B1 parked on the correct twin @0.95 (prototype: 0.85). Holdout HD2 — an adversarial
+domain-adjacent trap authored blind — fooled the canary lane (over-park) and was REJECTED by
+the judge @0.95: the reranker fixed the exact miss class it exists for, on a case sealed before
+any reranker code existed. Judge errors: 0. Production fn: `routeSkillReranked` (autopilot.ts),
+18 deterministic decision-tree tests; the bench calls the production head.
+**Date:** 2026-07-04 (design) · 2026-07-05 (build + re-materialization)
 **Owner:** Adrian (with ULTRON / Kev / Mack)
-**Sequencing:** v2 follow-up. Do NOT bundle into PR #45 (canary routing). Build as a working branch after #45 gets maintainer attention + Cameron's operational feedback.
+**Sequencing:** v2 follow-up. Do NOT bundle into PR #45 (canary routing). Ship after #45
+resolves + Cameron's operational feedback. NOTE (2026-07-05): miner hygiene (synthetic-tape
+gate + shelf dedup, `test/miner-hygiene.test.ts`) landed AHEAD of the reranker in this branch —
+routing precision is worthless if the evidence stream is contaminated; the learner must never
+mine its own harness.
 
 ---
 
@@ -58,21 +78,27 @@ For the top candidate (or top-N), one LLM call:
 - **Opt-in:** gate behind a flag (e.g. `MM_NATIVE=passages,rerank` or `MM_RERANK=on`). Off → current canary behavior (15/16). Never on the hot path — reflect lane only.
 - **Relationship to canary:** canary widens recall honestly (nearest ≠ relevant); the reranker sharpens precision (nearest ≠ same-job). They compose — keep both.
 
-## 6. Honest caveats (must resolve before it ships)
+## 6. Honest caveats (status at 2026-07-05 re-materialization)
 
-1. **Cost + latency:** one LLM call per reflect *when a candidate exists*. Off the hot path, so acceptable — but real.
-2. **Nondeterminism:** LLM judge isn't deterministic. The prototype used a **strong (`default`) model, top-1 candidate**. Before shipping: (a) validate a **cheap model** holds the margins (likely, given 0.85–0.98 spread, but unproven), (b) re-run for stability, (c) keep the **deterministic fixture eval as the CI gate** — the reranker is a live-quality booster, not a CI dependency.
-3. **Prototype evaporated:** the live 16/16 was measured, receipts in `/tmp/mm-bench-*` (now gone). Re-materialize + re-run when building the branch.
-4. **Cross-encoder alternative:** instead of an LLM judge, a hosted cross-encoder reranker (Cohere Rerank v4 / Voyage / Jina v3 / Qwen3-Reranker) is higher-precision but adds a dependency/API — heavier for a zero-dep mod. LLM-via-fork is the pragmatic first cut.
+1. **Cost + latency:** one LLM call per reflect *when a candidate exists*. Off the hot path, so acceptable — but real. glm-5.2 thinks 10–40s/call; glm-5-turbo is fast and matched it 24/24.
+2. **Nondeterminism:** ~~unproven~~ **RESOLVED for this set:** (a) cheap model (glm-5-turbo) held every margin, 24/24; (b) strong judge ×2 byte-identical routes; (c) the deterministic fixture eval (`test/rerank.test.ts`, fake judges) stays the CI gate — the live judge is a quality booster, never a CI dependency.
+3. **Prototype evaporated:** ~~receipts gone~~ **RESOLVED:** durable bench (`scripts/bench-rerank-live.ts`) + committed receipts (`receipts/rerank-live-1783256190811.json`, PASS; plus the honest BLOCKED run `1783255233087` that self-refused on a dead judge).
+4. **Cross-encoder alternative:** unchanged — LLM-via-fork remains the pragmatic zero-dep cut.
+5. **NEW — n is still small:** 24 labeled cases (16 dev + 8 sealed holdout), one embedder, one judge family. The holdout answers *dev-set exhaustion*, not scale. Next holdout must be authored by a different referee (rotate: ULTRON), and the burn rule applies: this holdout is now SPENT for any future lever tuning.
+6. **NEW — judge-family provenance:** judges rode the ZAI coding-plan anthropic-compat lane, which REMAPS unservable model ids silently (`glm-4.5-air`→`glm-4.7`). Receipts record the SERVED model per call; any future judge swap must re-probe the mapping.
 
 ## 7. Sequencing / the queue
 
 ```
 PR #45   canary routing (semantic + canary)   — OPEN, offline 16/16, live 15/16
+  →      miner hygiene (synthetic-tape gate)   — DONE 2026-07-05 in this branch: the learner
+                                                 must never mine its own harness (observed live:
+                                                 mmreflex nonces counted 11× as experience)
   →      incremental-edit (surgical patch)     — Cameron's edit-quality ask; design in mm-incremental-edit-design.md
-  →      reranker v2 (THIS doc)                — routing precision to live 16/16
+  →      reranker v2 (THIS doc)                — BUILT + re-materialized 2026-07-05; ships after
+                                                 #45 resolves + Cameron's operational feedback
 ```
-All separate layers, one tight PR at a time. Reranker = "which skill" precision; incremental-edit = "how to edit it." Ship shaped by Cameron's operational traces, not all at once.
+All separate layers, one tight PR at a time. Miner hygiene = "is this evidence real"; reranker = "which skill"; incremental-edit = "how to edit it." Ship shaped by Cameron's operational traces, not all at once.
 
 ## 8. Cameron framing (when it eventually ships)
 
