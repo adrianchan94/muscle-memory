@@ -205,6 +205,22 @@ export async function forkAuthor(ctx: any, c: Candidate, repair?: RepairChain): 
 }
 
 
+/** RERANK V2 in-mod judge: same fork rail as forkAuthor/reviewForkAuthor — the agent's own model
+ * judges (evidence, skill) job-match in a hidden conversation. Fully guarded: no fork surface →
+ * undefined (rerank lane silently disabled); any call failure → null (routeSkillReranked falls
+ * back to the shipped canary gate). Zero new dependencies — the design doc's promise, kept. */
+export function judgeViaFork(ctx: any): JudgeFn | undefined {
+  if (typeof ctx?.conversation?.fork !== "function") return undefined;
+  return async (evidence, skill) => {
+    try {
+      const forked = await ctx.conversation.fork({ hidden: true });
+      const stream = await forked.sendMessageStream([{ role: "user", content: `${RERANK_SYSTEM_PROMPT}\n\n${rerankUserPrompt(evidence, skill.name, skill.description)}` }]);
+      const raw = await consumeStreamBounded(stream as AsyncIterable<unknown>);
+      return parseJudgement(raw);
+    } catch { return null; }
+  };
+}
+
 /** Live autopilot run: build plan from real state, model-author richer bodies (best-effort), execute, persist. */
 export async function runAutopilot(ctx: any, config?: AutopilotConfig): Promise<AutopilotPlan & { result?: any }> {
   const cfg = config || AUTOPILOT_DEFAULT;
@@ -761,7 +777,7 @@ export function reviewForkAuthor(ctx: any): (sys: string, user: string) => Promi
 
 /** v3.1 AUTONOMOUS REFLECTIVE REVIEW: cross-conversation evidence → forked reviewer → update-first
  * routing + gates → write (staged by default; live in auto mode). Reversible + receipted. The surpass, autonomous. */
-export async function runReflectiveReview(ctx: any, config: { mode?: "staged" | "auto"; minItems?: number; minInstances?: number; authorFn?: (s: string, u: string) => Promise<string>; experience?: Row[]; dirs?: string[]; stagedDir?: string; semanticFn?: SemanticFn } = {}): Promise<ReviewResult & { wrote?: string }> {
+export async function runReflectiveReview(ctx: any, config: { mode?: "staged" | "auto"; minItems?: number; minInstances?: number; authorFn?: (s: string, u: string) => Promise<string>; experience?: Row[]; dirs?: string[]; stagedDir?: string; semanticFn?: SemanticFn; judgeFn?: JudgeFn } = {}): Promise<ReviewResult & { wrote?: string }> {
   // dirs/stagedDir injectable (same pattern as `experience`) so callers/tests are hermetic —
   // scanDirs(ctx) reads the HOST's real shelves (agent MemFS + ~/.letta/skills), which made the
   // n=1 wiring test pass only on machines with an empty global shelf (fake-green class).
@@ -797,7 +813,7 @@ export async function runReflectiveReview(ctx: any, config: { mode?: "staged" | 
   const author = config.authorFn || reviewForkAuthor(ctx);
   let res: ReviewResult;
   try {
-    res = await reviewAndAuthor(digest, reviewDirs, author, { semanticFn: config.semanticFn });
+    res = await reviewAndAuthor(digest, reviewDirs, author, { semanticFn: config.semanticFn, judgeFn: config.judgeFn ?? judgeViaFork(ctx) });
   } catch (e: any) {
     // author/review threw — never leave the panel stuck on "writing…"; write a terminal state.
     appendUiEvent({ phase: "reflect_error", summary: `author failed: ${String(e?.message ?? e).slice(0, 80)}` });

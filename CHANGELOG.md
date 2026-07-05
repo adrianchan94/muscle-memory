@@ -5,6 +5,28 @@ All notable changes to `@letta-ai/muscle-memory`. Format loosely follows [Keep a
 ## [Unreleased]
 
 ### Added
+- **Rerank v2 · LLM precision judge (opt-in `MM_RERANK=on`, reflect lane only)** — after semantic
+  recall, the agent's own model (via a hidden `ctx.conversation.fork`, zero new dependencies — or an
+  injected `judgeFn`) reads the lesson and the top on-shelf candidate TOGETHER and answers one strict
+  question: same job-to-be-done? Confirmed duplicates park on the correct twin; rejected candidates
+  CREATE. This is the cross-encoder answer to the one paraphrase class a bi-encoder structurally
+  cannot separate (zero-overlap twins like `alembic upgrade` ↔ "broken schema changes"). Explicit
+  gate tree: rerank ON → judge is the sole precision gate (canary advisory); OFF → shipped canary
+  behavior; judge failure → graceful fallback to the canary gate. Receipts, prereg (sealed 8-case
+  blind holdout authored before any reranker code + 3 pre-observation amendments), and the honest
+  BLOCKED run live in `docs/prereg-reranker-holdout.md` + `receipts/`. Live result, computed by
+  `scripts/bench-rerank-live.ts`: dev 16/16 and holdout 8/8 on both glm-5.2 (×2, byte-identical) and
+  glm-5-turbo, 0 judge errors — including an adversarial domain-adjacent holdout trap (HD2) that
+  fooled the shipped canary lane and was rejected by the judge @0.95. Bounded claim: n=24 labeled
+  cases, one embedder, one judge family; the holdout is now spent for lever tuning.
+- **Miner hygiene · synthetic-tape gate + shelf dedup** — the learner must never mine its own
+  harness. Observed live: a dogfood miner counted its own reflex-suite nonce workflows
+  (`mmreflex<epoch-ms>`, 11×) as top "durable experience". `detect()` now rejects harness-marker
+  rows (mm-reflex/bench/canary/routing-eval/smoke families) and fused epoch-ms nonce tokens
+  (class-level: catches ANY `name${Date.now()}` fixture, ours or not) and reports
+  `rejectedSynthetic`; `searchSkills` dedupes by skill name across shelves (agent + global copies
+  no longer occupy two match slots). Regression: `test/miner-hygiene.test.ts`, including the
+  invariant that mixing synthetic rows into a legit tape changes nothing about the candidates.
 - **E5 · The Reflex (opt-in `MM_REFLEX=on`)** — learned scar tissue now fires **in context**, not in a
   log. When a tool FAILS and both the step signature and the error class match a learned repair chain
   (`coachOnFailure`, kind `fix`, observed ≥2×), the known fix is appended to the failing tool's own

@@ -140,6 +140,8 @@ It also audits cross-shelf drift, so the same skill cannot quietly diverge betwe
 
 Honest caveat: routing is lexical-precision-first, with an opt-in semantic recall lane (`MM_NATIVE=passages`) whose duplicate-suspect trust is canary-calibrated (see CHANGELOG). Live decision quality on the 16-case labeled set: lexical-only 7/16 → hybrid 15/16 across three consecutive Letta Cloud runs; the one standing miss is an embedding-model limit, receipt in the bench. Semantic evidence never auto-patches — it only corroborates or parks.
 
+Stacked on top (opt-in `MM_RERANK=on`, reflect lane only): an LLM precision judge reads the lesson and the top candidate together (same job-to-be-done?) before any park — the cross-encoder answer to the zero-overlap paraphrase class the embedder structurally misses. Under prereg with a sealed blind holdout: dev 16/16 + holdout 8/8 live on two judge models (receipts + prereg trail in `docs/` and `receipts/`; n=24 cases — a bounded, not universal, claim). Judge failure falls back to the canary gate; the judge never auto-patches either.
+
 ```txt
 improve the library, don't grow a landfill
 ```
