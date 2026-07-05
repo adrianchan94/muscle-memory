@@ -56,35 +56,58 @@ type JudgeTrace = { model: string; caseId: string; skill: string; ms: number; ra
 const traces: JudgeTrace[] = [];
 let judgeErrors: Record<string, number> = {};
 
+// Transport hardening (2026-07-05, after run 1783255233087 BLOCKED itself on 42x http 429):
+// serial pacing + exponential backoff on 429/5xx. PURELY transport — prompt, threshold, models
+// and decision logic are prereg-frozen and untouched; run 1 leaked zero judge verdicts.
+const PACE_MS = 1_500;
+const BACKOFFS = [4_000, 10_000, 25_000, 60_000];
+let lastCall = 0;
+async function paced(): Promise<void> {
+  const wait = lastCall + PACE_MS - Date.now();
+  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+  lastCall = Date.now();
+}
+
 function makeJudge(model: string, caseId: () => string): JudgeFn {
   return async (evidence, skill) => {
     const t0 = Date.now();
-    try {
-      const res = await fetch(ZAI_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.ZAI_API_KEY}` },
-        body: JSON.stringify({
-          model, temperature: 0, max_tokens: 200,
-          messages: [
-            { role: "system", content: RERANK_SYSTEM_PROMPT },
-            { role: "user", content: rerankUserPrompt(evidence, skill.name, skill.description) },
-          ],
-        }),
-        signal: AbortSignal.timeout(60_000),
-      });
-      if (!res.ok) throw new Error(`http ${res.status}`);
-      const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
-      const raw = String(data?.choices?.[0]?.message?.content ?? "");
-      const parsed = parseJudgement(raw);
-      traces.push({ model, caseId: caseId(), skill: skill.name, ms: Date.now() - t0, raw: raw.slice(0, 500), parsed });
-      if (!parsed) { judgeErrors[model] = (judgeErrors[model] ?? 0) + 1; }
-      return parsed;
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      traces.push({ model, caseId: caseId(), skill: skill.name, ms: Date.now() - t0, raw: "", parsed: null, error: msg });
-      judgeErrors[model] = (judgeErrors[model] ?? 0) + 1;
-      throw e;
+    let lastErr = "";
+    for (let attempt = 0; attempt <= BACKOFFS.length; attempt++) {
+      try {
+        await paced();
+        const res = await fetch(ZAI_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.ZAI_API_KEY}` },
+          body: JSON.stringify({
+            model, temperature: 0, max_tokens: 200,
+            messages: [
+              { role: "system", content: RERANK_SYSTEM_PROMPT },
+              { role: "user", content: rerankUserPrompt(evidence, skill.name, skill.description) },
+            ],
+          }),
+          signal: AbortSignal.timeout(60_000),
+        });
+        if (res.status === 429 || res.status >= 500) {
+          lastErr = `http ${res.status}`;
+          if (attempt < BACKOFFS.length) { await new Promise((r) => setTimeout(r, BACKOFFS[attempt])); continue; }
+          throw new Error(lastErr);
+        }
+        if (!res.ok) throw new Error(`http ${res.status}`);
+        const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+        const raw = String(data?.choices?.[0]?.message?.content ?? "");
+        const parsed = parseJudgement(raw);
+        traces.push({ model, caseId: caseId(), skill: skill.name, ms: Date.now() - t0, raw: raw.slice(0, 500), parsed });
+        if (!parsed) { judgeErrors[model] = (judgeErrors[model] ?? 0) + 1; }
+        return parsed;
+      } catch (e) {
+        lastErr = e instanceof Error ? e.message : String(e);
+        if (/http (429|5\d\d)/.test(lastErr) && attempt < BACKOFFS.length) continue;
+        break;
+      }
     }
+    traces.push({ model, caseId: caseId(), skill: skill.name, ms: Date.now() - t0, raw: "", parsed: null, error: lastErr });
+    judgeErrors[model] = (judgeErrors[model] ?? 0) + 1;
+    throw new Error(lastErr);
   };
 }
 
