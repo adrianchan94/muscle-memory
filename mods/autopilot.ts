@@ -298,7 +298,14 @@ export function searchSkills(dirs: string[], query: string, k = 5): Array<{ name
     }
     if (matched > 0) out.push({ name: n, description: desc, dir: d, score, matched });
   }
-  return out.sort((a, b) => b.score - a.score || b.matched - a.matched).slice(0, k);
+  // Dedup by skill NAME across shelves (agent + global can both hold a copy): keep the best-scoring
+  // entry. Without this, one skill occupies two match slots and pollutes routing/ambiguity checks.
+  const best = new Map<string, (typeof out)[number]>();
+  for (const e of out) {
+    const p = best.get(e.name);
+    if (!p || e.score > p.score || (e.score === p.score && e.matched > p.matched)) best.set(e.name, e);
+  }
+  return [...best.values()].sort((a, b) => b.score - a.score || b.matched - a.matched).slice(0, k);
 }
 
 /** Decide a SAFE update-first target: must clear the threshold, have ≥N distinctive name/desc hits,

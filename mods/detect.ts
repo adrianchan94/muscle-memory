@@ -233,14 +233,32 @@ export function repairCandidates(rows: Row[]): Candidate[] {
 }
 
 
-export function detect(rows: Row[]): { templates: Candidate[]; sequences: Candidate[]; candidates: Candidate[] } {
-  const templates = detectTemplates(rows);
-  const sequences = detectSequences(rows);
-  const repairs = repairCandidates(rows); // mature recoveries are first-class, highest-value candidates
+// ── SYNTHETIC-TAPE GATE (miner hygiene) — the learner must never mine its own harness. ──
+// Observed live 2026-07-05: a dogfood build counted its own reflex-suite nonce workflows
+// (mmreflex<epoch-ms>, 11×) as top "durable experience" — the same self-tape contamination
+// class that poisoned the SPM eval corpus (drill provenance is a first-class validity threat).
+// Two independent detectors, both class-level (not name-specific):
+//   1. MM's own harness markers — reflex/bench/canary/eval fixtures, by prefix family.
+//   2. Fused nonce tokens — a word glued to a 13-digit epoch-ms (`anything1783107000115`):
+//      the signature of ANY harness minting `name${Date.now()}` identifiers, ours or not.
+export const SYNTHETIC_MARKER_RE = /\bmm-?(?:reflex|bench|canary|routing-eval|drill|smoke)[-\w]*/i;
+export const NONCE_TOKEN_RE = /\b[a-z][a-z_-]{2,32}1[6-9]\d{11}\b/i;
+
+export function isSyntheticRow(row: Row): boolean {
+  const s = `${row.tool} ${row.tmpl ?? ""} ${row.fp ?? ""}`;
+  return SYNTHETIC_MARKER_RE.test(s) || NONCE_TOKEN_RE.test(s);
+}
+
+export function detect(rows: Row[]): { templates: Candidate[]; sequences: Candidate[]; candidates: Candidate[]; rejectedSynthetic: number } {
+  const real = rows.filter((r) => !isSyntheticRow(r));
+  const rejectedSynthetic = rows.length - real.length;
+  const templates = detectTemplates(real);
+  const sequences = detectSequences(real);
+  const repairs = repairCandidates(real); // mature recoveries are first-class, highest-value candidates
   const repairKeys = new Set(repairs.map((r) => r.key));
   const rest = [...templates, ...sequences].filter((c) => !repairKeys.has(c.key)); // dedupe vs a literal sequence
   const candidates = [...repairs, ...rest].filter(isSkillWorthy).sort((a, b) => b.maturity - a.maturity);
-  return { templates, sequences, candidates };
+  return { templates, sequences, candidates, rejectedSynthetic };
 }
 
 
