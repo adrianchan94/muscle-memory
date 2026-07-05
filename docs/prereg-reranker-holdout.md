@@ -33,10 +33,18 @@ Judge the **top-1 on-shelf candidate** (pointwise), matching the prototype.
 
 | Role | Model | Endpoint | Runs |
 |---|---|---|---|
-| Strong judge | `glm-5.2` | ZAI chat completions | ×2 (stability check) |
-| Cheap judge (caveat 6.2a) | `glm-4.5-air` | ZAI chat completions | ×1 |
+| Strong judge | `gemini-2.5-pro` | Gemini generateContent | ×2 (stability check) |
+| Cheap judge (caveat 6.2a) | `gemini-2.5-flash-lite` | Gemini generateContent | ×1 |
 
 Temperature 0 where the API honors it. Exact request/response bodies land in receipts.
+
+**AMENDMENT 1 (2026-07-05, pre-observation — provider substitution, not lever tuning):**
+originally pinned `glm-5.2` / `glm-4.5-air` via ZAI. Run `1783255233087` self-labeled BLOCKED:
+all 42 judge calls returned http 429, root-caused by probe to ZAI error 1113 *"Insufficient
+balance"* (account credit exhausted — receipt in the BLOCKED run + probe output). Zero judge
+verdicts were ever observed from any model, so no judge-selection information exists to leak;
+the swap to Gemini is infrastructure substitution recorded BEFORE the first scoring run.
+Prompt, threshold, top-k, recall, and decision logic unchanged.
 
 ## Data sets
 

@@ -12,7 +12,7 @@
 //   rerank strong2 routeSkillReranked(.., glm-5.2)    — stability duplicate
 //   rerank cheap   routeSkillReranked(.., glm-4.5-air)— caveat 6.2a
 //
-// Requirements: LETTA_API_KEY (Cloud embeddings) + ZAI_API_KEY (judges).
+// Requirements: LETTA_API_KEY (Cloud embeddings) + GEMINI_API_KEY (judges — prereg Amendment 1).
 // Receipts: receipts/rerank-live-<ts>.json (IN-REPO — the /tmp evaporation bug dies here).
 // Run: bun scripts/bench-rerank-live.ts
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -25,12 +25,13 @@ import { canaryPassages, parseSkillHits, semanticSkillCandidates, skillPassageTa
 import { CASES, intentSatisfied, materialize, type RoutingCase } from "../test/routing-cases";
 import { HOLDOUT_CASES } from "../test/routing-holdout";
 
-const STRONG_MODEL = "glm-5.2";
-const CHEAP_MODEL = "glm-4.5-air";
-const ZAI_URL = "https://api.z.ai/api/paas/v4/chat/completions";
+// Judges per prereg AMENDMENT 1: Gemini (ZAI balance exhausted before any verdict was observed).
+const STRONG_MODEL = "gemini-2.5-pro";
+const CHEAP_MODEL = "gemini-2.5-flash-lite";
+const GEMINI_URL = (model: string) => `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`;
 
 if (!process.env.LETTA_API_KEY) { console.error("LETTA_API_KEY not set"); process.exit(2); }
-if (!process.env.ZAI_API_KEY) { console.error("ZAI_API_KEY not set"); process.exit(2); }
+if (!process.env.GEMINI_API_KEY) { console.error("GEMINI_API_KEY not set"); process.exit(2); }
 process.env.MM_NATIVE = "passages";
 
 async function loadClientCtor(): Promise<new (opts?: { apiKey?: string | null }) => unknown> {
@@ -50,7 +51,7 @@ async function loadClientCtor(): Promise<new (opts?: { apiKey?: string | null })
   throw new Error("letta-client not resolvable — set LETTA_CLIENT_PATH");
 }
 
-// ── Judge over ZAI chat completions. Raw text + latency recorded for the receipt. Errors throw —
+// ── Judge over Gemini generateContent. Raw text + latency recorded for the receipt. Errors throw —
 // routeSkillReranked catches them (graceful fallback), and we ALSO tally them per prereg. ──
 type JudgeTrace = { model: string; caseId: string; skill: string; ms: number; raw: string; parsed: { same_job: boolean; confidence: number } | null; error?: string };
 const traces: JudgeTrace[] = [];
@@ -75,17 +76,16 @@ function makeJudge(model: string, caseId: () => string): JudgeFn {
     for (let attempt = 0; attempt <= BACKOFFS.length; attempt++) {
       try {
         await paced();
-        const res = await fetch(ZAI_URL, {
+        const res = await fetch(GEMINI_URL(model), {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.ZAI_API_KEY}` },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            model, temperature: 0, max_tokens: 200,
-            messages: [
-              { role: "system", content: RERANK_SYSTEM_PROMPT },
-              { role: "user", content: rerankUserPrompt(evidence, skill.name, skill.description) },
-            ],
+            systemInstruction: { parts: [{ text: RERANK_SYSTEM_PROMPT }] },
+            contents: [{ role: "user", parts: [{ text: rerankUserPrompt(evidence, skill.name, skill.description) }] }],
+            // Generous budget: Gemini 2.5 thinking tokens count against maxOutputTokens.
+            generationConfig: { temperature: 0, maxOutputTokens: 4096 },
           }),
-          signal: AbortSignal.timeout(60_000),
+          signal: AbortSignal.timeout(90_000),
         });
         if (res.status === 429 || res.status >= 500) {
           lastErr = `http ${res.status}`;
@@ -93,8 +93,8 @@ function makeJudge(model: string, caseId: () => string): JudgeFn {
           throw new Error(lastErr);
         }
         if (!res.ok) throw new Error(`http ${res.status}`);
-        const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
-        const raw = String(data?.choices?.[0]?.message?.content ?? "");
+        const data = (await res.json()) as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
+        const raw = (data?.candidates?.[0]?.content?.parts ?? []).map((p) => p?.text ?? "").join("");
         const parsed = parseJudgement(raw);
         traces.push({ model, caseId: caseId(), skill: skill.name, ms: Date.now() - t0, raw: raw.slice(0, 500), parsed });
         if (!parsed) { judgeErrors[model] = (judgeErrors[model] ?? 0) + 1; }
@@ -230,7 +230,7 @@ mkdirSync(join(import.meta.dir, "..", "receipts"), { recursive: true });
 const out = join(import.meta.dir, "..", "receipts", `rerank-live-${Date.now()}.json`);
 writeFileSync(out, JSON.stringify({
   ts: new Date().toISOString(), agentId, prereg: "docs/prereg-reranker-holdout.md",
-  judges: { strong: STRONG_MODEL, cheap: CHEAP_MODEL, endpoint: ZAI_URL }, criteria, pass, rows, traces,
+  judges: { strong: STRONG_MODEL, cheap: CHEAP_MODEL, endpoint: "gemini generateContent v1beta" }, criteria, pass, rows, traces,
 }, null, 2));
 console.log(`  receipts (IN-REPO, commit them): ${out}`);
 process.exit(blocked ? 18 : pass ? 0 : 1);
