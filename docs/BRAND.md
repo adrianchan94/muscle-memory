@@ -12,6 +12,12 @@ games and stats become real. Receipts live on the court, not in the press confer
 | Ships as | `npm:@letta-ai/muscle-memory` (Letta mod) | referee harness + verdict engine (separate repo — the ref never plays for the team) |
 | Color | court-orange `#ff6b35` | whistle-teal `#5eead4` |
 
+**THE CORE INSIGHT (Adrian, 2026-07-07 03:02 — the sentence the whole thesis collapses into):**
+*"The unlock isn't skill quality — it's skills catered to THE AGENT."* Skill value is a property
+of the MATCH, not the skill: the same page measured +0.62 for the agent that lacked it and −0.50
+for the agent that already knew it. Registries are textbook publishers; HARDWOOD is diagnosis +
+tutoring + report cards. Libraries commoditize; knowing each agent's gap compounds.
+
 **Set tagline:** `Train hard. Keep score.`
 **Long form:** *The first agent skill system where the learning is autonomous and the stats are real.*
 
