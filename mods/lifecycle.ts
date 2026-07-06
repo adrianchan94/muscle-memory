@@ -1,5 +1,6 @@
 // muscle-memory · lifecycle module (split from index.ts — behavior-preserving).
 import { mkdirSync, readFileSync, existsSync, writeFileSync, readdirSync, renameSync } from "node:fs";
+import { loadPlusMinus, skillUtility } from "./referee";
 import { join } from "node:path";
 import { Row, USAGE_PATH, appendMeshFeed, appendUiEvent, autonomousShelves, ensureDir, isManaged, listSkillNames, loadRows, readSkill, scanDirs, skillDesc, slug, writeUiState } from "./core";
 import { buildCrossConversationEvidence, detectRepairChains, isDurableLesson, stepSig } from "./detect";
@@ -68,9 +69,22 @@ export function retiredSkillBlocker(name: string, ctx?: any): string | null {
   return null;
 }
 
+/** VAULT TENURE LADDER (v0.8 closed loop) — minutes are EARNED, not granted:
+ * pinned (human fiat) > tenured (referee net ≥ +3 OR ≥10 real uses) > labile.
+ * Consumed by the film room (patch protection) and the curator. Evidence beats pedigree:
+ * tenure derived from the ledger drops automatically when the record drops. */
+export function tenureFor(name: string, usage = loadUsage(), ledger = loadPlusMinus()): "pinned" | "tenured" | "labile" {
+  const u = usage[name] || ({} as any);
+  if (u.pinned) return "pinned";
+  const net = skillUtility(ledger, name);
+  if ((net !== null && net >= 3) || (u.uses || 0) >= 10) return "tenured";
+  return "labile";
+}
+
 export function runAutonomousPrune(ctx?: any, opts: { maxRetire?: number } = {}): { retired: string[]; retiredPaths: string[]; flagged: string[]; kept: string[] } {
   const maxRetire = Math.max(0, opts.maxRetire ?? 1);
   const usage = loadUsage();
+  const ledger = loadPlusMinus();
   const now = Date.now();
   const retired: string[] = [];
   const retiredPaths: string[] = [];
@@ -85,6 +99,18 @@ export function runAutonomousPrune(ctx?: any, opts: { maxRetire?: number } = {})
       const u = usage[n] || {};
       if (u.pinned) { kept.push(n); continue; }
       const uses = u.uses || 0;
+      // ── CLOSED LOOP (v0.8): the referee's record outranks raw usage, both directions. ──
+      const net = skillUtility(ledger, n);
+      if (net !== null && net <= -2 && retired.length < maxRetire) {
+        // evidence-backed retirement: a skill with a real NEGATIVE record is hurting, even if used
+        const reason = `referee-prune: plus-minus net ${net} — evidence-backed retirement (reversible)`;
+        const target = retireManagedSkill(n, reason, ctx, undefined, [d]);
+        retired.push(n); retiredPaths.push(target);
+        appendUiEvent({ phase: "skill_retired", summary: `retired '${n}' (net ${net} plus-minus) — the record says it hurts`, skill: n, action: "retire", route: "referee-prune" });
+        appendMeshFeed({ type: "skill_retired", skill: n, route: "REFEREE-PRUNE", signals: net });
+        continue;
+      }
+      if (net !== null && net > 0) { kept.push(n); continue; } // EARNED minutes: a positive record protects even a 0-uses skill
       if (uses > 0 || u.lastActivity) { kept.push(n); continue; }
       const created = u.created || now;
       const ageDays = Math.floor((now - created) / 86400000);

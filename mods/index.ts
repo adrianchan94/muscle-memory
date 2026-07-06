@@ -40,7 +40,7 @@ import { buildCrossConversationEvidence, classifyError, commandTemplate, correla
 import { auditSkills, buildDiffFragment, candidateDescription, candidateName, crossShelfDuplicates, dedupCheck, draftSkillFromCandidate, draftWithRepair, effectivenessVerdict, findCandidate, lintSkillDraft, repairForCandidate, sotaQualityGaps } from "./gate";
 import { approveStagedPublish, catalogPrivacyScan, findSimilarSkills, liveSkillVisible, publishHardBlocks, publishMetadata, publishPlan, publishSkillToCatalog, publishTier, publishVisibilityReceipt, publishabilityScore, sanitizeForPublish, stageSanitizedPublish } from "./publish";
 import { Defense, ENGRAM, GuardMode, buildDefenses, buildNeocortexBlock, captureTagged, coachOnFailure, engramConsolidate, expectationFor, guardDecision, interleave, labileSkills, nativeEnabled, preActionDefense, predictionError, renderEngramDigest, replayQueue, reverseReplay, semanticSkillCandidates, skillRetrieved, syncNeocortexBlock, syncSkillPassages, tagExperience } from "./engram";
-import { CURATOR, aggregateTelemetry, buildRegistry, bumpUsage, churnSignal, coverageMap, curateManagedSkills, curatorPass, isPinned, lifecycleTransition, managedSkillUsage, restoreManagedSkill, retireManagedSkill, retiredSkillBlocker, runAutonomousPrune, setPinned, skillVerbs, specDrift } from "./lifecycle";
+import { CURATOR, aggregateTelemetry, buildRegistry, bumpUsage, churnSignal, coverageMap, curateManagedSkills, curatorPass, isPinned, lifecycleTransition, managedSkillUsage, restoreManagedSkill, retireManagedSkill, retiredSkillBlocker, runAutonomousPrune, setPinned, skillVerbs, specDrift, tenureFor } from "./lifecycle";
 import { AUTOPILOT_DEFAULT, AutopilotMode, REVIEW_PROMPT, SemanticFn, applySemanticEvidence, autopilotPlan, buildEvidenceManifest, executeAutopilotPlan, forkAuthor, graduateStagedSkill, isHighConfidenceCreate, loadHandledReflects, managedView, pickUpdateTarget, reflectSignature, retrievePreferences, reviewAndAuthor, reviewForkAuthor, runAutopilot, runReflectiveReview, searchSkills, streamChunkText } from "./autopilot";
 import { renderMuscleMemoryPanel, summarizeReflectActions } from "./ui";
 import { runFilmRoom } from "./filmroom";
@@ -353,6 +353,21 @@ export default function activate(letta: any) {
           const dupline = dups.length ? `\n⚠ similar Custom Skills (consider merge/update): ${dups.map((d) => d.name).join(", ")}` : "";
           const act = plan.recommended === "publish" ? "✅ publish as-is (clean)" : plan.recommended === "stage-sanitized" ? "📦 stage SANITIZED (run `publish stage`)" : "🚫 block";
           return { type: "output", output: `🚢 publish preflight — ${plan.skill}\n  ${plan.currentShelf} → ${plan.recommendedShelf}  ·  tier: ${tier}  ·  publishability ${plan.publishability}/100  ·  ${act}${blocks}\nissues:\n${issues}${reps}${dupline}\n(dry-run — nothing published.)` };
+        }
+        if (sub === "boxscore") {
+          // 🏀 HARDWOOD BOX SCORE — the closed loop made visible: tenure + minutes + record per skill.
+          const dirs = scanDirs(ctx);
+          const reg = buildRegistry(dirs);
+          const ledger = loadPlusMinus();
+          const rows = reg.skills.filter((s: any) => s.state !== "archived").map((s: any) => {
+            const r = ledger[s.name];
+            const net = r ? r.plus - r.minus : null;
+            const ten = tenureFor(s.name);
+            return { name: s.name, ten, uses: s.uses || 0, net, rec: r ? `+${r.plus}/-${r.minus}` : "—" };
+          }).sort((a: any, b: any) => (b.net ?? -99) - (a.net ?? -99) || b.uses - a.uses);
+          const icon = (t: string) => t === "pinned" ? "📌" : t === "tenured" ? "🏆" : "·";
+          const body = rows.map((r: any) => `  ${icon(r.ten)} ${(r.net === null ? "  —" : (r.net >= 0 ? "+" + r.net : String(r.net))).padStart(3)}  ${r.name}  (${r.rec} · ${r.uses} min)`).join("\n");
+          return { type: "output", output: `🏀 HARDWOOD BOX SCORE — tenure · net ± · record · minutes\n\n${body || "(no managed skills yet)"}\n\n📌 pinned · 🏆 tenured (earned) · rate plays: /muscle-memory rate <skill> up|down` };
         }
         if (sub === "rate") {
           // E7 REFEREE: skill plus-minus — ledger always; Letta-native steps.feedback when a step id

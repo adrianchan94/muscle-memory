@@ -17,7 +17,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { RECEIPTS_DIR, STATE_DIR, appendJsonl, appendUiEvent, ensureDir, isManaged, readSkill, scanSkillContent, writeSkill } from "./core";
 import { compareSkillSections, routeSkill, searchSkills } from "./autopilot";
-import { isPinned, managedSkillUsage } from "./lifecycle";
+import { isPinned, managedSkillUsage, tenureFor as vaultTenure } from "./lifecycle";
 import type { PlusMinusLedger } from "./referee";
 
 export const FILMROOM_MAX_LINES = 8;
@@ -57,14 +57,9 @@ export function parsePatchNotes(raw: string): PatchNote[] | null {
   } catch { return null; }
 }
 
-/** Default tenure ladder (Vault v1): pinned by human fiat; tenured earned by usage; else labile. */
+/** Tenure via the shared Vault ladder (lifecycle.tenureFor) — one ladder, every consumer. */
 export function tenureOf(name: string, dirs: string[]): Tenure {
-  try {
-    if (isPinned(name)) return "pinned";
-    const u = managedSkillUsage(name);
-    if ((u?.uses ?? 0) >= 10) return "tenured";
-  } catch { /* default labile */ }
-  return "labile";
+  try { return vaultTenure(name); } catch { return "labile"; }
 }
 
 /** Append note lines under the target section of a SKILL.md body. Section missing → appended at
@@ -158,6 +153,7 @@ export async function runFilmRoom(opts: {
   summary: string;
   dirs: string[];
   authorFn?: (system: string, user: string) => Promise<string>;
+  judgeFn?: (evidence: string, skill: { name: string; description: string }) => Promise<{ same_job: boolean; confidence: number } | null>;
   mode?: "staged" | "auto";
   stepBudget?: number;
   enabled?: string; // env override for tests
@@ -182,9 +178,20 @@ export async function runFilmRoom(opts: {
     // route-confirm: the note's target must be update-routable (lexical head; judge optional upstream)
     const lex = searchSkills(opts.dirs, `${note.skill} ${note.lines}`, 3);
     const d = routeSkill(lex, [], (n) => opts.dirs.some((x) => existsSync(join(x, n, "SKILL.md"))));
-    if (!(d.route === "update" && d.target?.name === note.skill) && !lex.some((m) => m.name === note.skill)) {
+    let confirmed: boolean;
+    if (opts.judgeFn && steps < budget) {
+      // JUDGE AUTHORITATIVE (rerank doctrine): when a judge is available, it IS the precision
+      // gate — the lexical echo (name appears in its own query) can never self-confirm past it.
+      steps++;
+      const desc = lex.find((m) => m.name === note.skill)?.description ?? "";
+      const j = await opts.judgeFn(note.lines, { name: note.skill, description: desc }).catch(() => null);
+      confirmed = !!j && j.same_job === true && j.confidence >= 0.6;
+    } else {
+      confirmed = (d.route === "update" && d.target?.name === note.skill) || lex.some((m) => m.name === note.skill);
+    }
+    if (!confirmed) {
       parked.push(note);
-      appendJsonl(FILMROOM_PARKED, { ts: Date.now(), note, reason: "routing did not confirm target — parked for reflect lane" });
+      appendJsonl(FILMROOM_PARKED, { ts: Date.now(), note, reason: "routing + judge did not confirm target — parked for reflect lane" });
       continue;
     }
     patched.push(applyPatchNote(note, opts.dirs, { mode: opts.mode }));
