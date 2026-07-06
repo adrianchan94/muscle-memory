@@ -1,0 +1,961 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HARDWOOD — Train hard. Keep score.</title>
+<meta name="description" content="HARDWOOD — an agent skills program. muscle-memory trains your agent from real practice. Skill Plus-Minus is the referee that proves what every skill is worth.">
+<link rel="preconnect" href="https://api.fontshare.com">
+<link href="https://api.fontshare.com/v2/css?f[]=clash-display@500,600,700&f[]=satoshi@400,500,700&f[]=jetbrains-mono@400,500,700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#050505; --panel:#0b0b0f; --card:#0f0f15; --line:rgba(255,255,255,.07); --hair:rgba(255,255,255,.13);
+  --ink:#f2efe9; --dim:#9a95a0; --faint:#5d5964;
+  --orange:#ff6a2b; --teal:#4fe3c1; --gold:#f5c518; --red:#ff5252; --green:#51e08a;
+  --disp:'Clash Display',ui-sans-serif,system-ui; --body:'Satoshi',ui-sans-serif,system-ui; --mono:'JetBrains Mono',ui-monospace,Menlo,monospace;
+  --ease:cubic-bezier(.32,.72,0,1); --ease2:cubic-bezier(.16,1,.3,1);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden;cursor:none}
+@media(pointer:coarse){body{cursor:auto}}
+::selection{background:var(--orange);color:#140700}
+a{color:inherit;text-decoration:none}
+a:focus-visible,.sw:focus-visible{outline:2px solid var(--orange);outline-offset:3px;border-radius:8px}
+.wrap{max-width:1200px;margin:0 auto;padding:0 28px}
+.mono{font-family:var(--mono)}
+
+/* ═══ THE ARENA — full-page continuous WebGL court ═══ */
+#court{position:fixed;inset:0;width:100%;height:100%;display:block;z-index:0}
+main,nav,footer,#hero{position:relative;z-index:2}
+
+/* game clock (scroll progress) */
+#clock{position:fixed;top:0;left:0;height:2px;width:0%;z-index:9100;background:linear-gradient(90deg,var(--orange),var(--gold));box-shadow:0 0 12px rgba(255,106,43,.6)}
+
+/* cursor */
+#cur,#curDot{position:fixed;top:0;left:0;pointer-events:none;z-index:9000;transform:translate(-50%,-50%);will-change:transform}
+#cur{width:34px;height:34px;border:1px solid rgba(255,255,255,.5);border-radius:50%;transition:width .35s var(--ease),height .35s var(--ease),border-color .35s;mix-blend-mode:difference}
+#curDot{width:5px;height:5px;background:var(--orange);border-radius:50%}
+body.cur-hover #cur{width:66px;height:66px;border-color:var(--orange)}
+@media(pointer:coarse){#cur,#curDot{display:none}}
+
+.grain{position:fixed;inset:-50%;width:200%;height:200%;pointer-events:none;z-index:8000;opacity:.05;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23n)' opacity='.6'/%3E%3C/svg%3E");
+  animation:grain 7s steps(8) infinite}
+@keyframes grain{0%{transform:translate(0,0)}25%{transform:translate(-4%,3%)}50%{transform:translate(3%,-4%)}75%{transform:translate(-2%,-2%)}100%{transform:translate(0,0)}}
+.vig{position:fixed;inset:0;pointer-events:none;z-index:7999;background:radial-gradient(ellipse at center,transparent 55%,rgba(0,0,0,.5) 100%)}
+
+/* preloader */
+#pre{position:fixed;inset:0;background:var(--bg);z-index:9500;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:20px;transition:opacity .8s var(--ease),visibility .8s}
+#pre.done{opacity:0;visibility:hidden}
+#pre .word{font-family:var(--disp);font-weight:700;font-size:clamp(30px,5vw,46px);letter-spacing:.3em;text-indent:.3em;overflow:hidden}
+#pre .word span{display:inline-block;transform:translateY(115%);animation:riseup 1s var(--ease2) .1s forwards}
+@keyframes riseup{to{transform:translateY(0)}}
+#pre .ct{font-family:var(--mono);font-size:12px;color:var(--faint);letter-spacing:.2em}
+
+/* nav */
+nav{position:fixed;top:22px;left:50%;transform:translateX(-50%);z-index:6000;display:flex;align-items:center;gap:4px;
+  background:rgba(12,12,16,.55);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+  border:1px solid var(--hair);border-radius:99px;padding:7px 9px;transition:transform .6s var(--ease)}
+nav.hid{transform:translate(-50%,-170%)}
+nav .logo{font-family:var(--disp);font-weight:700;font-size:14px;letter-spacing:.16em;padding:6px 15px 6px 13px}
+nav .logo b{color:var(--orange)}
+nav a.lnk{font-family:var(--mono);font-size:11px;letter-spacing:.06em;color:var(--dim);padding:8px 13px;border-radius:99px;transition:color .3s,background .3s;white-space:nowrap}
+nav a.lnk:hover{color:var(--ink);background:rgba(255,255,255,.06)}
+nav a.lnk.live{color:var(--ink);background:rgba(255,106,43,.14)}
+nav .cta{display:flex;align-items:center;gap:8px;background:var(--ink);color:#0a0a0a;font-family:var(--mono);font-size:11.5px;font-weight:700;border-radius:99px;padding:8px 8px 8px 16px;margin-left:6px;transition:transform .4s var(--ease);will-change:transform}
+nav .cta:hover{transform:scale(1.04)}
+nav .cta .ic{width:24px;height:24px;border-radius:50%;background:rgba(0,0,0,.12);display:flex;align-items:center;justify-content:center;font-size:12px;transition:transform .4s var(--ease)}
+nav .cta:hover .ic{transform:translate(2px,-1px)}
+@media(max-width:820px){nav a.lnk{display:none}}
+
+/* ═══ HERO — the wordmark ═══ */
+#hero{position:relative;min-height:100dvh;display:flex;flex-direction:column;justify-content:center;overflow:hidden}
+#hero .haze{position:absolute;inset:0;pointer-events:none;background:
+  radial-gradient(1000px 520px at 70% 14%,rgba(255,106,43,.10),transparent 60%),
+  radial-gradient(700px 420px at 16% 6%,rgba(79,227,193,.06),transparent 60%),
+  linear-gradient(to bottom,rgba(5,5,5,.4),transparent 28%,transparent 62%,rgba(5,5,5,.72) 97%)}
+#hero .inner{position:relative;z-index:2;width:100%;text-align:center;padding:120px 0 110px}
+.eyebrow{display:inline-flex;align-items:center;gap:10px;font-family:var(--mono);font-size:10.5px;letter-spacing:.24em;text-transform:uppercase;color:var(--gold);
+  border:1px solid rgba(245,197,24,.28);background:rgba(245,197,24,.05);border-radius:99px;padding:8px 18px;margin-bottom:44px}
+.eyebrow .dot{width:5px;height:5px;border-radius:50%;background:var(--gold);animation:blink 2.4s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
+.wordmark{font-family:var(--disp);font-weight:700;font-size:clamp(64px,12.5vw,196px);line-height:.92;letter-spacing:.015em;display:flex;justify-content:center;align-items:center;gap:.02em;white-space:nowrap;
+  filter:drop-shadow(0 24px 60px rgba(0,0,0,.65))}
+.wordmark .ch{display:inline-block;overflow:hidden}
+.wordmark .ch i{display:inline-block;font-style:normal;transform:translateY(115%);transition:transform 1.15s var(--ease2)}
+.wordmark.in .ch i{transform:translateY(0)}
+.ball-o{display:inline-flex;align-items:center;justify-content:center;width:.86em;height:.86em;margin:0 .015em;border-radius:50%;position:relative;top:.045em;
+  background:radial-gradient(circle at 34% 30%,#ff8b52,#ff6a2b 45%,#b33d12 100%);
+  box-shadow:0 0 60px rgba(255,106,43,.4),inset -6px -10px 24px rgba(0,0,0,.4);
+  transform:scale(0);transition:transform .9s var(--ease2)}
+.wordmark.in .ball-o{transform:scale(1)}
+.wordmark.in .ball-o.b2{transition-delay:.12s}
+.ball-o::before,.ball-o::after{content:"";position:absolute;inset:0;border-radius:50%}
+.ball-o::before{border-left:2px solid rgba(20,7,0,.55);left:50%;width:0;border-radius:0}
+.ball-o::after{border:2px solid rgba(20,7,0,.4);border-left-color:transparent;border-right-color:transparent;transform:scaleX(1.5)}
+.tagline{margin:40px auto 14px;font-family:var(--disp);font-weight:600;font-size:clamp(20px,3.2vw,34px);letter-spacing:-.01em;opacity:0;transform:translateY(20px);transition:all 1s var(--ease2) .55s}
+.tagline.in{opacity:1;transform:none}
+.tagline .k{color:var(--orange)}
+.hero-sub{max-width:640px;margin:0 auto 44px;font-size:clamp(15px,1.7vw,18px);color:var(--dim);opacity:0;transform:translateY(20px);transition:all 1s var(--ease2) .7s}
+.hero-sub.in{opacity:1;transform:none}
+.hero-sub b.mm{color:var(--orange)}.hero-sub b.spm{color:var(--teal)}.hero-sub b.w{color:var(--ink)}
+.hero-cta{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;opacity:0;transform:translateY(20px);transition:all 1s var(--ease2) .85s}
+.hero-cta.in{opacity:1;transform:none}
+.pill{display:inline-flex;align-items:center;gap:12px;border-radius:99px;padding:15px 10px 15px 24px;font-family:var(--mono);font-size:13px;transition:transform .45s var(--ease);will-change:transform}
+.pill:active{transform:scale(.97)}
+.pill.solid{background:var(--orange);color:#180800;font-weight:700}
+.pill.ghost{border:1px solid var(--hair);color:var(--ink);background:rgba(255,255,255,.03)}
+.pill .ic{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;transition:transform .45s var(--ease)}
+.pill.solid .ic{background:rgba(0,0,0,.16)}
+.pill.ghost .ic{background:rgba(255,255,255,.07)}
+.pill:hover .ic{transform:translate(3px,-2px) scale(1.06)}
+.scrolldn{position:absolute;bottom:30px;left:50%;transform:translateX(-50%);z-index:2;font-family:var(--mono);font-size:10px;letter-spacing:.3em;color:var(--faint);display:flex;flex-direction:column;align-items:center;gap:10px}
+.scrolldn .bar{width:1px;height:44px;background:linear-gradient(var(--orange),transparent);animation:drop 1.8s var(--ease) infinite}
+@keyframes drop{0%{transform:scaleY(0);transform-origin:top}45%{transform:scaleY(1);transform-origin:top}55%{transform:scaleY(1);transform-origin:bottom}100%{transform:scaleY(0);transform-origin:bottom}}
+
+/* marquee */
+.tick{border-top:1px solid var(--line);border-bottom:1px solid var(--line);overflow:hidden;padding:15px 0;background:rgba(8,8,10,.55);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+.tick .in{display:flex;white-space:nowrap;animation:mq 38s linear infinite;width:max-content;will-change:transform}
+.tick span{font-family:var(--mono);font-size:12px;letter-spacing:.28em;color:var(--faint);padding:0 34px}
+.tick b{color:var(--orange);font-weight:500}
+@keyframes mq{to{transform:translateX(-50%)}}
+
+/* quarter chip */
+.q{display:flex;align-items:center;gap:18px;margin-bottom:30px}
+.q .chip{font-family:var(--mono);font-weight:700;font-size:13px;letter-spacing:.1em;border:1px solid var(--hair);border-radius:10px;padding:10px 16px;background:var(--card);display:flex;gap:14px;align-items:center}
+.q .chip .qn{color:var(--orange)}
+.q .chip .clk{color:var(--faint);font-size:11px;font-variant-numeric:tabular-nums;min-width:4.5ch}
+.q .ttl{font-family:var(--mono);font-size:11px;letter-spacing:.26em;text-transform:uppercase;color:var(--dim)}
+
+section{padding:clamp(100px,12vw,180px) 0;position:relative}
+section::before{content:"";position:absolute;inset:0;pointer-events:none;z-index:-1;
+  background:linear-gradient(to bottom,transparent,rgba(5,5,5,.55) 14%,rgba(5,5,5,.55) 86%,transparent)}
+h2{font-family:var(--disp);font-weight:600;font-size:clamp(36px,5.6vw,68px);line-height:1.04;letter-spacing:-.02em;max-width:900px}
+h2 .mut{color:var(--faint)}
+h2 .w{display:inline-block;overflow:hidden;vertical-align:bottom;padding-bottom:.08em;margin-bottom:-.08em}
+h2 .w i{display:inline-block;font-style:normal;transform:translateY(112%);transition:transform 1s var(--ease2)}
+h2.split-in .w i{transform:translateY(0)}
+.lede{color:var(--dim);max-width:660px;font-size:17px;margin-top:24px}
+.lede b{color:var(--ink)}
+html.js .rv{opacity:0;transform:translateY(46px);filter:blur(6px);transition:opacity 1s var(--ease2),transform 1s var(--ease2),filter 1s var(--ease2)}
+html.js .rv.in{opacity:1;transform:none;filter:none}
+.rv.d1{transition-delay:.08s}.rv.d2{transition-delay:.16s}.rv.d3{transition-delay:.24s}.rv.d4{transition-delay:.32s}
+
+/* Q1 — the problem: editorial storytelling */
+#q1 .story{margin-top:70px;display:grid;grid-template-columns:1fr 1fr;gap:70px;align-items:start}
+#q1 .story .big{font-family:var(--disp);font-weight:500;font-size:clamp(22px,2.9vw,32px);line-height:1.4}
+#q1 .story .big em{font-style:normal;color:var(--red)}
+#q1 .story .big .fade{color:var(--faint)}
+#q1 .sidenote{font-size:15px;color:var(--dim);border-left:1px solid var(--hair);padding-left:28px;display:grid;gap:18px}
+#q1 .sidenote b{color:var(--ink)}
+@media(max-width:860px){#q1 .story{grid-template-columns:1fr}}
+
+/* bezel util */
+.bez{background:rgba(255,255,255,.028);border:1px solid var(--line);border-radius:2rem;padding:9px}
+.bez .core{background:linear-gradient(160deg,var(--card),var(--panel));border-radius:calc(2rem - 9px);padding:40px;height:100%;position:relative;overflow:hidden;box-shadow:inset 0 1px 1px rgba(255,255,255,.06)}
+.bez .core::before{content:"";position:absolute;inset:0;opacity:0;transition:opacity .6s;pointer-events:none;background:radial-gradient(520px 320px at var(--mx,50%) var(--my,0%),rgba(255,255,255,.05),transparent 60%)}
+.bez:hover .core::before{opacity:1}
+
+/* duo */
+.duo{display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-top:60px}
+.duo .role{font-family:var(--mono);font-size:10px;letter-spacing:.24em;margin-bottom:16px}
+.duo .mm .role{color:var(--orange)}.duo .spm .role{color:var(--teal)}
+.duo .nm{font-family:var(--disp);font-weight:600;font-size:clamp(24px,2.6vw,32px);margin-bottom:12px}
+.duo .tg{font-size:15px;font-weight:700;margin-bottom:12px}
+.duo p{color:var(--dim);font-size:14.5px}
+.duo .mm .core{border-top:2px solid var(--orange)}
+.duo .spm .core{border-top:2px solid var(--teal)}
+@media(max-width:840px){.duo{grid-template-columns:1fr}}
+.loop{display:flex;flex-wrap:wrap;gap:10px;margin-top:46px}
+.loop .step{font-family:var(--mono);font-size:12.5px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 18px;color:var(--dim);transition:all .4s var(--ease)}
+.loop .step em{color:var(--teal);font-style:normal}
+.loop .step:hover{border-color:var(--hair);color:var(--ink);transform:translateY(-3px)}
+.loop .ar{color:var(--faint);align-self:center;font-family:var(--mono)}
+.bento{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:56px}
+.stat-n{font-family:var(--disp);font-weight:700;font-size:clamp(42px,4.6vw,60px);line-height:1;font-variant-numeric:tabular-nums}
+.stat-n.o{color:var(--orange)}.stat-n.t{color:var(--teal)}.stat-n.g{color:var(--gold)}
+.stat-l{color:var(--dim);font-size:14px;margin-top:12px}
+.stat-f{font-family:var(--mono);font-size:11px;color:var(--faint);margin-top:16px}
+@media(max-width:840px){.bento{grid-template-columns:1fr}}
+
+/* ═══ Q3 — the interactive twin demo ═══ */
+.demo{margin-top:64px}
+.demo .bez .core{padding:46px}
+.demo-head{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:22px;margin-bottom:38px}
+.demo-title{font-family:var(--mono);font-size:11px;letter-spacing:.22em;color:var(--faint)}
+.switch{display:flex;align-items:center;gap:16px;font-family:var(--mono);font-size:12px}
+.switch .lab{color:var(--dim);transition:color .4s}.switch .lab.on{color:var(--orange);font-weight:700}
+.sw{width:74px;height:38px;border-radius:99px;background:var(--panel);border:1px solid var(--hair);position:relative;cursor:none;transition:background .5s var(--ease),border-color .5s}
+@media(pointer:coarse){.sw{cursor:pointer}}
+.sw .knob{position:absolute;top:3px;left:3px;width:30px;height:30px;border-radius:50%;
+  background:radial-gradient(circle at 34% 30%,#8d8d96,#5b5b64);transition:transform .55s var(--ease2),background .5s}
+.sw.on{background:rgba(255,106,43,.18);border-color:rgba(255,106,43,.5);box-shadow:0 0 34px rgba(255,106,43,.18)}
+.sw.on .knob{transform:translateX(36px);background:radial-gradient(circle at 34% 30%,#ff8b52,#ff6a2b 50%,#b33d12)}
+.demo-grid{display:grid;grid-template-columns:1fr 220px;gap:40px;align-items:center}
+.qa{display:grid;gap:14px}
+.qa .row{display:grid;grid-template-columns:1fr auto;gap:18px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 22px;transition:border-color .5s;position:relative;overflow:hidden}
+.qa .row::after{content:"";position:absolute;inset:0;transform:translateX(-101%);background:linear-gradient(90deg,transparent,rgba(81,224,138,.08),transparent);pointer-events:none}
+.qa .row.sweep::after{animation:sweep .8s var(--ease2)}
+@keyframes sweep{to{transform:translateX(101%)}}
+.qa .prompt{font-family:var(--mono);font-size:12.5px;color:var(--dim)}
+.qa .ans{font-family:var(--mono);font-size:13px;font-weight:700;transition:color .3s}
+.qa .ans.ok{color:var(--green)}.qa .ans.bad{color:var(--red)}
+.scoreboard{text-align:center;background:var(--panel);border:1px solid var(--hair);border-radius:20px;padding:32px 20px}
+.scoreboard .lbl{font-family:var(--mono);font-size:10px;letter-spacing:.22em;color:var(--faint)}
+.scoreboard .val{font-family:var(--disp);font-weight:700;font-size:64px;line-height:1.1;transition:color .4s;font-variant-numeric:tabular-nums}
+.scoreboard .val.hi{color:var(--green);text-shadow:0 0 46px rgba(81,224,138,.35)}
+.scoreboard .val.lo{color:var(--red)}
+.scoreboard .val.buzz{animation:buzz .7s var(--ease2)}
+@keyframes buzz{0%{transform:scale(1)}30%{transform:scale(1.14)}100%{transform:scale(1)}}
+.scoreboard .sub{font-family:var(--mono);font-size:10.5px;color:var(--faint);margin-top:8px}
+.demo-note{font-family:var(--mono);font-size:11.5px;color:var(--faint);margin-top:26px;letter-spacing:.04em}
+.demo-note b{color:var(--teal);font-weight:500}
+@media(max-width:760px){.demo-grid{grid-template-columns:1fr}}
+
+/* box score + arc */
+.scorehead{display:flex;justify-content:space-between;align-items:center;font-family:var(--mono);font-size:10.5px;letter-spacing:.2em;color:var(--faint);padding:0 6px 14px;margin-top:70px}
+.scorehead .liv{color:var(--green)}
+.scorehead .liv::before{content:"●";margin-right:8px;animation:blink 1.6s infinite}
+table.bx{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:13px;background:rgba(8,8,10,.4)}
+table.bx th{text-align:left;font-weight:500;font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--faint);padding:14px 16px;border-bottom:1px solid var(--hair)}
+table.bx td{padding:17px 16px;border-bottom:1px solid var(--line);transition:background .3s}
+table.bx tr:hover td{background:rgba(255,255,255,.02)}
+.v-eff{color:var(--green)}.v-dir{color:var(--gold)}.flag{color:var(--red);font-size:11.5px}
+.fine{font-family:var(--mono);font-size:11px;color:var(--faint);margin-top:16px;letter-spacing:.04em}
+.arcwrap{margin-top:80px;position:relative}
+.arcsvg{position:absolute;left:0;right:0;top:-34px;width:100%;height:130px;pointer-events:none}
+.arcsvg path{fill:none;stroke:url(#arcgrad);stroke-width:1.6;stroke-dasharray:1400;stroke-dashoffset:1400;transition:stroke-dashoffset 2.6s var(--ease2) .3s}
+.arcwrap.in .arcsvg path{stroke-dashoffset:0}
+.arcgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;position:relative;z-index:1}
+.arct{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:26px 24px;transition:transform .5s var(--ease)}
+.arct:hover{transform:translateY(-6px)}
+.arct .tag{font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint)}
+.arct .d{font-family:var(--disp);font-weight:700;font-size:34px;margin:10px 0 8px}
+.arct .w{color:var(--dim);font-size:12.5px;line-height:1.55}
+.arct.k1 .d{color:var(--red);text-decoration:line-through;text-decoration-thickness:3px;text-decoration-color:rgba(255,82,82,.5)}
+.arct.k2 .d{color:var(--dim)}.arct.k3 .d{color:var(--gold)}
+.arct.k4{border-color:rgba(81,224,138,.35);box-shadow:0 0 60px rgba(81,224,138,.07)}
+.arct.k4 .d{color:var(--green);text-shadow:0 0 40px rgba(81,224,138,.4)}
+@media(max-width:840px){.arcgrid{grid-template-columns:1fr 1fr}.arcsvg{display:none}}
+@media(max-width:520px){.arcgrid{grid-template-columns:1fr}}
+.signed{margin-top:56px;font-size:clamp(19px,2.6vw,27px);font-family:var(--disp);font-weight:600;line-height:1.42;max-width:780px}
+.signed .p{color:var(--green)}.signed .z{color:var(--red)}
+
+/* Q4 receipts */
+#q4::before{background:linear-gradient(to bottom,transparent,rgba(20,5,5,.6) 14%,rgba(20,5,5,.6) 86%,transparent)}
+.blocks{display:grid;gap:16px;margin-top:56px}
+.blk{background:var(--card);border:1px solid var(--line);border-left:3px solid var(--red);border-radius:14px;padding:26px 30px;display:grid;grid-template-columns:auto 1fr;gap:24px;align-items:start}
+.blk .stamp{font-family:var(--mono);font-weight:700;font-size:12px;color:var(--red);border:1.5px solid var(--red);border-radius:6px;padding:6px 12px;transform:rotate(-4deg) scale(1.6);letter-spacing:.1em;white-space:nowrap;opacity:0;transition:opacity .45s var(--ease),transform .45s var(--ease)}
+.blk.in .stamp{opacity:1;transform:rotate(-4deg) scale(1)}
+.blk .t{font-family:var(--mono);font-size:13px;margin-bottom:6px}
+.blk .d{color:var(--dim);font-size:14px}
+blockquote{margin-top:84px;max-width:860px}
+blockquote p{font-family:var(--disp);font-weight:500;font-size:clamp(21px,3vw,31px);line-height:1.45}
+blockquote p em{color:var(--orange);font-style:normal}
+blockquote cite{display:block;margin-top:22px;font-family:var(--mono);font-size:12.5px;color:var(--faint);font-style:normal;letter-spacing:.06em}
+
+/* season */
+.season{margin-top:70px;position:relative;padding-left:44px}
+.season::before{content:"";position:absolute;left:10px;top:8px;bottom:8px;width:1px;background:linear-gradient(var(--green),var(--orange) 30%,var(--line) 62%)}
+.rel{position:relative;margin-bottom:20px}
+.rel::before{content:"";position:absolute;left:-39px;top:30px;width:9px;height:9px;border-radius:50%;background:var(--bg);border:2px solid var(--orange)}
+.rel.done::before{background:var(--green);border-color:var(--green)}
+.rel .core{display:grid;grid-template-columns:130px 1fr;gap:26px;padding:28px 32px}
+.rel .v{font-family:var(--disp);font-weight:700;font-size:22px;color:var(--orange)}
+.rel.done .v{color:var(--green)}
+.rel .v small{display:block;font-family:var(--mono);font-weight:400;font-size:9.5px;color:var(--faint);letter-spacing:.16em;margin-top:6px}
+.rel h3{font-family:var(--disp);font-weight:600;font-size:18px;margin-bottom:8px}
+.rel p{color:var(--dim);font-size:14px}
+.rel .gate{font-family:var(--mono);font-size:11px;color:var(--teal);margin-top:12px}
+.rel.final .bez{border-color:rgba(245,197,24,.25)}
+.rel.final .v{color:var(--gold)}
+@media(max-width:680px){.rel .core{grid-template-columns:1fr}}
+
+/* final CTA */
+#join{text-align:center}
+#join h2{margin:0 auto;max-width:900px}
+#join .lede{margin-left:auto;margin-right:auto}
+#join .hero-cta{opacity:1;transform:none;margin-top:44px}
+
+/* footer */
+footer{position:relative;padding:120px 0 60px;overflow:hidden;border-top:1px solid var(--line);background:linear-gradient(to bottom,transparent,rgba(5,5,5,.85) 30%)}
+footer .big{font-family:var(--disp);font-weight:700;font-size:clamp(80px,16.5vw,250px);line-height:.85;letter-spacing:0;color:transparent;-webkit-text-stroke:1px rgba(255,255,255,.09);user-select:none;white-space:nowrap;text-align:center;will-change:transform}
+footer .row{display:flex;justify-content:space-between;flex-wrap:wrap;gap:22px;margin-top:60px;color:var(--dim);font-size:14px}
+footer .mono{font-size:11.5px;color:var(--faint);letter-spacing:.06em}
+footer .ball{color:var(--orange)}
+
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.001s!important;transition-duration:.001s!important}
+  .rv{opacity:1;transform:none;filter:none}
+  h2 .w i{transform:none!important}
+  body{cursor:auto}#cur,#curDot{display:none}
+}
+</style>
+</head>
+<body>
+
+<canvas id="court" aria-hidden="true"></canvas>
+<div id="clock"></div>
+<div id="pre"><div class="word"><span>HARDWOOD</span></div><div class="ct" id="ct">00</div></div>
+<div id="cur"></div><div id="curDot"></div>
+<div class="grain"></div><div class="vig"></div>
+
+<nav id="nav">
+  <a class="logo" href="#hero" data-h>HARD<b>WOOD</b></a>
+  <a class="lnk" href="#q1" data-h>Q1 · THE PROBLEM</a>
+  <a class="lnk" href="#q2" data-h>Q2 · TRAINING</a>
+  <a class="lnk" href="#q3" data-h>Q3 · THE REF</a>
+  <a class="lnk" href="#q4" data-h>Q4 · RECEIPTS</a>
+  <a class="lnk" href="#season" data-h>SEASON</a>
+  <a class="cta" href="https://github.com/letta-ai/mods/tree/main/packages/muscle-memory" data-h data-mag>INSTALL <span class="ic">↗</span></a>
+</nav>
+
+<header id="hero" data-tint="#ffb27a" data-fade="1">
+  <div class="haze"></div>
+  <div class="wrap inner">
+    <div class="eyebrow rv"><span class="dot"></span> AN AGENT SKILLS PROGRAM — 🏆 LETTA MOD CHALLENGE WINNER</div>
+    <div class="wordmark" id="wm">
+      <span class="ch"><i>H</i></span><span class="ch"><i>A</i></span><span class="ch"><i>R</i></span><span class="ch"><i>D</i></span><span class="ch"><i>W</i></span><span class="ball-o b1"></span><span class="ball-o b2"></span><span class="ch"><i>D</i></span>
+    </div>
+    <div class="tagline" id="tg">Train hard. <span class="k">Keep score.</span></div>
+    <p class="hero-sub" id="hsub"><b class="mm">muscle-memory</b> turns your agent's real work into skills. <b class="spm">Skill Plus-Minus</b> is the referee that proves what they're worth. <b class="w">The learning is autonomous. The stats are real.</b></p>
+    <div class="hero-cta" id="hcta">
+      <a class="pill solid" href="https://www.npmjs.com/package/@letta-ai/muscle-memory" data-h data-mag>letta install npm:@letta-ai/muscle-memory <span class="ic">↗</span></a>
+      <a class="pill ghost" href="#q3" data-h data-mag>meet the referee <span class="ic">↓</span></a>
+    </div>
+  </div>
+  <div class="scrolldn">TIP-OFF<span class="bar"></span></div>
+</header>
+
+<main>
+
+<div class="tick"><div class="in">
+  <span>BALL DON'T LIE <b>·</b> RECEIPTS OVER VIBES <b>·</b> SKILLS EARNED, NOT GRANTED <b>·</b> EVERY NUMBER HAS A COMMIT HASH <b>·</b> THE REF NEVER PLAYS FOR THE TEAM <b>·</b> RESTRAINT IS THE FLEX <b>·</b></span>
+  <span>BALL DON'T LIE <b>·</b> RECEIPTS OVER VIBES <b>·</b> SKILLS EARNED, NOT GRANTED <b>·</b> EVERY NUMBER HAS A COMMIT HASH <b>·</b> THE REF NEVER PLAYS FOR THE TEAM <b>·</b> RESTRAINT IS THE FLEX <b>·</b></span>
+</div></div>
+
+<section id="q1" data-tint="#ff5252" data-fade="0.5">
+  <div class="wrap">
+    <div class="q rv"><div class="chip"><span class="qn">Q1</span><span class="clk" data-clk="12:00">12:00</span></div><div class="ttl">THE PROBLEM</div></div>
+    <h2 class="rv d1" data-split>Your agent solved this yesterday.<br><span class="mut">It will solve it again tomorrow. From scratch.</span></h2>
+    <div class="story">
+      <div class="big rv d2">Every session, the world's smartest models re-learn your codebase's landmines, re-discover your conventions, re-make the same fix — <em>and remember none of it.</em> <span class="fade">The industry's answer is bigger models. But the next model still won't know the things only your work can teach.</span></div>
+      <div class="sidenote rv d3">
+        <div><b>The gap is structural.</b> Models know everything public and nothing local. Your conventions, your pitfalls, your hard-won fixes — that knowledge lives nowhere.</div>
+        <div><b>And the tools that try</b> to capture it have a garbage problem: skill libraries that grow like weeds, with no way to know what's actually worth keeping.</div>
+        <div style="color:var(--orange);font-family:var(--mono);font-size:12.5px;letter-spacing:.06em">HARDWOOD exists to fix both. →</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="q2" style="padding-top:40px" data-tint="#ff6a2b" data-fade="0.5">
+  <div class="wrap">
+    <div class="q rv"><div class="chip"><span class="qn">Q2</span><span class="clk" data-clk="09:14">09:14</span></div><div class="ttl">THE TRAINING SYSTEM</div></div>
+    <h2 class="rv d1" data-split>Every session becomes practice film.</h2>
+    <p class="lede rv d2">No prompting rituals. The lifecycle runs at natural boundaries, off the hot path, <b>staged-first</b> — you review what it learns before it counts.</p>
+    <div class="loop rv d3">
+      <div class="step">watch <em>real tool-use</em></div><div class="ar">→</div>
+      <div class="step">distill <em>recurring fixes</em></div><div class="ar">→</div>
+      <div class="step">route <em>into existing skills</em></div><div class="ar">→</div>
+      <div class="step">gate <em>quality + security</em></div><div class="ar">→</div>
+      <div class="step">stage <em>for your review</em></div><div class="ar">→</div>
+      <div class="step">verify <em>with a referee</em></div><div class="ar">→</div>
+      <div class="step">prune <em>what doesn't earn</em></div>
+    </div>
+    <div class="duo">
+      <div class="bez mm rv d2" data-tilt><div class="core">
+        <div class="role">THE TRAINING SYSTEM</div>
+        <div class="nm">muscle-memory</div>
+        <div class="tg">Every session is practice film.</div>
+        <p>Watches real tool-use, distills recurring lessons into skills, folds improvements into what already exists, prunes what doesn't earn its minutes. Opt-in. Reversible. Yours to review.</p>
+      </div></div>
+      <div class="bez spm rv d3" data-tilt><div class="core">
+        <div class="role">THE OFFICIATING CREW</div>
+        <div class="nm">Skill Plus-Minus</div>
+        <div class="tg">Every skill gets a box score.</div>
+        <p>Twin agents — identical except one carries the skill — run drills the bare model provably can't answer. Placebo arm, pre-registered rules, verdicts computed by the instrument. The ref never plays for the team.</p>
+      </div></div>
+    </div>
+    <div class="bento">
+      <div class="bez rv d1"><div class="core"><div class="stat-n t" data-count>44% → 94%</div><div class="stat-l">update-first routing — lessons improve existing skills instead of spawning duplicates</div><div class="stat-f">live Letta Cloud bench · CI-gated</div></div></div>
+      <div class="bez rv d2"><div class="core"><div class="stat-n o" data-count>24 / 24</div><div class="stat-l">reranker decision quality — dev set <b>and</b> a sealed blind holdout with an adversarial trap</div><div class="stat-f">pre-registered · judge-stable ×2</div></div></div>
+      <div class="bez rv d3"><div class="core"><div class="stat-n g">0</div><div class="stat-l">skills created from harness noise since the synthetic-tape gate</div><div class="stat-f">the learner can't mine its own tests</div></div></div>
+    </div>
+  </div>
+</section>
+
+<div class="tick"><div class="in">
+  <span>TRAIN HARD <b>·</b> KEEP SCORE <b>·</b> TRAIN HARD <b>·</b> KEEP SCORE <b>·</b> TRAIN HARD <b>·</b> KEEP SCORE <b>·</b> TRAIN HARD <b>·</b> KEEP SCORE <b>·</b></span>
+  <span>TRAIN HARD <b>·</b> KEEP SCORE <b>·</b> TRAIN HARD <b>·</b> KEEP SCORE <b>·</b> TRAIN HARD <b>·</b> KEEP SCORE <b>·</b> TRAIN HARD <b>·</b> KEEP SCORE <b>·</b></span>
+</div></div>
+
+<section id="q3" data-tint="#4fe3c1" data-fade="0.5">
+  <div class="wrap">
+    <div class="q rv"><div class="chip"><span class="qn">Q3</span><span class="clk" data-clk="06:40">06:40</span></div><div class="ttl">THE OFFICIATING CREW</div></div>
+    <h2 class="rv d1" data-split>Don't take the skill's word for it.<br><span class="mut">Flip the switch.</span></h2>
+    <p class="lede rv d2">This is a real experiment we ran — same model, same questions, the only difference is one page of learned knowledge. Try it.</p>
+
+    <div class="demo rv d3"><div class="bez"><div class="core">
+      <div class="demo-head">
+        <div class="demo-title">LIVE RECONSTRUCTION · glm-5.2 · leak-gated drills · placebo-controlled</div>
+        <div class="switch"><span class="lab" id="labOff">SKILL OFF</span><div class="sw" id="sw" data-h tabindex="0" role="switch" aria-checked="false" aria-label="Toggle skill"><div class="knob"></div></div><span class="lab" id="labOn">SKILL ON</span></div>
+      </div>
+      <div class="demo-grid">
+        <div class="qa" id="qa">
+          <div class="row"><div class="prompt">Total order value? (amounts are in eighths of a cent)</div><div class="ans bad" data-off="$2,379.59 ✗" data-on="$297.45 ✓">$2,379.59 ✗</div></div>
+          <div class="row"><div class="prompt">Count of ACTIVE users? (archived:true means active — migration)</div><div class="ans bad" data-off="6 ✗" data-on="5 ✓">6 ✗</div></div>
+          <div class="row"><div class="prompt">Valid records? (digit-sum × 3 mod 11 == 4)</div><div class="ans bad" data-off="12 ✗" data-on="2 ✓">12 ✗</div></div>
+          <div class="row"><div class="prompt">Total levy? (7.32%, category "K" only)</div><div class="ans bad" data-off="$449.59 ✗" data-on="$248.51 ✓">$449.59 ✗</div></div>
+        </div>
+        <div class="scoreboard">
+          <div class="lbl">ACCURACY</div>
+          <div class="val lo" id="sbv">16%</div>
+          <div class="sub" id="sbs">bare model · guessing</div>
+        </div>
+      </div>
+      <div class="demo-note">placebo control: an irrelevant page of the same size scored <b>13% ≈ bare</b> — it's the knowledge, not the padding. Δ +0.64 [95% CI +0.44, +0.84] · 16W/0L · every row from the committed run.</div>
+    </div></div></div>
+
+    <div class="scorehead rv"><span>OFFICIAL BOX SCORE — REAL RUNS, LIVE RECEIPTS</span><span class="liv">LIVE</span></div>
+    <div class="rv d1">
+      <table class="bx">
+        <tr><th>skill</th><th>verdict</th><th>bench Δ (95% CI)</th><th>W/T/L</th><th>control</th><th>flags</th></tr>
+        <tr><td>v4-pipeline-conventions</td><td class="v-eff">+0.64 — skill effect</td><td>+0.64 [+0.44, +0.84]</td><td>16/9/0</td><td class="v-eff">placebo ≈ off ✓</td><td class="fine">n=25 · sealing n≥30</td></tr>
+        <tr><td>orders-pipeline-conventions</td><td class="v-dir">directional(+)</td><td>+0.14 [−0.14, +0.39]</td><td>10/12/6</td><td>—</td><td class="flag">interference ×2</td></tr>
+        <tr><td>recovering-from-failing-scripts</td><td class="v-dir">neutral-leaning</td><td>+0.03 [−0.20, +0.23]</td><td>6/19/5</td><td>—</td><td class="flag">ceiling effect</td></tr>
+      </table>
+      <div class="fine">bench = causal (paired twins) · field = associated only · verdicts self-label insufficiency</div>
+    </div>
+
+    <div class="arcwrap rv d2" id="arcw">
+      <svg class="arcsvg" viewBox="0 0 1120 130" preserveAspectRatio="none">
+        <defs><linearGradient id="arcgrad" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stop-color="#ff5252"/><stop offset=".38" stop-color="#98939c"/><stop offset=".66" stop-color="#f5c518"/><stop offset="1" stop-color="#51e08a"/>
+        </linearGradient></defs>
+        <path d="M70,108 C 220,-16 340,138 490,66 C 610,14 700,118 840,76 C 940,46 1010,34 1064,20"/>
+      </svg>
+      <div class="arcgrid">
+        <div class="arct k1"><div class="tag">contaminated corpus</div><div class="d">+0.50</div><div class="w">an artifact — our red team caught it; results discarded, methods hardened</div></div>
+        <div class="arct k2"><div class="tag">generic skill</div><div class="d">+0.03</div><div class="w">ceiling effect: the model already knew — an honest null, published anyway</div></div>
+        <div class="arct k3"><div class="tag">leaky drills</div><div class="d">+0.14</div><div class="w">real signal, diluted — the leak gate was born from this run</div></div>
+        <div class="arct k4"><div class="tag">leak-gated + placebo</div><div class="d">+0.64</div><div class="w">the true prior-gap effect — sixteen wins, zero losses</div></div>
+      </div>
+    </div>
+
+    <p class="signed rv d2">The finding that matters: <span class="p">skill value is signed.</span> Knowledge the model lacks is worth +0.64. Knowledge it already has is worth <span class="z">nothing — sometimes less.</span> No system that measures by vibes can see the difference. Ours prints it.</p>
+  </div>
+</section>
+
+<section id="q4" data-tint="#ff5252" data-fade="0.45">
+  <div class="wrap">
+    <div class="q rv"><div class="chip"><span class="qn">Q4</span><span class="clk" data-clk="02:11">02:11</span></div><div class="ttl">THE RECEIPTS</div></div>
+    <h2 class="rv d1" data-split>Our benchmark blocked itself.<br>Three times.</h2>
+    <p class="lede rv d2">Anyone can show you their wins. We keep the fouls on the tape — because an instrument you can't watch fail is an instrument you can't trust.</p>
+    <div class="blocks">
+      <div class="blk rv d1"><span class="stamp">BLOCKED · EXIT 18</span><div><div class="t">Judge transport dead — 42/42 calls failed</div><div class="d">Rather than score an eval with no judge, the run self-labeled BLOCKED and committed the failure. The receipt ships in the repo.</div></div></div>
+      <div class="blk rv d2"><span class="stamp">CULLED</span><div><div class="t">Leak gate — 5 of 6 "impossible" drills were guessable</div><div class="d">The OFF-arm pilot proved our own drill design leaked. The gate now runs before every registration — the corpus can't lie to us anymore.</div></div></div>
+      <div class="blk rv d3"><span class="stamp">CAPPED</span><div><div class="t">"Directional" at p = 0.0002</div><div class="d">Our best-ever result stayed capped because it was five pairs short of the pre-registered n. The rules don't bend for good news either.</div></div></div>
+    </div>
+    <blockquote class="rv d2">
+      <p>"I was impressed with Muscle Memory <em>primarily because of its simplicity</em>… Agents that passively learn how to do something through practice is exactly the kind of thing we want agents to improve at."</p>
+      <cite>— CAMERON · LETTA / MEMGPT TEAM · MOD CHALLENGE RESULTS</cite>
+    </blockquote>
+  </div>
+</section>
+
+<section id="season" style="padding-top:60px" data-tint="#f5c518" data-fade="0.5">
+  <div class="wrap">
+    <div class="q rv"><div class="chip"><span class="qn">OT</span><span class="clk" data-clk="05:00">05:00</span></div><div class="ttl">THE SEASON · RELEASE ROADMAP</div></div>
+    <h2 class="rv d1" data-split>One tight release at a time.</h2>
+    <p class="lede rv d2">Every release ships with its receipts or it doesn't ship. Claim language is pre-committed per release.</p>
+    <div class="season">
+      <div class="rel done rv"><div class="bez"><div class="core"><div class="v">v0.6<small>SHIPPED</small></div><div><h3>The Challenge Build</h3><p>The core loop: distill · dedup · quality-gate · sanitize · prune. First place, Letta Mod Challenge; running on Letta's internal agents.</p><div class="gate">receipts: official repo + npm org + announcement</div></div></div></div></div>
+      <div class="rel rv d1"><div class="bez"><div class="core"><div class="v">v0.7<small>IN REVIEW</small></div><div><h3>The Routing Release</h3><p>Semantic update-first routing with canary calibration (44%→94%), passage-sync hygiene, the synthetic-tape gate.</p><div class="gate">gate: maintainer review (PR #45) · eval CI-gated 16/16</div></div></div></div></div>
+      <div class="rel rv d2"><div class="bez"><div class="core"><div class="v">v0.8<small>BUILT · STAGED</small></div><div><h3>The Referee Release</h3><p>LLM reranker (24/24 sealed holdout) · the Film Room — bounded PATCH_NOTE maintenance of existing skills · live plus-minus on Letta's native rating rail · referee-coupled auto-revert.</p><div class="gate">gate: v0.7 merged · install smoke + live rating receipts</div></div></div></div></div>
+      <div class="rel rv d3"><div class="bez"><div class="core"><div class="v">v0.9<small>DESIGNED</small></div><div><h3>The Transfer Release</h3><p>Skills travel with their box scores: provenance scorecards, sanitization reports, quarantined import, reverify-before-trust. Squad shelves across your agents.</p><div class="gate">gate: zero-trust import proven · privacy scans on every file</div></div></div></div></div>
+      <div class="rel final rv d4"><div class="bez"><div class="core"><div class="v">v1.0<small>THE PROOF</small></div><div><h3>The Compounding Proof</h3><p>Multi-model, multi-machine, placebo-armed benchmark at n≥30 per skill — the published chart that answers "does agent skill-learning actually work, and where?"</p><div class="gate">gate: pre-registered · external replication · crew + maintainer review</div></div></div></div></div>
+    </div>
+  </div>
+</section>
+
+<section id="join" data-tint="#ffffff" data-fade="0.85">
+  <div class="wrap">
+    <div class="q rv" style="justify-content:center"><div class="chip"><span class="qn">FINAL</span><span class="clk">00:00</span></div><div class="ttl">JOIN THE PROGRAM</div></div>
+    <h2 class="rv d1" data-split>Your agent is already practicing.<br><span class="mut">Start keeping the film.</span></h2>
+    <div class="hero-cta rv d2">
+      <a class="pill solid" href="https://www.npmjs.com/package/@letta-ai/muscle-memory" data-h data-mag>letta install npm:@letta-ai/muscle-memory <span class="ic">↗</span></a>
+      <a class="pill ghost" href="https://github.com/adrianchan94/muscle-memory" data-h data-mag>read the receipts <span class="ic">↗</span></a>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer data-tint="#ff6a2b" data-fade="0.7">
+  <div class="wrap">
+    <div class="big rv" id="fbig">HARDWOOD</div>
+    <div class="row">
+      <div>Built by <b style="color:var(--ink)">Adrian Chan</b> with his agent crew — Kev, Mack &amp; ULTRON. <span class="ball">🏀</span></div>
+      <div style="display:flex;gap:26px">
+        <a href="https://github.com/letta-ai/mods/tree/main/packages/muscle-memory" data-h style="color:var(--dim)">letta-ai/mods ↗</a>
+        <a href="https://www.npmjs.com/package/@letta-ai/muscle-memory" data-h style="color:var(--dim)">npm ↗</a>
+        <a href="https://github.com/adrianchan94/muscle-memory" data-h style="color:var(--dim)">receipts ↗</a>
+      </div>
+    </div>
+    <div class="mono" style="margin-top:26px;text-align:center">skills earned, not granted · every number on this page has a commit hash · ball don't lie</div>
+  </div>
+</footer>
+
+<script>
+document.documentElement.classList.add('js');
+/* SAFETY NET: whatever happens (slow IO, headless capture, hung fonts), nothing stays invisible */
+setTimeout(()=>{document.querySelectorAll('.rv,.blk,.arcwrap').forEach(el=>el.classList.add('in'));
+  document.querySelectorAll('h2[data-split]').forEach(el=>el.classList.add('split-in'));
+  ['wm','tg','hsub','hcta'].forEach(id=>{const el=document.getElementById(id);if(el)el.classList.add('in')});
+  const ey=document.querySelector('.eyebrow');if(ey)ey.classList.add('in');
+  const pre=document.getElementById('pre');if(pre)pre.classList.add('done');
+},2600);
+
+/* ══════════════════════════════════════════════════════════════
+   THE ARENA — one continuous WebGL scene behind the whole page.
+   Scroll is a camera dolly down an endless court. A ball dribbles
+   ahead of you. The lights come up when the preloader clears.
+   ══════════════════════════════════════════════════════════════ */
+const ARENA=(function(){
+  const cv=document.getElementById('court');
+  const gl=cv.getContext('webgl',{antialias:true,alpha:false,powerPreference:'high-performance'});
+  if(!gl){cv.style.background='radial-gradient(800px 400px at 60% 20%, #14100d, #050505)';return null}
+  const VS=`attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}`;
+  const FS=`
+precision highp float;
+uniform vec2 R;      // resolution
+uniform float T;     // time
+uniform vec2 M;      // mouse -0.5..0.5
+uniform float CZ;    // camera z along the court
+uniform vec3 TINT;   // section grade color
+uniform float FADE;  // section brightness
+uniform float ON;    // arena lights 0..1 (flicker-on)
+uniform vec3 B;      // ball position
+uniform float BR;    // ball roll angle
+
+float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+float noise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);
+  return mix(mix(hash(i),hash(i+vec2(1,0)),f.x),mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),f.x),f.y);}
+float line(float d,float w){return smoothstep(w,0.,abs(d));}
+mat2 rot(float a){float c=cos(a),s=sin(a);return mat2(c,-s,s,c);}
+
+/* court markings for local z in [0,30] */
+float markings(float x,float zz){
+  float L=0.;
+  L+=line(abs(x)-7.5,.06);
+  L+=line(zz,.06)+line(zz-30.,.06);
+  L+=line(zz-15.,.05);
+  L+=line(length(vec2(x,zz-15.))-2.2,.05);
+  L+=line(length(vec2(x,zz-1.4))-6.6,.05)*step(1.4,zz);
+  L+=line(length(vec2(x,zz-28.6))-6.6,.05)*step(zz,28.6);
+  L+=line(max(abs(x)-2.45,abs(zz-2.9)-2.9),.05);
+  L+=line(max(abs(x)-2.45,abs(zz-27.1)-2.9),.05);
+  L+=line(length(vec2(x,zz-5.8))-1.8,.05);
+  L+=line(length(vec2(x,zz-24.2))-1.8,.05);
+  return clamp(L,0.,1.);
+}
+
+/* arena environment for upward rays: stands full of tiny lights */
+vec3 arena(vec3 rd){
+  vec3 col=vec3(0.);
+  if(rd.y>.01){
+    float a=atan(rd.x,rd.z);
+    vec2 g=vec2(a*10.,rd.y*22.);
+    vec2 id=floor(g);
+    float h=hash(id);
+    float star=smoothstep(.94,1.,h)*smoothstep(.5,.0,length(fract(g)-.5));
+    float flick=.6+.4*sin(T*(1.+h*3.)+h*40.);
+    col+=vec3(1.,.85,.6)*star*flick*.7*smoothstep(.5,.12,rd.y);
+    // upper darkness gradient
+    col+=vec3(.012,.012,.017)*smoothstep(.0,.35,rd.y);
+  }
+  return col;
+}
+
+/* distance from ray (ro,rd) to a vertical light axis at (ax, az) */
+float beam(vec3 ro,vec3 rd,vec2 az){
+  vec3 A=vec3(az.x,0.,az.y);
+  vec3 u=vec3(0.,1.,0.);
+  vec3 cr=cross(u,rd);
+  float l=length(cr);
+  if(l<1e-4)return 99.;
+  return abs(dot(ro-A,cr/l));
+}
+
+void main(){
+  vec2 uv=(gl_FragCoord.xy-.5*R)/R.y;
+  uv*=rot(sin(T*.13)*.008);
+  vec3 ro=vec3(M.x*1.5, 1.55+M.y*.45+sin(T*.5)*.028, CZ);
+  vec3 rd=normalize(vec3(uv.x, uv.y-.235, 1.));
+
+  vec3 col=vec3(.010,.010,.014);
+  float lights=ON;
+
+  /* ---- three spotlights tracking ahead of the camera ---- */
+  vec2 L1=vec2( 2.6, CZ+7.);
+  vec2 L2=vec2(-3.2, CZ+15.);
+  vec2 L3=vec2( 0.4, CZ+24.);
+
+  /* ---- ball: exact ray-sphere ---- */
+  float rB=.34;
+  vec3 oc=ro-B;
+  float b=dot(oc,rd);
+  float cc=dot(oc,oc)-rB*rB;
+  float hh=b*b-cc;
+  float tBall=(hh>0.)?(-b-sqrt(hh)):-1.;
+
+  /* ---- floor ---- */
+  float tFloor=(rd.y<-0.015)?(-(ro.y)/rd.y):-1.;
+
+  if(tBall>0.&&(tFloor<0.||tBall<tFloor)){
+    /* ── the ball ── */
+    vec3 pos=ro+rd*tBall;
+    vec3 n=normalize(pos-B);
+    vec3 nl=n; nl.xz*=rot(BR*.7); nl.xy*=rot(BR);
+    float seam=min(abs(nl.y),abs(nl.x));
+    seam=min(seam,abs(dot(nl,normalize(vec3(.5,0.,.87)))));
+    seam=min(seam,abs(dot(nl,normalize(vec3(-.5,0.,.87)))));
+    vec3 base=mix(vec3(.86,.32,.10),vec3(.98,.5,.2),.5+.5*n.y);
+    base=mix(vec3(.06,.02,.008),base,smoothstep(.015,.05,seam));
+    vec3 keyL=normalize(vec3(L1.x,7.5,L1.y)-pos);
+    float dif=max(dot(n,keyL),0.);
+    float rim=pow(clamp(1.+dot(n,rd),0.,1.),2.5);
+    col=base*(.16+dif*1.15*lights)+vec3(1.,.6,.35)*rim*.55;
+    float spec=pow(max(dot(reflect(-keyL,n),-rd),0.),24.);
+    col+=vec3(1.,.9,.8)*spec*.5*lights;
+  }
+  else if(tFloor>0.){
+    /* ── the hardwood ── */
+    vec3 h=ro+rd*tFloor;
+    float x=h.x,z=h.z;
+    float fog=exp(-tFloor*.05);
+    float zz=mod(z,30.);
+
+    /* parquet: alternating plank direction + per-plank tone */
+    vec2 pk=vec2(floor(x*1.6),floor(z*.5));
+    float tone=hash(pk)*.35;
+    float grain=noise(vec2(x*22.,z*2.2))*.3+noise(vec2(x*3.,z*40.))*.2;
+    vec3 wood=mix(vec3(.052,.034,.024),vec3(.085,.055,.038),tone+grain*.5);
+
+    /* markings, tinted per quarter */
+    float L=markings(x,zz);
+    float pulse=exp(-abs(mod(T*5.,60.)-mod(z,60.))*.16);
+    vec3 lineCol=mix(vec3(1.,.42,.17),TINT,.6);
+    col=wood*(.35+.75*lights);
+    col+=L*lineCol*(.4+.9*pulse)*(.25+.85*lights);
+
+    /* spotlight pools on the floor */
+    float pool=0.;
+    pool+=exp(-dot(h.xz-L1,h.xz-L1)*.10);
+    pool+=exp(-dot(h.xz-L2,h.xz-L2)*.09);
+    pool+=exp(-dot(h.xz-L3,h.xz-L3)*.08);
+    col+=vec3(1.,.72,.45)*pool*.13*lights;
+    col*=1.+pool*1.15*lights;
+
+    /* varnish: fresnel reflection of the arena */
+    vec3 refl=reflect(rd,vec3(0.,1.,0.));
+    float fres=pow(clamp(1.+rd.y,0.,1.),3.);
+    col+=arena(refl)*fres*1.4*lights;
+
+    /* ball: soft contact shadow + bounce glow */
+    float dxz=length(h.xz-B.xz);
+    float sh=exp(-dxz*dxz/(0.12+B.y*.5))*(1.-clamp(B.y*.5,0.,.8));
+    col*=1.-sh*.75;
+    float impact=exp(-dxz*dxz*2.2)*exp(-(B.y-.34)*9.);
+    col+=vec3(1.,.5,.22)*max(impact,0.)*.5*lights;
+
+    col*=fog;
+    col+=vec3(.05,.032,.02)*exp(-length(vec2(x*.5,z-CZ-12.))*.12)*fog*lights;
+  }
+  else{
+    /* ── the stands ── */
+    col+=arena(rd)*lights;
+    float g=exp(-length(uv-vec2(.25,.28))*2.2);
+    col+=vec3(.05,.025,.012)*g*lights;
+    float g2=exp(-length(uv+vec2(.45,-.05))*2.6);
+    col+=vec3(.008,.03,.026)*g2*lights;
+  }
+
+  /* volumetric beams */
+  float bm=0.;
+  bm+=exp(-pow(beam(ro,rd,L1),2.)*2.4);
+  bm+=exp(-pow(beam(ro,rd,L2),2.)*2.2)*.8;
+  bm+=exp(-pow(beam(ro,rd,L3),2.)*2.0)*.6;
+  float dust=noise(uv*7.+T*.15)*.4+.6;
+  col+=vec3(1.,.68,.4)*bm*.05*dust*lights;
+  col+=mix(vec3(1.),TINT,.7)*bm*.028*lights;
+
+  /* halo around the ball (presence) */
+  float dBall=length(cross(rd,normalize(B-ro)))*length(B-ro);
+  col+=vec3(1.,.45,.18)*exp(-dBall*dBall*2.4)*.06*lights;
+
+  /* grade */
+  col*=FADE;
+  col=col/(col+1.);
+  col=pow(col,vec3(.92));
+  col*=mix(vec3(1.),TINT/max(max(TINT.r,TINT.g),TINT.b),.14);
+  col*=1.-.4*length(uv*vec2(.75,1.05));
+  float n2=fract(sin(dot(gl_FragCoord.xy,vec2(12.9898,78.233))+T)*43758.5453);
+  col+=(n2-.5)*.012;
+  gl_FragColor=vec4(col,1.);
+}`;
+  function sh(t,s){const o=gl.createShader(t);gl.shaderSource(o,s);gl.compileShader(o);
+    if(!gl.getShaderParameter(o,gl.COMPILE_STATUS))console.error(gl.getShaderInfoLog(o));return o}
+  const pr=gl.createProgram();gl.attachShader(pr,sh(gl.VERTEX_SHADER,VS));gl.attachShader(pr,sh(gl.FRAGMENT_SHADER,FS));gl.linkProgram(pr);gl.useProgram(pr);
+  const bf=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,bf);
+  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),gl.STATIC_DRAW);
+  const lp=gl.getAttribLocation(pr,'p');gl.enableVertexAttribArray(lp);gl.vertexAttribPointer(lp,2,gl.FLOAT,false,0,0);
+  const U={};['R','T','M','CZ','TINT','FADE','ON','B','BR'].forEach(k=>U[k]=gl.getUniformLocation(pr,k));
+
+  let mx=0,my=0,tx=0,ty=0;
+  addEventListener('pointermove',e=>{tx=(e.clientX/innerWidth-.5);ty=(e.clientY/innerHeight-.5)},{passive:true});
+  function rs(){const d=Math.min(devicePixelRatio,1.5);cv.width=innerWidth*d;cv.height=innerHeight*d;gl.viewport(0,0,cv.width,cv.height)}
+  rs();addEventListener('resize',rs);
+
+  const rm=matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const state={scroll:0,scrollS:0,tint:[1,.7,.48],tintT:[1,.7,.48],fade:1,fadeT:1,on:0,lightsAt:-1,run:true};
+  document.addEventListener('visibilitychange',()=>{state.run=!document.hidden;if(state.run)requestAnimationFrame(loop)});
+
+  const st=performance.now();
+  function loop(now){
+    if(!state.run)return;
+    const t=rm?0:(now-st)/1000;
+    mx+=(tx-mx)*.04;my+=(ty-my)*.04;
+    state.scrollS+=(state.scroll-state.scrollS)*.06;
+    for(let i=0;i<3;i++)state.tint[i]+=(state.tintT[i]-state.tint[i])*.05;
+    state.fade+=(state.fadeT-state.fade)*.05;
+
+    /* lights flicker-on after preloader */
+    let on=0;
+    if(state.lightsAt>0){
+      const e=(now-state.lightsAt)/1600;
+      on=Math.min(1,Math.max(0,e));
+      if(e<1)on*= (Math.sin(e*43)>-(e*2-0.2)?1:.25); /* stutter */
+    }
+    state.on+=(on-state.on)*.25;
+
+    const camZ=state.scrollS*54;
+    /* the ball: dribbling ahead of the camera, drifting across the floor */
+    const bx=Math.sin(t*.6)*2.2+Math.cos(t*.31)*.8;
+    const bz=camZ+7.5+Math.sin(t*.23)*2.0;
+    const by=.36+Math.abs(Math.sin(t*3.1))*(0.55+0.3*Math.sin(t*.47));
+
+    gl.uniform2f(U.R,cv.width,cv.height);
+    gl.uniform1f(U.T,t);
+    gl.uniform2f(U.M,mx,my);
+    gl.uniform1f(U.CZ,camZ);
+    gl.uniform3f(U.TINT,state.tint[0],state.tint[1],state.tint[2]);
+    gl.uniform1f(U.FADE,state.fade);
+    gl.uniform1f(U.ON,rm?1:state.on);
+    gl.uniform3f(U.B,bx,rm?.36:by,bz);
+    gl.uniform1f(U.BR,t*5.);
+    gl.drawArrays(gl.TRIANGLES,0,3);
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+  return state;
+})();
+
+/* section → tint/fade driver + scroll → camera */
+(function(){
+  if(!ARENA)return;
+  const zones=[...document.querySelectorAll('[data-tint]')];
+  const hex=s=>[1,3,5].map(i=>parseInt(s.slice(i,i+2),16)/255);
+  function apply(){
+    const mid=scrollY+innerHeight*.5;
+    let best=zones[0];
+    for(const z of zones){if(z.offsetTop<=mid)best=z}
+    ARENA.tintT=hex(best.dataset.tint);
+    ARENA.fadeT=parseFloat(best.dataset.fade||'1');
+    ARENA.scroll=scrollY/Math.max(1,document.documentElement.scrollHeight-innerHeight);
+  }
+  addEventListener('scroll',apply,{passive:true});
+  addEventListener('resize',apply);
+  apply();
+})();
+
+/* preloader → lights on → hero choreography */
+(function(){
+  const pre=document.getElementById('pre'),ct=document.getElementById('ct');
+  function go(){
+    pre.classList.add('done');
+    if(ARENA&&ARENA.lightsAt<0)ARENA.lightsAt=performance.now();
+    document.getElementById('wm').classList.add('in');
+    document.getElementById('tg').classList.add('in');
+    document.getElementById('hsub').classList.add('in');
+    document.getElementById('hcta').classList.add('in');
+    document.querySelector('.eyebrow').classList.add('in');
+  }
+  addEventListener('load',()=>setTimeout(go,900));
+  let n=0;const iv=setInterval(()=>{n=Math.min(100,n+Math.ceil(Math.random()*23));ct.textContent=String(n).padStart(2,'0');
+    if(n>=100){clearInterval(iv);setTimeout(go,200)}},65);
+})();
+
+/* wordmark letter stagger */
+document.querySelectorAll('#wm .ch i').forEach((el,i)=>{el.style.transitionDelay=(i*.05)+'s'});
+
+/* split headline reveals — word masks, preserves .mut spans and <br> */
+(function(){
+  if(matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+  document.querySelectorAll('h2[data-split]').forEach(h=>{
+    let k=0;
+    function split(node){
+      [...node.childNodes].forEach(ch=>{
+        if(ch.nodeType===3){
+          const frag=document.createDocumentFragment();
+          ch.textContent.split(/(\s+)/).forEach(tok=>{
+            if(!tok)return;
+            if(/^\s+$/.test(tok)){frag.appendChild(document.createTextNode(' '));return}
+            const w=document.createElement('span');w.className='w';
+            const i=document.createElement('i');i.textContent=tok;i.style.transitionDelay=(k++*.035)+'s';
+            w.appendChild(i);frag.appendChild(w);
+          });
+          node.replaceChild(frag,ch);
+        }else if(ch.nodeType===1&&ch.tagName!=='BR'){split(ch)}
+      });
+    }
+    split(h);
+  });
+  const io=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('split-in');io.unobserve(e.target)}}),{threshold:.4});
+  document.querySelectorAll('h2[data-split]').forEach(h=>io.observe(h));
+})();
+
+/* odometer stats — count numbers up when they enter view */
+(function(){
+  const els=document.querySelectorAll('[data-count]');
+  const io=new IntersectionObserver(es=>es.forEach(e=>{
+    if(!e.isIntersecting)return;io.unobserve(e.target);
+    const el=e.target,final=el.textContent;
+    const parts=final.split(/(\d+)/);
+    const t0=performance.now();
+    (function step(now){
+      const p=Math.min(1,(now-t0)/1100),ease=1-Math.pow(1-p,3);
+      el.textContent=parts.map(s=>/^\d+$/.test(s)?String(Math.round(parseInt(s,10)*ease)):s).join('');
+      if(p<1)requestAnimationFrame(step);else el.textContent=final;
+    })(t0);
+  }),{threshold:.6});
+  els.forEach(el=>io.observe(el));
+})();
+
+/* quarter clocks tick down while their section is on screen */
+(function(){
+  document.querySelectorAll('.clk[data-clk]').forEach(clk=>{
+    let[m,s]=clk.dataset.clk.split(':').map(Number);
+    let iv=null;
+    const io=new IntersectionObserver(es=>{
+      if(es[0].isIntersecting&&!iv){
+        iv=setInterval(()=>{s--;if(s<0){s=59;m=Math.max(0,m-1)}
+          if(m===0&&s===0)clearInterval(iv);
+          clk.textContent=String(m).padStart(2,'0')+':'+String(s).padStart(2,'0')},800);
+      }else if(!es[0].isIntersecting&&iv){clearInterval(iv);iv=null}
+    },{threshold:.2});
+    io.observe(clk.closest('section')||clk);
+  });
+})();
+
+/* cursor */
+(function(){
+  const c=document.getElementById('cur'),d=document.getElementById('curDot');
+  let x=innerWidth/2,y=innerHeight/2,cx=x,cy=y;
+  addEventListener('pointermove',e=>{x=e.clientX;y=e.clientY;d.style.transform=`translate(${x}px,${y}px) translate(-50%,-50%)`},{passive:true});
+  (function f(){cx+=(x-cx)*.16;cy+=(y-cy)*.16;c.style.transform=`translate(${cx}px,${cy}px) translate(-50%,-50%)`;requestAnimationFrame(f)})();
+  document.querySelectorAll('a,[data-h],button,.sw').forEach(el=>{
+    el.addEventListener('pointerenter',()=>document.body.classList.add('cur-hover'));
+    el.addEventListener('pointerleave',()=>document.body.classList.remove('cur-hover'));
+  });
+})();
+
+/* magnetic CTAs */
+(function(){
+  if(matchMedia('(pointer:coarse)').matches)return;
+  document.querySelectorAll('[data-mag]').forEach(el=>{
+    el.addEventListener('pointermove',e=>{
+      const r=el.getBoundingClientRect();
+      const dx=(e.clientX-r.left-r.width/2)/r.width,dy=(e.clientY-r.top-r.height/2)/r.height;
+      el.style.transform=`translate(${dx*10}px,${dy*8}px)`;
+    });
+    el.addEventListener('pointerleave',()=>{el.style.transform=''});
+  });
+})();
+
+/* reveals */
+(function(){
+  const io=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target)}}),{threshold:.16,rootMargin:'0px 0px -6% 0px'});
+  document.querySelectorAll('.rv,.blk,.arcwrap').forEach(el=>io.observe(el));
+})();
+
+/* nav hide + game clock + active link + footer skew */
+(function(){
+  let last=0,tick=false,vel=0;
+  const nav=document.getElementById('nav'),clock=document.getElementById('clock'),fbig=document.getElementById('fbig');
+  const lnks=[...nav.querySelectorAll('a.lnk')];
+  const secs=lnks.map(a=>document.querySelector(a.getAttribute('href')));
+  addEventListener('scroll',()=>{if(tick)return;tick=true;requestAnimationFrame(()=>{
+    const y=scrollY;
+    vel+=((y-last)-vel)*.2;
+    nav.classList.toggle('hid',y>140&&y>last);last=y;
+    const p=y/(document.documentElement.scrollHeight-innerHeight);
+    clock.style.width=(p*100)+'%';
+    /* active section */
+    const mid=y+innerHeight*.5;let act=-1;
+    secs.forEach((s,i)=>{if(s&&s.offsetTop<=mid)act=i});
+    lnks.forEach((a,i)=>a.classList.toggle('live',i===act));
+    /* footer skew rides scroll velocity */
+    if(fbig)fbig.style.transform=`skewX(${Math.max(-6,Math.min(6,-vel*.06))}deg) translateX(${Math.max(-30,Math.min(30,-vel*.3))}px)`;
+    tick=false})},{passive:true});
+})();
+
+/* card glow + tilt */
+document.querySelectorAll('[data-tilt] .core').forEach(core=>{
+  const bez=core.parentElement;
+  bez.addEventListener('pointermove',e=>{
+    const r=core.getBoundingClientRect();
+    core.style.setProperty('--mx',((e.clientX-r.left)/r.width*100)+'%');
+    core.style.setProperty('--my',((e.clientY-r.top)/r.height*100)+'%');
+    const rx=((e.clientY-r.top)/r.height-.5)*-3,ry=((e.clientX-r.left)/r.width-.5)*3;
+    core.style.transform=`perspective(900px) rotateX(${rx}deg) rotateY(${ry}deg)`;
+  });
+  bez.addEventListener('pointerleave',()=>{core.style.transform='perspective(900px) rotateX(0) rotateY(0)'});
+});
+
+/* ── THE SWITCH: skill on/off demo ── */
+(function(){
+  const sw=document.getElementById('sw'),v=document.getElementById('sbv'),s=document.getElementById('sbs');
+  const lOn=document.getElementById('labOn'),lOff=document.getElementById('labOff');
+  const rows=document.querySelectorAll('#qa .row');
+  const answers=document.querySelectorAll('#qa .ans');
+  let on=false;
+  function render(){
+    sw.classList.toggle('on',on);
+    sw.setAttribute('aria-checked',on);
+    lOn.classList.toggle('on',on);lOff.classList.toggle('on',!on);
+    answers.forEach((a,i)=>{setTimeout(()=>{
+      a.textContent=on?a.dataset.on:a.dataset.off;
+      a.classList.toggle('ok',on);a.classList.toggle('bad',!on);
+      if(on){rows[i].classList.remove('sweep');void rows[i].offsetWidth;rows[i].classList.add('sweep')}
+    },i*90)});
+    const from=on?16:80,to=on?80:16;const t0=performance.now();
+    (function cnt(now){const p=Math.min(1,(now-t0)/650);const e=1-Math.pow(1-p,3);
+      v.textContent=Math.round(from+(to-from)*e)+'%';
+      if(p<1)requestAnimationFrame(cnt);
+      else if(on){v.classList.remove('buzz');void v.offsetWidth;v.classList.add('buzz')}})(t0);
+    v.classList.toggle('hi',on);v.classList.toggle('lo',!on);
+    s.textContent=on?'with one page of learned knowledge':'bare model · guessing';
+  }
+  const flip=()=>{on=!on;render()};
+  sw.addEventListener('click',flip);
+  sw.addEventListener('keydown',e=>{if(e.key===' '||e.key==='Enter'){e.preventDefault();flip()}});
+  lOff.classList.add('on');
+  const io=new IntersectionObserver(es=>{if(es[0].isIntersecting){setTimeout(()=>{if(!on){on=true;render()}},900);io.disconnect()}},{threshold:.5});
+  io.observe(sw);
+})();
+</script>
+</body>
+</html>
