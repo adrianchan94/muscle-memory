@@ -41,8 +41,9 @@ import { auditSkills, buildDiffFragment, candidateDescription, candidateName, cr
 import { approveStagedPublish, catalogPrivacyScan, findSimilarSkills, liveSkillVisible, publishHardBlocks, publishMetadata, publishPlan, publishSkillToCatalog, publishTier, publishVisibilityReceipt, publishabilityScore, sanitizeForPublish, stageSanitizedPublish } from "./publish";
 import { Defense, ENGRAM, GuardMode, buildDefenses, buildNeocortexBlock, captureTagged, coachOnFailure, engramConsolidate, expectationFor, guardDecision, interleave, labileSkills, nativeEnabled, preActionDefense, predictionError, renderEngramDigest, replayQueue, reverseReplay, semanticSkillCandidates, skillRetrieved, syncNeocortexBlock, syncSkillPassages, tagExperience } from "./engram";
 import { CURATOR, aggregateTelemetry, buildRegistry, bumpUsage, churnSignal, coverageMap, curateManagedSkills, curatorPass, isPinned, lifecycleTransition, managedSkillUsage, restoreManagedSkill, retireManagedSkill, retiredSkillBlocker, runAutonomousPrune, setPinned, skillVerbs, specDrift } from "./lifecycle";
-import { AUTOPILOT_DEFAULT, AutopilotMode, REVIEW_PROMPT, SemanticFn, applySemanticEvidence, autopilotPlan, buildEvidenceManifest, executeAutopilotPlan, forkAuthor, graduateStagedSkill, isHighConfidenceCreate, loadHandledReflects, managedView, pickUpdateTarget, reflectSignature, retrievePreferences, reviewAndAuthor, runAutopilot, runReflectiveReview, searchSkills, streamChunkText } from "./autopilot";
+import { AUTOPILOT_DEFAULT, AutopilotMode, REVIEW_PROMPT, SemanticFn, applySemanticEvidence, autopilotPlan, buildEvidenceManifest, executeAutopilotPlan, forkAuthor, graduateStagedSkill, isHighConfidenceCreate, loadHandledReflects, managedView, pickUpdateTarget, reflectSignature, retrievePreferences, reviewAndAuthor, reviewForkAuthor, runAutopilot, runReflectiveReview, searchSkills, streamChunkText } from "./autopilot";
 import { renderMuscleMemoryPanel, summarizeReflectActions } from "./ui";
+import { runFilmRoom } from "./filmroom";
 import { collectWins, renderWins } from "./wins";
 
 
@@ -181,7 +182,20 @@ export default function activate(letta: any) {
         writeFileSync(join(RECEIPTS_DIR, `compact-${Date.now()}.json`), JSON.stringify({ phase: "start", conv: event?.conversationId ?? null, candidatesPreserved: candidates.length, ts: Date.now() }));
       } catch {}
     }));
-    disposers.push(letta.events.on("compact_end", (event: any) => {
+    disposers.push(letta.events.on("compact_end", (event: any, ctx: any) => {
+      // THE FILM ROOM (opt-in MM_FILMROOM=staged|auto): bounded incremental maintenance of
+      // EXISTING skills at the natural sleep boundary — summary-fed, step-budgeted, PATCH_NOTE
+      // only, staged-first, tenure-protected, referee-coupled. Best-effort; never blocks compaction.
+      try {
+        if ((process.env.MM_FILMROOM ?? "off") !== "off") {
+          const summary = String(ctx?.conversationSummary ?? event?.summary ?? "");
+          if (summary.trim()) {
+            void runFilmRoom({ summary, dirs: scanDirs(ctx ?? {}), authorFn: reviewForkAuthor(ctx), mode: process.env.MM_FILMROOM === "auto" ? "auto" : "staged" })
+              .then((r) => { if (r.ran && (r.patched.length || r.parked.length)) appendUiEvent({ phase: "filmroom_ran", summary: `film room: ${r.patched.length} patch(es), ${r.parked.length} parked`, route: "filmroom" }); })
+              .catch(() => { /* bounded, best-effort */ });
+          }
+        }
+      } catch { /* never blocks compaction */ }
       try { ensureDir(); mkdirSync(RECEIPTS_DIR, { recursive: true });
         writeFileSync(join(RECEIPTS_DIR, `compact-end-${Date.now()}.json`), JSON.stringify({ phase: "end", conv: event?.conversationId ?? null, trigger: event?.trigger ?? null, messagesBefore: event?.messagesBefore ?? null, messagesAfter: event?.messagesAfter ?? null, contextTokensBefore: event?.contextTokensBefore ?? null, contextTokensAfter: event?.contextTokensAfter ?? null, ts: Date.now() }));
       } catch {}
