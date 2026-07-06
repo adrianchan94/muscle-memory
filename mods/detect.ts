@@ -112,7 +112,7 @@ export function stepSig(row: Row): string {
 
 /** Mine recurring command/file templates. */
 export function detectTemplates(rows: Row[]): Candidate[] {
-  const byKey = new Map<string, { count: number; convs: Set<string>; fixes: number; lastFail: boolean }>();
+  const byKey = new Map<string, { count: number; convs: Set<string>; fixes: number; lastFail: boolean; oks: number }>();
   // track per-conversation fail->success recovery on the same template
   const failPending = new Map<string, boolean>(); // key=conv|tmpl
   for (const r of rows) {
@@ -160,13 +160,13 @@ export function detectSequences(rows: Row[], n = MM.NGRAM): Candidate[] {
 }
 
 
-export function finalize(kind: "template" | "sequence", byKey: Map<string, { count: number; convs: Set<string>; fixes: number }>): Candidate[] {
+export function finalize(kind: "template" | "sequence", byKey: Map<string, { count: number; convs: Set<string>; fixes: number; oks?: number }>): Candidate[] {
   const out: Candidate[] = [];
   for (const [key, e] of byKey) {
     const convs = e.convs.size;
     const m = maturityScore(e.count, convs, e.fixes);
     const mature = isMature(e.count, convs, m);
-    out.push({ kind, key, count: e.count, convs, fixes: e.fixes, maturity: +m.toFixed(2), mature });
+    out.push({ kind, key, count: e.count, convs, fixes: e.fixes, maturity: +m.toFixed(2), mature, oks: e.oks ?? 0 } as any);
   }
   return out.sort((a, b) => b.maturity - a.maturity);
 }
@@ -207,6 +207,12 @@ export function isDistinctiveStep(sig: string): boolean {
 
 export function isSkillWorthy(c: Candidate): boolean {
   if (!c.mature) return false;
+  // FRONTIER #2 — VERIFIED SELF-DISTILLATION (STaR-with-a-referee): recurrence FINDS a candidate,
+  // verification LICENSES it. A pattern that recurred but never once verified green (no ok run,
+  // no verified fix) is a habit, not a lesson — it may not become a skill. (Repairs carry their
+  // verification by construction: fail→fix→re-run-green.)
+  const oks = (c as any).oks ?? 0;
+  if (c.kind !== "repair" && c.fixes === 0 && oks === 0) return false;
   if (c.kind === "template") {
     if (PRIMITIVE.test(c.key)) return false;                // primitive file-op, not a skill
     if (TRIVIAL_CMD.has(templateVerb(c.key))) return false; // shell noise (ls/cat/echo/mkdir…) — never a skill

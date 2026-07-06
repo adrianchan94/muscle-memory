@@ -17,7 +17,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { RECEIPTS_DIR, STATE_DIR, appendJsonl, appendUiEvent, ensureDir, isManaged, readSkill, scanSkillContent, writeSkill } from "./core";
 import { compareSkillSections, routeSkill, searchSkills } from "./autopilot";
+import { recordAutonomy } from "./autonomy";
 import { isPinned, managedSkillUsage, tenureFor as vaultTenure } from "./lifecycle";
+import { loadPlusMinus } from "./referee";
 import type { PlusMinusLedger } from "./referee";
 
 export const FILMROOM_MAX_LINES = 8;
@@ -164,7 +166,12 @@ export async function runFilmRoom(opts: {
   let steps = 0;
   const budget = opts.stepBudget ?? FILMROOM_STEP_BUDGET;
   const shelf = opts.dirs.flatMap((d) => { try { return searchSkills([d], opts.summary, 6); } catch { return []; } });
-  const shelfList = [...new Set(shelf.map((s) => `${s.name}: ${s.description}`))].slice(0, 12).join("\n");
+  // FRONTIER #7 — VERBAL REWARD: the referee's record coaches the editor. A skill's recent
+  // plus-minus line steers patches at the OBSERVED failure mode instead of generic polish.
+  let ledger: PlusMinusLedger = {};
+  try { ledger = loadPlusMinus(); } catch { /* no records yet */ }
+  const recLine = (n: string) => { const r = ledger[n]; return r ? ` [record +${r.plus}/-${r.minus}${r.minus > r.plus ? " — LOSING: aim the patch at why" : ""}]` : ""; };
+  const shelfList = [...new Set(shelf.map((s) => `${s.name}: ${s.description}${recLine(s.name)}`))].slice(0, 12).join("\n");
   const system = `You are muscle-memory's FILM ROOM — a maintenance editor for EXISTING skills. From the session summary, extract at most ${FILMROOM_MAX_PATCHES} small durable lessons that IMPROVE an existing skill below. Reply STRICT JSON only: an array of {"skill": "<existing name>", "section": "Procedure"|"Pitfalls"|"Verification"|"Worked examples", "op": "append", "lines": "<=8 lines of markdown>", "evidence_ref": "<one-line receipt>"}. Rules: NEVER invent a new skill name; if no lesson clearly belongs to an existing skill, reply []. Small and specific beats broad.`;
   const user = `SESSION SUMMARY:\n${opts.summary.slice(0, 4000)}\n\nEXISTING SKILLS:\n${shelfList || "(none)"}`;
   steps++;
@@ -194,7 +201,9 @@ export async function runFilmRoom(opts: {
       appendJsonl(FILMROOM_PARKED, { ts: Date.now(), note, reason: "routing + judge did not confirm target — parked for reflect lane" });
       continue;
     }
-    patched.push(applyPatchNote(note, opts.dirs, { mode: opts.mode }));
+    const res = applyPatchNote(note, opts.dirs, { mode: opts.mode });
+    try { if (res.status === "shadowed" || res.status === "patched-live") recordAutonomy("film-room-patch", "proposed", { ref: `${note.skill}:${note.section}` }); } catch { /* ledger best-effort */ }
+    patched.push(res);
   }
   return { ran: true, patched, parked, reason: "boundary maintenance complete", stepsUsed: steps };
 }

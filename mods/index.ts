@@ -44,6 +44,7 @@ import { CURATOR, aggregateTelemetry, buildRegistry, bumpUsage, churnSignal, cov
 import { AUTOPILOT_DEFAULT, AutopilotMode, REVIEW_PROMPT, SemanticFn, applySemanticEvidence, autopilotPlan, buildEvidenceManifest, executeAutopilotPlan, forkAuthor, graduateStagedSkill, isHighConfidenceCreate, loadHandledReflects, managedView, pickUpdateTarget, reflectSignature, retrievePreferences, reviewAndAuthor, reviewForkAuthor, runAutopilot, runReflectiveReview, searchSkills, streamChunkText } from "./autopilot";
 import { renderMuscleMemoryPanel, summarizeReflectActions } from "./ui";
 import { runFilmRoom } from "./filmroom";
+import { renderAutonomy } from "./autonomy";
 import { collectWins, renderWins } from "./wins";
 
 
@@ -367,7 +368,7 @@ export default function activate(letta: any) {
           }).sort((a: any, b: any) => (b.net ?? -99) - (a.net ?? -99) || b.uses - a.uses);
           const icon = (t: string) => t === "pinned" ? "📌" : t === "tenured" ? "🏆" : "·";
           const body = rows.map((r: any) => `  ${icon(r.ten)} ${(r.net === null ? "  —" : (r.net >= 0 ? "+" + r.net : String(r.net))).padStart(3)}  ${r.name}  (${r.rec} · ${r.uses} min)`).join("\n");
-          return { type: "output", output: `🏀 HARDWOOD BOX SCORE — tenure · net ± · record · minutes\n\n${body || "(no managed skills yet)"}\n\n📌 pinned · 🏆 tenured (earned) · rate plays: /muscle-memory rate <skill> up|down` };
+          return { type: "output", output: `🏀 HARDWOOD BOX SCORE — tenure · net ± · record · minutes\n\n${body || "(no managed skills yet)"}\n\nTHE PROGRAM ITSELF (autonomy tenure — trust as a ledger):\n${renderAutonomy()}\n\n📌 pinned · 🏆 tenured (earned) · rate plays: /muscle-memory rate <skill> up|down` };
         }
         if (sub === "rate") {
           // E7 REFEREE: skill plus-minus — ledger always; Letta-native steps.feedback when a step id

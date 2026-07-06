@@ -95,13 +95,16 @@ test("detectInvocationGotchas: learns flag and env gotchas, ignores benign re-ru
 // ── Compounds-truly: preserve-update safety (an update must never destroy a proven skill's core) ──
 
 test("isSkillWorthy: rejects shell-noise templates and trivial primitive-pair sequences; keeps rituals", () => {
-  const mat = { count: 5, convs: 3, fixes: 0, maturity: 9, mature: true } as const;
+  // Contract evolved 2026-07-07 (verified self-distillation): recurrence FINDS, verification
+  // LICENSES — mature non-repair candidates also need >=1 verified green run (oks) or a fix.
+  const mat = { count: 5, convs: 3, fixes: 0, maturity: 9, mature: true, oks: 4 } as any;
   expect(isSkillWorthy({ kind: "template", key: "ls <path>", ...mat })).toBe(false);   // shell noise
   expect(isSkillWorthy({ kind: "template", key: "cat <path>", ...mat })).toBe(false);   // shell noise
   expect(isSkillWorthy({ kind: "sequence", key: "Edit.py → python3", ...mat })).toBe(false); // universal edit→run loop, no fix
   expect(isSkillWorthy({ kind: "sequence", key: "git add → git commit", ...mat })).toBe(true);  // a real ritual
   expect(isSkillWorthy({ kind: "template", key: "docker build <str>", ...mat })).toBe(true);    // distinctive command
-  expect(isSkillWorthy({ kind: "sequence", key: "Edit.py → python3", count: 3, convs: 2, fixes: 2, maturity: 9, mature: true })).toBe(true); // a repair embedded → keep
+  expect(isSkillWorthy({ kind: "sequence", key: "Edit.py → python3", count: 3, convs: 2, fixes: 2, maturity: 9, mature: true } as any)).toBe(true); // a repair embedded → keep
+  expect(isSkillWorthy({ kind: "template", key: "docker build <str>", count: 5, convs: 3, fixes: 0, maturity: 9, mature: true, oks: 0 } as any)).toBe(false); // NEW LAW: recurred but never verified green → habit, not lesson
 });
 
 test("detectRepairChains: GENERALIZES same-shape recoveries across different commands into one lesson", () => {
