@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HARDWOOD — muscle-memory × Skill Plus-Minus · train hard, keep score</title>
+<meta name="description" content="HARDWOOD — an agent skills program. muscle-memory trains your agent from real practice; Skill Plus-Minus is the referee that proves what every skill is worth. Train hard. Keep score.">
+<style>
+  :root{
+    --bg:#0a0a0e; --bg2:#101018; --card:#14141e; --line:#23232f;
+    --ink:#e8e6e1; --dim:#8a8894; --faint:#55535f;
+    --orange:#ff6b35; --teal:#5eead4; --gold:#f5c518; --red:#ff5d5d; --green:#4ade80;
+    --mono:'SF Mono',ui-monospace,'Cascadia Code',Menlo,monospace;
+    --sans:-apple-system,'Inter',system-ui,sans-serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.6;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1060px;margin:0 auto;padding:0 24px}
+  a{color:var(--teal);text-decoration:none} a:hover{text-decoration:underline}
+  .mono{font-family:var(--mono)}
+
+  /* hero */
+  .duo{display:grid;grid-template-columns:1fr 40px 1fr;align-items:stretch;gap:0;margin-top:44px}
+  .duo-card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:26px 28px}
+  .duo-card.mm{border-top:3px solid var(--orange)} .duo-card.spm{border-top:3px solid var(--teal)}
+  .duo-role{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;color:var(--faint)}
+  .duo-card.mm .duo-role{color:var(--orange)} .duo-card.spm .duo-role{color:var(--teal)}
+  .duo-name{font-size:21px;font-weight:750;letter-spacing:-.01em;margin:8px 0 8px}
+  .duo-line{color:var(--dim);font-size:13.5px;line-height:1.6}
+  .duo-vs{align-self:center;text-align:center;font-family:var(--mono);color:var(--faint);font-size:18px}
+  @media(max-width:760px){.duo{grid-template-columns:1fr}.duo-vs{padding:6px 0}}
+  header{padding:96px 0 64px;border-bottom:1px solid var(--line);background:
+    radial-gradient(1200px 500px at 70% -10%, rgba(255,107,53,.07), transparent),
+    radial-gradient(800px 400px at 20% 0%, rgba(94,234,212,.05), transparent)}
+  .badge{display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);font-size:12.5px;
+    color:var(--gold);border:1px solid rgba(245,197,24,.35);border-radius:99px;padding:5px 14px;margin-bottom:28px;letter-spacing:.02em}
+  h1{font-size:clamp(40px,6vw,64px);line-height:1.05;letter-spacing:-.03em;font-weight:800}
+  h1 .accent{color:var(--orange)}
+  .sub{font-size:clamp(17px,2.2vw,21px);color:var(--dim);max-width:640px;margin:22px 0 36px}
+  .sub b{color:var(--ink);font-weight:600}
+  .install{display:inline-flex;align-items:center;gap:14px;background:var(--card);border:1px solid var(--line);
+    border-radius:10px;padding:14px 20px;font-family:var(--mono);font-size:14.5px}
+  .install .p{color:var(--faint)} .install .c{color:var(--teal)}
+  .hero-links{margin-top:18px;font-size:13.5px;color:var(--faint)}
+  .hero-links a{margin-right:18px;color:var(--dim)}
+
+  section{padding:72px 0;border-bottom:1px solid var(--line)}
+  .kicker{font-family:var(--mono);font-size:12.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--orange);margin-bottom:14px}
+  h2{font-size:clamp(26px,3.6vw,36px);letter-spacing:-.02em;line-height:1.15;margin-bottom:14px}
+  .lede{color:var(--dim);max-width:680px;font-size:16.5px}
+
+  /* the loop */
+  .loop{display:flex;flex-wrap:wrap;gap:10px;margin-top:36px;font-family:var(--mono);font-size:13.5px}
+  .loop .step{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 16px;color:var(--ink)}
+  .loop .arrow{color:var(--faint);align-self:center}
+  .loop .step em{color:var(--teal);font-style:normal}
+
+  /* stats */
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-top:40px}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:26px 24px}
+  .stat .n{font-family:var(--mono);font-size:34px;font-weight:700;letter-spacing:-.02em}
+  .stat .n.orange{color:var(--orange)} .stat .n.teal{color:var(--teal)} .stat .n.gold{color:var(--gold)} .stat .n.green{color:var(--green)}
+  .stat .l{color:var(--dim);font-size:13.5px;margin-top:6px}
+  .stat .fine{color:var(--faint);font-size:11.5px;font-family:var(--mono);margin-top:10px}
+
+  /* box score table */
+  .boxscore{width:100%;border-collapse:collapse;margin-top:36px;font-family:var(--mono);font-size:13px}
+  .boxscore th{color:var(--faint);text-align:left;font-weight:500;padding:10px 14px;border-bottom:1px solid var(--line);letter-spacing:.04em;font-size:11.5px;text-transform:uppercase}
+  .boxscore td{padding:12px 14px;border-bottom:1px solid var(--line);color:var(--ink)}
+  .boxscore .v-dir{color:var(--gold)} .boxscore .v-help{color:var(--green)} .boxscore .flag{color:var(--red);font-size:12px}
+  .lanes{color:var(--faint);font-size:12px;font-family:var(--mono);margin-top:12px}
+
+  /* honesty */
+  .blocked{background:var(--card);border:1px solid var(--line);border-left:3px solid var(--red);border-radius:10px;padding:22px 26px;margin-top:18px}
+  .blocked .t{font-family:var(--mono);font-size:13px;color:var(--red);margin-bottom:6px}
+  .blocked .d{color:var(--dim);font-size:14.5px}
+
+  /* the arc */
+  .arc{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:2px;margin-top:36px;font-family:var(--mono)}
+  .arc .step{background:var(--card);padding:22px 20px;border:1px solid var(--line)}
+  .arc .delta{font-size:26px;font-weight:700}
+  .arc .why{color:var(--dim);font-size:12.5px;margin-top:6px;line-height:1.5}
+  .arc .tag{font-size:11px;color:var(--faint);letter-spacing:.06em;text-transform:uppercase}
+
+  /* quote */
+  blockquote{border-left:3px solid var(--orange);padding:6px 0 6px 26px;margin-top:32px;max-width:720px}
+  blockquote p{font-size:19px;color:var(--ink);font-style:italic;line-height:1.55}
+  blockquote cite{display:block;margin-top:12px;color:var(--faint);font-size:13.5px;font-style:normal;font-family:var(--mono)}
+
+  /* roadmap */
+  .releases{margin-top:36px;display:grid;gap:14px}
+  .rel{display:grid;grid-template-columns:110px 1fr;gap:20px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:22px 26px}
+  .rel .v{font-family:var(--mono);font-weight:700;font-size:18px;color:var(--orange)}
+  .rel .v small{display:block;color:var(--faint);font-weight:400;font-size:11px;margin-top:4px;letter-spacing:.04em}
+  .rel h3{font-size:16.5px;margin-bottom:6px}
+  .rel p{color:var(--dim);font-size:14px}
+  .rel .gate{font-family:var(--mono);font-size:11.5px;color:var(--teal);margin-top:10px}
+  .rel.done{opacity:.92} .rel.done .v{color:var(--green)}
+
+  footer{padding:56px 0 72px;color:var(--faint);font-size:13.5px}
+  footer .mono{font-size:12px;margin-top:10px}
+  .ball{color:var(--orange)}
+  @media(max-width:640px){.rel{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <div class="badge">HARDWOOD · an agent skills program &nbsp;—&nbsp; 🏆 Letta Mod Challenge winner</div>
+    <h1>Train hard. <span class="accent">Keep score.</span></h1>
+    <p class="sub">Two products, one game. <b style="color:var(--orange)">muscle-memory</b> is the training system — it turns your agent's real work into skills. <b style="color:var(--teal)">Skill Plus-Minus</b> is the referee — the only benchmark that proves what those skills are worth. <b>The learning is autonomous. The stats are real.</b></p>
+    <div class="install"><span class="p">$</span><span class="c">letta install npm:@letta-ai/muscle-memory</span></div>
+    <div class="hero-links">
+      <a href="https://github.com/letta-ai/mods/tree/main/packages/muscle-memory">letta-ai/mods</a>
+      <a href="https://www.npmjs.com/package/@letta-ai/muscle-memory">npm: @letta-ai</a>
+      <a href="https://github.com/adrianchan94/muscle-memory">source + receipts</a>
+    </div>
+    <div class="duo">
+      <div class="duo-card mm">
+        <div class="duo-role">THE TRAINING SYSTEM</div>
+        <div class="duo-name">muscle-memory</div>
+        <div class="duo-line">Every session is practice film. Watches real tool-use, distills recurring lessons into skills, folds improvements into what exists, prunes what doesn't earn minutes.</div>
+      </div>
+      <div class="duo-vs">×</div>
+      <div class="duo-card spm">
+        <div class="duo-role">THE OFFICIATING CREW</div>
+        <div class="duo-name">Skill Plus-Minus</div>
+        <div class="duo-line">Every skill gets a box score. Twin trials, placebo control, pre-registered rules — an honest number on any piece of agent knowledge. The ref never plays for the team.</div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <div class="kicker">muscle-memory · the training system</div>
+    <h2>Every session becomes practice film.</h2>
+    <p class="lede">No prompting rituals, no "remember to save that." The lifecycle runs at natural boundaries, off the hot path, staged-first — you review what it learns before it counts.</p>
+    <div class="loop">
+      <div class="step">watch <em>real tool-use</em></div><div class="arrow">→</div>
+      <div class="step">distill <em>recurring fixes</em></div><div class="arrow">→</div>
+      <div class="step">route <em>into existing skills</em></div><div class="arrow">→</div>
+      <div class="step">gate <em>quality + security</em></div><div class="arrow">→</div>
+      <div class="step">stage <em>for your review</em></div><div class="arrow">→</div>
+      <div class="step">verify <em>with a referee</em></div><div class="arrow">→</div>
+      <div class="step">prune <em>what doesn't earn</em></div>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="n teal">44% → 94%</div><div class="l">update-first routing accuracy — lessons fold into existing skills instead of spawning duplicates</div><div class="fine">live Letta Cloud bench, 16-case labeled set, CI-gated</div></div>
+      <div class="stat"><div class="n orange">24 / 24</div><div class="l">reranker decision quality — dev set <b>and</b> a sealed blind holdout, including an adversarial trap</div><div class="fine">pre-registered, judge-stable ×2, receipts in-repo</div></div>
+      <div class="stat"><div class="n gold">0</div><div class="l">skills created from harness noise after the synthetic-tape gate — the learner can't mine its own tests</div><div class="fine">regression-tested per defect class</div></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="kicker" style="color:var(--teal)">Skill Plus-Minus · the officiating crew</div>
+    <h2>Every skill gets a box score.</h2>
+    <p class="lede">SPM is the independent referee: twin agents — identical except one carries the skill — run drills the bare model provably can't answer, with a placebo arm, pre-registered rules, and verdicts computed by the instrument, never narrated by us.</p>
+    <table class="boxscore">
+      <tr><th>skill</th><th>verdict</th><th>bench Δ (95% CI)</th><th>W/T/L</th><th>control</th><th>flags</th></tr>
+      <tr><td>v4-pipeline-conventions</td><td class="v-help">+0.64 — skill effect</td><td class="mono">+0.64 [+0.44, +0.84]</td><td>16/9/0</td><td>placebo ≈ off ✓</td><td class="mono" style="color:var(--faint)">n=25, sealing n≥30</td></tr>
+      <tr><td>orders-pipeline-conventions</td><td class="v-dir">directional(+)</td><td class="mono">+0.14 [−0.14, +0.39]</td><td>10/12/6</td><td>—</td><td class="flag">interference: 2 classes</td></tr>
+      <tr><td>recovering-from-failing-scripts</td><td class="v-dir">neutral-leaning</td><td class="mono">+0.03 [−0.20, +0.23]</td><td>6/19/5</td><td>—</td><td class="flag">ceiling effect</td></tr>
+    </table>
+    <div class="lanes">bench = causal (paired twins) · field = associated only · verdicts self-label insufficiency · real runs, real numbers, live receipts in the repo</div>
+
+    <div class="arc">
+      <div class="step"><div class="tag">contaminated corpus</div><div class="delta" style="color:var(--red)">+0.50</div><div class="why">an artifact — our red team caught it, results discarded</div></div>
+      <div class="step"><div class="tag">generic skill</div><div class="delta" style="color:var(--dim)">+0.03</div><div class="why">ceiling effect: the model already knew — honest null, published</div></div>
+      <div class="step"><div class="tag">leaky drills</div><div class="delta" style="color:var(--gold)">+0.14</div><div class="why">real signal, diluted — the leak gate was born here</div></div>
+      <div class="step"><div class="tag">leak-gated + placebo</div><div class="delta" style="color:var(--green)">+0.64</div><div class="why">the true prior-gap effect — 16 wins, zero losses</div></div>
+    </div>
+    <p class="lede" style="margin-top:26px">The finding that matters: <b>skill value is signed.</b> Knowledge the model lacks is worth +0.64. Knowledge it already has is worth nothing — sometimes less. No system that measures by vibes can see the difference. Ours prints it.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="kicker" style="color:var(--red)">The whistle works both ways</div>
+    <h2>Our benchmark blocked itself. Three times.</h2>
+    <p class="lede">The instrument refuses to produce numbers it can't stand behind — and every refusal is a committed receipt, not a deleted log.</p>
+    <div class="blocked"><div class="t">BLOCKED · exit 18 — judge transport dead (42/42 calls failed)</div><div class="d">Rather than score an eval with no judge, the run self-labeled BLOCKED and committed the failure. The receipt ships in the repo.</div></div>
+    <div class="blocked"><div class="t">CULLED · leak gate — 5 of 6 "impossible" drills were guessable</div><div class="d">The OFF-arm pilot proved our own drill design leaked. The gate now runs before every registration — the corpus can't lie to us anymore.</div></div>
+    <div class="blocked"><div class="t">CAPPED · "directional" at p = 0.0002</div><div class="d">Our best-ever result stayed capped at "directional" because it was 5 pairs short of the pre-registered n. The rules don't bend for good news either.</div></div>
+    <blockquote>
+      <p>"I was impressed with Muscle Memory primarily because of its simplicity… Skill learning is a big focus for us at Letta. Agents that passively learn how to do something through practice is exactly the kind of thing we want agents to improve at."</p>
+      <cite>— Cameron, Letta / MemGPT team · Mod Challenge results</cite>
+    </blockquote>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="kicker">The season · release roadmap</div>
+    <h2>One tight release at a time.</h2>
+    <p class="lede">Every release ships with its receipts or it doesn't ship. Claim language is pre-committed per release.</p>
+    <div class="releases">
+      <div class="rel done"><div class="v">v0.6 <small>SHIPPED</small></div><div><h3>The Challenge Build</h3><p>The core loop: distill · dedup · quality-gate · sanitize · prune. Opt-in, staged-first. First place, Letta Mod Challenge; running on Letta's internal agents.</p><div class="gate">receipts: official repo + npm org + announcement</div></div></div>
+      <div class="rel"><div class="v">v0.7 <small>IN REVIEW</small></div><div><h3>The Routing Release</h3><p>Semantic update-first routing with canary calibration (44%→94%), passage-sync hygiene, miner synthetic-tape gate — lessons improve existing skills instead of spawning garbage.</p><div class="gate">gate: maintainer review (PR #45) · eval CI-gated 16/16</div></div></div>
+      <div class="rel"><div class="v">v0.8 <small>BUILT · STAGED</small></div><div><h3>The Referee Release</h3><p>LLM reranker (24/24 sealed holdout) · the Film Room — bounded PATCH_NOTE maintenance of existing skills · live plus-minus ledger on Letta's native rating rail · referee-coupled auto-revert.</p><div class="gate">gate: v0.7 merged · install smoke + live rating receipts</div></div></div>
+      <div class="rel"><div class="v">v0.9 <small>DESIGNED</small></div><div><h3>The Transfer Release</h3><p>Skills travel with their box scores: provenance scorecards, sanitization reports, quarantined import, reverify-before-trust. Squad shelves across your agents.</p><div class="gate">gate: quarantine tests green · zero-trust import proven</div></div></div>
+      <div class="rel"><div class="v">v1.0 <small>THE PROOF</small></div><div><h3>The Compounding Proof</h3><p>Multi-model, multi-machine, placebo-armed benchmark at n≥30 per skill — the published chart that answers "does agent skill-learning actually work, and where?"</p><div class="gate">gate: pre-registered · external replication · crew + maintainer review</div></div></div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div><b>HARDWOOD</b> — built by <b>Adrian Chan</b> with his agent crew: Kev, Mack &amp; ULTRON. <span class="ball">🏀</span> Skills earned, not granted. Receipts over vibes. Restraint is the flex.</div>
+    <div class="mono">every number on this page has a commit hash · ball don't lie</div>
+  </div>
+</footer>
+
+</body>
+</html>
