@@ -69,6 +69,33 @@ export function retiredSkillBlocker(name: string, ctx?: any): string | null {
   return null;
 }
 
+/** Smoke/eval fixture names must never pollute a live box score (the synthetic-tape doctrine,
+ * applied to our own display). */
+export const FIXTURE_SKILL_RE = /^ref-skill-/;
+
+/** THE BOX SCORE — one renderer, every surface (slash command + agent tool share this).
+ * tenure icon · net ± · record · minutes per managed skill, deduped across shelves,
+ * fixtures filtered, plus THE PROGRAM ITSELF (autonomy tenure lanes). */
+export function renderBoxscore(dirs: string[], opts: { renderAutonomy?: () => string } = {}): string {
+  const reg = buildRegistry(dirs);
+  const ledger = loadPlusMinus();
+  const seen = new Set<string>();
+  const rows = reg.skills
+    .filter((s: any) => s.state !== "archived" && !FIXTURE_SKILL_RE.test(s.name))
+    .filter((s: any) => (seen.has(s.name) ? false : (seen.add(s.name), true)))
+    .map((s: any) => {
+      const r = ledger[s.name];
+      const net = r ? r.plus - r.minus : null;
+      const ten = tenureFor(s.name);
+      return { name: s.name, ten, uses: s.uses || 0, net, rec: r ? `+${r.plus}/-${r.minus}` : "—" };
+    })
+    .sort((a: any, b: any) => (b.net ?? -99) - (a.net ?? -99) || b.uses - a.uses);
+  const icon = (t: string) => (t === "pinned" ? "📌" : t === "tenured" ? "🏆" : "·");
+  const body = rows.map((r: any) => `  ${icon(r.ten)} ${(r.net === null ? "  —" : (r.net >= 0 ? "+" + r.net : String(r.net))).padStart(3)}  ${r.name}  (${r.rec} · ${r.uses} min)`).join("\n");
+  const autonomy = opts.renderAutonomy ? `\n\nTHE PROGRAM ITSELF (autonomy tenure — trust as a ledger):\n${opts.renderAutonomy()}` : "";
+  return `🏀 HARDWOOD BOX SCORE — tenure · net ± · record · minutes\n\n${body || "(no managed skills yet)"}${autonomy}\n\n📌 pinned · 🏆 tenured (earned) · rate plays: /muscle-memory rate <skill> up|down`;
+}
+
 /** VAULT TENURE LADDER (v0.8 closed loop) — minutes are EARNED, not granted:
  * pinned (human fiat) > tenured (referee net ≥ +3 OR ≥10 real uses) > labile.
  * Consumed by the film room (patch protection) and the curator. Evidence beats pedigree:

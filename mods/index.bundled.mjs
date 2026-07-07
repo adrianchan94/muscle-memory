@@ -1,356 +1,19 @@
 // mods/index.ts
-import { mkdirSync as mkdirSync5, readFileSync as readFileSync6, existsSync as existsSync6, writeFileSync as writeFileSync5, readdirSync as readdirSync4 } from "node:fs";
-import { join as join7 } from "node:path";
+import { mkdirSync as mkdirSync6, readFileSync as readFileSync9, existsSync as existsSync9, writeFileSync as writeFileSync7, readdirSync as readdirSync4 } from "node:fs";
+import { join as join10 } from "node:path";
+
+// mods/referee.ts
+import { existsSync as existsSync5, readFileSync as readFileSync5, writeFileSync as writeFileSync5 } from "node:fs";
+import { join as join6 } from "node:path";
 
 // mods/core.ts
 import { appendFileSync, mkdirSync, readFileSync, existsSync, writeFileSync, readdirSync, renameSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { createHash } from "node:crypto";
-var STATE_DIR = process.env.MM_STATE_DIR || join(homedir(), ".letta", "muscle-memory");
-var LOG_PATH = join(STATE_DIR, "experience.jsonl");
-var SESSIONS_PATH = join(STATE_DIR, "sessions.jsonl");
-var GLOBAL_SKILLS_DIR = process.env.MM_GLOBAL_SKILLS_DIR || join(homedir(), ".letta", "skills");
-var SECRETISH = /(?:key|token|secret|password|passwd|auth|bearer|cookie|api[_-]?key)/i;
-var LONG_OPAQUE = /\b[A-Za-z0-9_\-]{24,}\b/g;
-var HEXID = /\b[0-9a-f]{7,}\b/gi;
-var ABS_PATH = /(?:\/[\w.\-~ ]+){2,}/g;
-var QUOTED = /(['"])(?:\\.|(?!\1).)*\1/g;
-var SECRET_ASSIGN = /\b(?=[A-Za-z_][A-Za-z0-9_]*\s*=)(?=[A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|AUTH|COOKIE|BEARER|API[_-]?KEY|APIKEY))[A-Za-z_][A-Za-z0-9_]*\s*=\s*(?:"[^"]*"|'[^']*'|[^\s;&]+)/gi;
-var SECRET_QUERY = /([?&])(?:access[_-]?token|refresh[_-]?token|api[_-]?key|apikey|key|token|secret|password|passwd|auth|cookie|bearer)=([^&\s]+)/gi;
-var SECRET_FLAG = /--(?:api[_-]?key|apikey|key|token|secret|password|passwd|auth|cookie|bearer)(?:=|\s+)(?:"[^"]*"|'[^']*'|[^\s;&]+)/gi;
-var SECRET_HEADER = /\b(?:authorization|cookie|x-api-key|api-key)\s*:\s*(?:"[^"]*"|'[^']*'|[^\s;&]+)/gi;
-var NUM = /\b\d+\b/g;
-function scrubSecrets(t) {
-  t = t.replace(/\b(?:bearer|token|apikey|api[_-]?key)\s+[^\s;&"']+/gi, "<cred> <redacted>");
-  t = t.replace(/([a-z][a-z0-9+.\-]*:\/\/)[^/\s:@]+(?::[^/\s@]+)?@/gi, "$1<cred>@");
-  t = t.replace(/\b((?:aws[_-]?)?(?:secret|password|passwd|token|api[_-]?key|access[_-]?key(?:[_-]?id)?|auth)[a-z0-9_]*)\s+(["']?)[^\s"';|&]{3,}\2/gi, "$1 <redacted>");
-  t = t.replace(/(^|\s)(--?user|-u)[=\s]+("?)[^\s"':;|&]+:[^\s"';|&]+\3/gi, "$1$2 <redacted>");
-  t = t.replace(/(^|\s)(--?(?:password|passwd|token|access[-_]?token|api[-_]?key))[=\s]+\S+/gi, "$1$2 <redacted>");
-  t = t.replace(/(^|\s)-p(?=\S)\S+/g, "$1-p <redacted>");
-  t = t.replace(/\b(?:AKIA|ASIA|AIza|ghp_|gho_|ghu_|ghs_|github_pat_|glpat-|xox[baprs]-|sk-[A-Za-z0-9]*-?|eyJ)[A-Za-z0-9_\-.]{6,}/g, "<id>");
-  t = t.replace(SECRET_ASSIGN, "<cred>=<redacted>");
-  t = t.replace(SECRET_QUERY, "$1<cred>=<redacted>");
-  t = t.replace(SECRET_FLAG, "--<cred>=<redacted>");
-  t = t.replace(SECRET_HEADER, "<cred>:<redacted>");
-  return t;
-}
-function redactFragment(text, maxLines = 8, maxChars = 320) {
-  const lines = String(text ?? "").split(/\r?\n/).slice(0, maxLines).map((ln) => {
-    let s = scrubSecrets(ln);
-    s = s.replace(ABS_PATH, "<path>");
-    s = s.replace(/\b[A-Za-z0-9_\-]{28,}\b/g, "<id>");
-    s = s.replace(/\b[0-9a-f]{12,}\b/gi, "<id>");
-    return s.replace(/[ \t]+/g, " ").replace(/\s+$/, "");
-  });
-  return lines.join(`
-`).replace(/\n{3,}/g, `
-
-`).trim().slice(0, maxChars);
-}
-function hash(s) {
-  return createHash("sha256").update(s).digest("hex").slice(0, 16);
-}
-var MM = {
-  MIN_COUNT: 3,
-  MIN_CONVS: 2,
-  STRONG_SINGLE: 8,
-  MATURE_AT: 3,
-  NGRAM: 2,
-  W_FREQ: 1,
-  W_SPREAD: 1.5,
-  W_FIX: 2
-};
-function ensureDir() {
-  try {
-    mkdirSync(STATE_DIR, { recursive: true });
-  } catch {}
-}
-function appendJsonl(path, row) {
-  try {
-    ensureDir();
-    appendFileSync(path, JSON.stringify(row) + `
-`);
-  } catch {}
-}
-function loadRows(path = LOG_PATH) {
-  if (!existsSync(path))
-    return [];
-  const rows = [];
-  for (const line of readFileSync(path, "utf8").split(`
-`)) {
-    if (!line)
-      continue;
-    try {
-      rows.push(JSON.parse(line));
-    } catch {}
-  }
-  return rows;
-}
-var GLOBAL_SKILLS = GLOBAL_SKILLS_DIR;
-var MM_TAG = "muscle-memory provenance";
-function agentSkillsDir(ctx) {
-  if (process.env.MEMORY_DIR)
-    return join(process.env.MEMORY_DIR, "skills");
-  const id = ctx?.agent?.id || ctx?.agentId;
-  if (id) {
-    const projected = join(homedir(), ".letta", "agents", id, "memory", "skills");
-    if (existsSync(join(homedir(), ".letta", "agents", id, "memory")))
-      return projected;
-    const local = join(homedir(), ".letta", "lc-local-backend", "memfs", id, "memory", "skills");
-    if (existsSync(join(homedir(), ".letta", "lc-local-backend", "memfs", id)))
-      return local;
-  }
-  return GLOBAL_SKILLS;
-}
-function scanDirs(ctx) {
-  return [...new Set([agentSkillsDir(ctx), GLOBAL_SKILLS])];
-}
-function skillShelves(ctx) {
-  const agent = agentSkillsDir(ctx);
-  const shelves = [{ name: "agent", dir: agent, writable: true, autonomous: true, priority: 20 }];
-  if (GLOBAL_SKILLS !== agent)
-    shelves.push({ name: "global", dir: GLOBAL_SKILLS, writable: false, autonomous: false, priority: 10 });
-  return shelves;
-}
-function autonomousShelves(ctx) {
-  return skillShelves(ctx).filter((s) => s.autonomous).map((s) => s.dir);
-}
-function slug(s) {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 64);
-}
-function listSkillNames(dir) {
-  try {
-    return readdirSync(dir).filter((n) => existsSync(join(dir, n, "SKILL.md")));
-  } catch {
-    return [];
-  }
-}
-function readSkill(dir, name) {
-  try {
-    return readFileSync(join(dir, name, "SKILL.md"), "utf8");
-  } catch {
-    return "";
-  }
-}
-function skillDesc(dir, name) {
-  return (readSkill(dir, name).match(/description:\s*(.+)/)?.[1] || "").trim();
-}
-function isManaged(dir, name) {
-  return readSkill(dir, name).includes(MM_TAG);
-}
-function writeSkill(dir, name, content) {
-  mkdirSync(join(dir, name), { recursive: true });
-  const tmp = join(dir, name, ".SKILL.md.tmp");
-  writeFileSync(tmp, content);
-  renameSync(tmp, join(dir, name, "SKILL.md"));
-  return join(dir, name, "SKILL.md");
-}
-var OUTCOME_PATH = join(STATE_DIR, "outcomes.jsonl");
-var TELEMETRY_PATH = join(STATE_DIR, "telemetry.json");
-var RECEIPTS_DIR = join(STATE_DIR, "receipts");
-function loadOutcomes() {
-  if (!existsSync(OUTCOME_PATH))
-    return [];
-  const out = [];
-  for (const l of readFileSync(OUTCOME_PATH, "utf8").split(`
-`)) {
-    if (!l)
-      continue;
-    try {
-      out.push(JSON.parse(l));
-    } catch {}
-  }
-  return out;
-}
-function loadExperience() {
-  return inferOutcomes(correlateOutcomes(loadRows(), loadOutcomes()));
-}
-var PUBLISH_STAGED_DIR = join(STATE_DIR, "publish-staged");
-var USAGE_PATH = join(STATE_DIR, "skill-usage.json");
-var NEOCORTEX_BLOCK = "muscle_memory";
-var SECRET_TOKEN_RE = /\b(?:(?:sk|pk|ghp|gho|ghu|ghs|xox[baprs])[-_][A-Za-z0-9]{12,}|sk-ant-[A-Za-z0-9-]{12,}|AKIA[0-9A-Z]{16}|AIza[A-Za-z0-9_-]{20,})\b/;
-function scanSkillContent(content) {
-  const c = String(content || "");
-  const issues = [];
-  if (SECRET_TOKEN_RE.test(c) || /\b(?:authorization|api[_-]?key|secret|password)\s*[:=]\s*["']?[^\s"'<>]{6,}/i.test(c) || /-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(c))
-    issues.push("secret-looking credential");
-  if (/\bcurl\b[^\n|]*\|\s*(?:sudo\s+)?(?:ba)?sh\b/i.test(c) || /\bwget\b[^\n|]*\|\s*(?:ba)?sh\b/i.test(c))
-    issues.push("pipe-to-shell (curl|sh)");
-  if (/\brm\s+-[rf]{1,2}\s+(?:["']?[~/]|\$HOME|\*)/.test(c))
-    issues.push("naked rm -rf on root/home/glob");
-  if (/(?:^|[\s;&|])sudo\s+\S/i.test(c))
-    issues.push("sudo command");
-  if (Math.ceil(c.length / 4) > 5000)
-    issues.push("body > 5000 tokens (decompose into references/)");
-  if (/\bignore\s+(?:all\s+|the\s+)?(?:previous|prior|above)\s+(?:instructions|messages|prompts|rules)\b/i.test(c) || /\b(?:disregard|override)\s+(?:your\s+|the\s+)?(?:system|previous)\s+(?:prompt|instructions)\b/i.test(c))
-    issues.push("prompt-injection phrasing");
-  if (/<\/?muscle-memory-skill\b/i.test(c) || /(?:<\/?(?:system|assistant|user)>|\[(?:system|assistant)\]\s*:?)\s*[^<\n]{0,80}\b(?:you\s+are\s+now|new\s+instructions?|ignore|disregard|override)\b/i.test(c) || /\bpublish\s+this\s+skill\s+(?:anyway|without\s+review|now\b|regardless)/i.test(c))
-    issues.push("prompt-injection / context-escape directive");
-  if (/\b(?:sk-ant-[a-zA-Z0-9-]{8,}|sk-[a-zA-Z0-9]{20,}|ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|xox[baprs]-[A-Za-z0-9-]{10,})\b/.test(c))
-    issues.push("hardcoded API key/token");
-  if (/\$\([^)]*(?:cat|head|tail|less)[^)]*(?:\.ssh|id_rsa|\.env|\.aws|credentials|\.netrc|passwd|secret|token)/i.test(c) || /(?:curl|wget|nc|ncat)\b[^\n]*(?:\$\(|`)[^\n]*(?:cat|\.ssh|\.env|credentials|secret)/i.test(c))
-    issues.push("credential exfiltration pattern");
-  if (/\beval\s*\(\s*(?:atob|Buffer\.from|decodeURIComponent|unescape)\s*\(/i.test(c) || /\bbase64\s+-d\b[^\n]*\|\s*(?:ba)?sh\b/i.test(c) || /\b(?:python3?|node|ruby|perl)\b[^\n]*\s-[ec]\b[^\n]*(?:atob|base64|exec\(|eval)/i.test(c))
-    issues.push("obfuscated code execution");
-  return { ok: issues.length === 0, issues };
-}
-function scanSupportFile(path, content) {
-  const issues = [...scanSkillContent(content).issues];
-  if (/\.(?:sh|mjs|cjs|js|ts|py|rb)$/i.test(path)) {
-    const testDemo = /\b(?:test|demo|smoke|example|fixture)\b/i.test(path) || /\b(?:test|demo|smoke|example)\b/i.test(String(content).slice(0, 240));
-    if (!testDemo && /\b(?:curl|wget|fetch\s*\(|https?:\/\/|rm\s+-[rf]|dd\s+if=|mkfs|>\s*\/dev\/)\b/i.test(content))
-      issues.push("support script runs network/destructive ops without test/demo marking");
-  }
-  return { ok: issues.length === 0, issues };
-}
-var SUPPORT_SUBDIRS = new Set(["references", "templates", "scripts", "assets"]);
-function validateSupportPath(filePath) {
-  const p = String(filePath || "");
-  if (!p)
-    return { ok: false, reason: "file_path required" };
-  if (p.includes(".."))
-    return { ok: false, reason: "path traversal ('..') blocked" };
-  if (p.startsWith("/") || /^[A-Za-z]:[\\/]/.test(p) || p.startsWith("~"))
-    return { ok: false, reason: "absolute/home path blocked" };
-  const parts = p.split("/").filter(Boolean);
-  if (parts.length < 2)
-    return { ok: false, reason: "provide subdir/filename" };
-  if (!SUPPORT_SUBDIRS.has(parts[0]))
-    return { ok: false, reason: `must be under: ${[...SUPPORT_SUBDIRS].join(", ")}` };
-  if (parts.some((s) => s.startsWith(".")))
-    return { ok: false, reason: "dotfiles/segments blocked" };
-  return { ok: true };
-}
-function skillDirOf(name, ctx) {
-  return scanDirs(ctx).find((d) => existsSync(join(d, name, "SKILL.md"))) || null;
-}
-function writeSupportFile(name, filePath, content, ctx) {
-  const v = validateSupportPath(filePath);
-  if (!v.ok)
-    throw new Error(v.reason);
-  const sc = scanSupportFile(filePath, content);
-  if (!sc.ok)
-    throw new Error(`security: ${sc.issues.join("; ")}`);
-  const d = skillDirOf(name, ctx);
-  if (!d)
-    throw new Error(`no skill '${name}'`);
-  const full = join(d, name, filePath);
-  mkdirSync(dirname(full), { recursive: true });
-  const tmp = full + ".mmtmp";
-  writeFileSync(tmp, content);
-  renameSync(tmp, full);
-  return full;
-}
-function removeSupportFile(name, filePath, ctx) {
-  const v = validateSupportPath(filePath);
-  if (!v.ok)
-    throw new Error(v.reason);
-  const d = skillDirOf(name, ctx);
-  if (!d)
-    throw new Error(`no skill '${name}'`);
-  const full = join(d, name, filePath);
-  if (!existsSync(full))
-    throw new Error(`no such support file`);
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const grave = join(STATE_DIR, "removed-files", name, `${filePath.replace(/\//g, "__")}-${stamp}`);
-  mkdirSync(dirname(grave), { recursive: true });
-  renameSync(full, grave);
-  return grave;
-}
-var STAGED_DIR = join(STATE_DIR, "staged");
-function createDedupeSurface(ctx) {
-  return [...new Set([...scanDirs(ctx), STAGED_DIR])];
-}
-var STAGED_RETIRED_DIR = join(STATE_DIR, "staged-retired");
-var AUTOPILOT_STATE = join(STATE_DIR, "autopilot-state.json");
-var UI_EVENTS = join(STATE_DIR, "ui-events.jsonl");
-var UI_STATE = join(STATE_DIR, "ui-state.json");
-var REFLECT_HANDLED = join(STATE_DIR, "reflect-handled.json");
-function appendUiEvent(e) {
-  try {
-    ensureDir();
-    appendJsonl(UI_EVENTS, { ts: Date.now(), source: "muscle-memory", ...e });
-  } catch {}
-}
-var livePanel = null;
-function setLivePanel(p) {
-  livePanel = p;
-}
-var panelUpdatePending = false;
-function writeUiState(s) {
-  try {
-    ensureDir();
-    writeFileSync(UI_STATE, JSON.stringify({ ...readUiState(), ...s, ts: Date.now() }));
-  } catch {}
-  if (livePanel && !panelUpdatePending) {
-    panelUpdatePending = true;
-    setTimeout(() => {
-      panelUpdatePending = false;
-      try {
-        livePanel?.update();
-      } catch {}
-    }, 100);
-  }
-}
-function readUiState() {
-  try {
-    return existsSync(UI_STATE) ? JSON.parse(readFileSync(UI_STATE, "utf8")) : {};
-  } catch {
-    return {};
-  }
-}
-function loadUiEvents(n = 8) {
-  if (!existsSync(UI_EVENTS))
-    return [];
-  const out = [];
-  for (const l of readFileSync(UI_EVENTS, "utf8").trim().split(`
-`)) {
-    if (!l)
-      continue;
-    try {
-      out.push(JSON.parse(l));
-    } catch {}
-  }
-  return out.slice(-n);
-}
-var MESH_FEED = join(homedir(), ".local", "state", "mesh-skill-feed.jsonl");
-function meshAgentLabel() {
-  return process.env.MM_AGENT || (String(process.env.MEMORY_DIR || "").includes("be7d4413") ? "mack" : "agent");
-}
-function appendMeshFeed(e) {
-  try {
-    mkdirSync(dirname(MESH_FEED), { recursive: true });
-    appendFileSync(MESH_FEED, JSON.stringify({ agent: meshAgentLabel(), ts: Date.now(), source: "muscle-memory", ...e }) + `
-`);
-  } catch {}
-}
-function loadMeshFeed(n = 6) {
-  try {
-    if (!existsSync(MESH_FEED))
-      return [];
-    const all = [];
-    for (const l of readFileSync(MESH_FEED, "utf8").trim().split(`
-`)) {
-      if (l)
-        try {
-          all.push(JSON.parse(l));
-        } catch {}
-    }
-    const seen = new Map;
-    for (const e of all)
-      seen.set(`${e.agent}|${e.skill}|${e.type}`, e);
-    return [...seen.values()].slice(-n);
-  } catch {
-    return [];
-  }
-}
-function renderMeshFeed(entries) {
-  return entries.map((e) => `${(e.agent || "?").padEnd(5)} ${String(e.type || "").replace("skill_", "")} ${e.skill || ""}${e.route ? ` · ${e.route}` : ""}${e.signals ? ` · ${e.signals} signals` : ""}`.trim());
-}
 
 // mods/detect.ts
-function commandTemplate2(cmd) {
+function commandTemplate(cmd) {
   let t = String(cmd).trim();
   t = t.replace(/\b(?:bearer|token|apikey|api[_-]?key)\s+[^\s;&"']+/gi, "<cred> <redacted>");
   t = t.replace(/([a-z][a-z0-9+.\-]*:\/\/)[^/\s:@]+(?::[^/\s@]+)?@/gi, "$1<cred>@");
@@ -373,13 +36,13 @@ function commandTemplate2(cmd) {
   return t.slice(0, 240);
 }
 var HIGH_SIGNAL_TOOL_SET = new Set((process.env.MM_HIGH_SIGNAL_TOOLS || "").split(",").map((s) => s.trim()).filter(Boolean));
-function fingerprint2(tool, args) {
+function fingerprint(tool, args) {
   let tmpl = null;
   const keys = Object.keys(args || {}).sort();
   if (tool === "Bash" && typeof args?.command === "string") {
-    tmpl = commandTemplate2(args.command);
+    tmpl = commandTemplate(args.command);
   } else if (tool === "exec_command" && typeof args?.cmd === "string") {
-    tmpl = commandTemplate2(args.cmd);
+    tmpl = commandTemplate(args.cmd);
   } else if ((tool === "Read" || tool === "Edit" || tool === "Write" || tool === "fast_apply") && typeof args?.file_path === "string") {
     const ext = String(args.file_path).match(/\.[A-Za-z0-9]+$/)?.[0] || "";
     tmpl = `${tool} <path>${ext}`;
@@ -485,7 +148,7 @@ function finalize(kind, byKey) {
     const convs = e.convs.size;
     const m = maturityScore(e.count, convs, e.fixes);
     const mature = isMature(e.count, convs, m);
-    out.push({ kind, key, count: e.count, convs, fixes: e.fixes, maturity: +m.toFixed(2), mature });
+    out.push({ kind, key, count: e.count, convs, fixes: e.fixes, maturity: +m.toFixed(2), mature, oks: e.oks ?? 0 });
   }
   return out.sort((a, b) => b.maturity - a.maturity);
 }
@@ -519,6 +182,9 @@ function isDistinctiveStep(sig) {
 function isSkillWorthy(c) {
   if (!c.mature)
     return false;
+  const oks = c.oks ?? 0;
+  if (c.kind !== "repair" && c.fixes === 0 && oks === 0)
+    return false;
   if (c.kind === "template") {
     if (PRIMITIVE.test(c.key))
       return false;
@@ -540,14 +206,22 @@ function repairCandidates(rows) {
   }
   return out;
 }
+var SYNTHETIC_MARKER_RE = /\bmm-?(?:reflex|bench|canary|routing-eval|drill|smoke)[-\w]*/i;
+var NONCE_TOKEN_RE = /\b[a-z][a-z_-]{2,32}1[6-9]\d{11}\b/i;
+function isSyntheticRow(row) {
+  const s = `${row.tool} ${row.tmpl ?? ""} ${row.fp ?? ""}`;
+  return SYNTHETIC_MARKER_RE.test(s) || NONCE_TOKEN_RE.test(s);
+}
 function detect(rows) {
-  const templates = detectTemplates(rows);
-  const sequences = detectSequences(rows);
-  const repairs = repairCandidates(rows);
+  const real = rows.filter((r) => !isSyntheticRow(r));
+  const rejectedSynthetic = rows.length - real.length;
+  const templates = detectTemplates(real);
+  const sequences = detectSequences(real);
+  const repairs = repairCandidates(real);
   const repairKeys = new Set(repairs.map((r) => r.key));
   const rest = [...templates, ...sequences].filter((c) => !repairKeys.has(c.key));
   const candidates = [...repairs, ...rest].filter(isSkillWorthy).sort((a, b) => b.maturity - a.maturity);
-  return { templates, sequences, candidates };
+  return { templates, sequences, candidates, rejectedSynthetic };
 }
 function classifyError(resultText, ok) {
   if (ok !== false)
@@ -908,6 +582,358 @@ function buildCrossConversationEvidence(rows) {
   return { digest: L.join(`
 `), convs, items: repairs.length + aps.length + topTmpl.length + high.length, rejected, signals };
 }
+
+// mods/core.ts
+var STATE_DIR = process.env.MM_STATE_DIR || join(homedir(), ".letta", "muscle-memory");
+var LOG_PATH = join(STATE_DIR, "experience.jsonl");
+var SESSIONS_PATH = join(STATE_DIR, "sessions.jsonl");
+var GLOBAL_SKILLS_DIR = process.env.MM_GLOBAL_SKILLS_DIR || join(homedir(), ".letta", "skills");
+var SECRETISH = /(?:key|token|secret|password|passwd|auth|bearer|cookie|api[_-]?key)/i;
+var LONG_OPAQUE = /\b[A-Za-z0-9_\-]{24,}\b/g;
+var HEXID = /\b[0-9a-f]{7,}\b/gi;
+var ABS_PATH = /(?:\/[\w.\-~ ]+){2,}/g;
+var QUOTED = /(['"])(?:\\.|(?!\1).)*\1/g;
+var SECRET_ASSIGN = /\b(?=[A-Za-z_][A-Za-z0-9_]*\s*=)(?=[A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|AUTH|COOKIE|BEARER|API[_-]?KEY|APIKEY))[A-Za-z_][A-Za-z0-9_]*\s*=\s*(?:"[^"]*"|'[^']*'|[^\s;&]+)/gi;
+var SECRET_QUERY = /([?&])(?:access[_-]?token|refresh[_-]?token|api[_-]?key|apikey|key|token|secret|password|passwd|auth|cookie|bearer)=([^&\s]+)/gi;
+var SECRET_FLAG = /--(?:api[_-]?key|apikey|key|token|secret|password|passwd|auth|cookie|bearer)(?:=|\s+)(?:"[^"]*"|'[^']*'|[^\s;&]+)/gi;
+var SECRET_HEADER = /\b(?:authorization|cookie|x-api-key|api-key)\s*:\s*(?:"[^"]*"|'[^']*'|[^\s;&]+)/gi;
+var NUM = /\b\d+\b/g;
+function scrubSecrets(t) {
+  t = t.replace(/\b(?:bearer|token|apikey|api[_-]?key)\s+[^\s;&"']+/gi, "<cred> <redacted>");
+  t = t.replace(/([a-z][a-z0-9+.\-]*:\/\/)[^/\s:@]+(?::[^/\s@]+)?@/gi, "$1<cred>@");
+  t = t.replace(/\b((?:aws[_-]?)?(?:secret|password|passwd|token|api[_-]?key|access[_-]?key(?:[_-]?id)?|auth)[a-z0-9_]*)\s+(["']?)[^\s"';|&]{3,}\2/gi, "$1 <redacted>");
+  t = t.replace(/(^|\s)(--?user|-u)[=\s]+("?)[^\s"':;|&]+:[^\s"';|&]+\3/gi, "$1$2 <redacted>");
+  t = t.replace(/(^|\s)(--?(?:password|passwd|token|access[-_]?token|api[-_]?key))[=\s]+\S+/gi, "$1$2 <redacted>");
+  t = t.replace(/(^|\s)-p(?=\S)\S+/g, "$1-p <redacted>");
+  t = t.replace(/\b(?:AKIA|ASIA|AIza|ghp_|gho_|ghu_|ghs_|github_pat_|glpat-|xox[baprs]-|sk-[A-Za-z0-9]*-?|eyJ)[A-Za-z0-9_\-.]{6,}/g, "<id>");
+  t = t.replace(SECRET_ASSIGN, "<cred>=<redacted>");
+  t = t.replace(SECRET_QUERY, "$1<cred>=<redacted>");
+  t = t.replace(SECRET_FLAG, "--<cred>=<redacted>");
+  t = t.replace(SECRET_HEADER, "<cred>:<redacted>");
+  return t;
+}
+function redactFragment(text, maxLines = 8, maxChars = 320) {
+  const lines = String(text ?? "").split(/\r?\n/).slice(0, maxLines).map((ln) => {
+    let s = scrubSecrets(ln);
+    s = s.replace(ABS_PATH, "<path>");
+    s = s.replace(/\b[A-Za-z0-9_\-]{28,}\b/g, "<id>");
+    s = s.replace(/\b[0-9a-f]{12,}\b/gi, "<id>");
+    return s.replace(/[ \t]+/g, " ").replace(/\s+$/, "");
+  });
+  return lines.join(`
+`).replace(/\n{3,}/g, `
+
+`).trim().slice(0, maxChars);
+}
+function hash(s) {
+  return createHash("sha256").update(s).digest("hex").slice(0, 16);
+}
+var MM = {
+  MIN_COUNT: 3,
+  MIN_CONVS: 2,
+  STRONG_SINGLE: 8,
+  MATURE_AT: 3,
+  NGRAM: 2,
+  W_FREQ: 1,
+  W_SPREAD: 1.5,
+  W_FIX: 2
+};
+function ensureDir() {
+  try {
+    mkdirSync(STATE_DIR, { recursive: true });
+  } catch {}
+}
+function appendJsonl(path, row) {
+  try {
+    ensureDir();
+    appendFileSync(path, JSON.stringify(row) + `
+`);
+  } catch {}
+}
+function loadRows(path = LOG_PATH) {
+  if (!existsSync(path))
+    return [];
+  const rows = [];
+  for (const line of readFileSync(path, "utf8").split(`
+`)) {
+    if (!line)
+      continue;
+    try {
+      rows.push(JSON.parse(line));
+    } catch {}
+  }
+  return rows;
+}
+var GLOBAL_SKILLS = GLOBAL_SKILLS_DIR;
+var MM_TAG = "muscle-memory provenance";
+function agentSkillsDir(ctx) {
+  if (process.env.MEMORY_DIR)
+    return join(process.env.MEMORY_DIR, "skills");
+  const id = ctx?.agent?.id || ctx?.agentId;
+  if (id) {
+    const projected = join(homedir(), ".letta", "agents", id, "memory", "skills");
+    if (existsSync(join(homedir(), ".letta", "agents", id, "memory")))
+      return projected;
+    const local = join(homedir(), ".letta", "lc-local-backend", "memfs", id, "memory", "skills");
+    if (existsSync(join(homedir(), ".letta", "lc-local-backend", "memfs", id)))
+      return local;
+  }
+  return GLOBAL_SKILLS;
+}
+function scanDirs(ctx) {
+  return [...new Set([agentSkillsDir(ctx), GLOBAL_SKILLS])];
+}
+function skillShelves(ctx) {
+  const agent = agentSkillsDir(ctx);
+  const shelves = [{ name: "agent", dir: agent, writable: true, autonomous: true, priority: 20 }];
+  if (GLOBAL_SKILLS !== agent)
+    shelves.push({ name: "global", dir: GLOBAL_SKILLS, writable: false, autonomous: false, priority: 10 });
+  return shelves;
+}
+function autonomousShelves(ctx) {
+  return skillShelves(ctx).filter((s) => s.autonomous).map((s) => s.dir);
+}
+function slug(s) {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 64);
+}
+function listSkillNames(dir) {
+  try {
+    return readdirSync(dir).filter((n) => existsSync(join(dir, n, "SKILL.md")));
+  } catch {
+    return [];
+  }
+}
+function readSkill(dir, name) {
+  try {
+    return readFileSync(join(dir, name, "SKILL.md"), "utf8");
+  } catch {
+    return "";
+  }
+}
+function skillDesc(dir, name) {
+  return (readSkill(dir, name).match(/description:\s*(.+)/)?.[1] || "").trim();
+}
+function isManaged(dir, name) {
+  return readSkill(dir, name).includes(MM_TAG);
+}
+function writeSkill(dir, name, content) {
+  mkdirSync(join(dir, name), { recursive: true });
+  const tmp = join(dir, name, ".SKILL.md.tmp");
+  writeFileSync(tmp, content);
+  renameSync(tmp, join(dir, name, "SKILL.md"));
+  return join(dir, name, "SKILL.md");
+}
+var OUTCOME_PATH = join(STATE_DIR, "outcomes.jsonl");
+var TELEMETRY_PATH = join(STATE_DIR, "telemetry.json");
+var RECEIPTS_DIR = join(STATE_DIR, "receipts");
+function loadOutcomes() {
+  if (!existsSync(OUTCOME_PATH))
+    return [];
+  const out = [];
+  for (const l of readFileSync(OUTCOME_PATH, "utf8").split(`
+`)) {
+    if (!l)
+      continue;
+    try {
+      out.push(JSON.parse(l));
+    } catch {}
+  }
+  return out;
+}
+function loadExperience() {
+  return inferOutcomes(correlateOutcomes(loadRows(), loadOutcomes()));
+}
+var PUBLISH_STAGED_DIR = join(STATE_DIR, "publish-staged");
+var USAGE_PATH = join(STATE_DIR, "skill-usage.json");
+var NEOCORTEX_BLOCK = "muscle_memory";
+var SECRET_TOKEN_RE = /\b(?:(?:sk|pk|ghp|gho|ghu|ghs|xox[baprs])[-_][A-Za-z0-9]{12,}|sk-ant-[A-Za-z0-9-]{12,}|AKIA[0-9A-Z]{16}|AIza[A-Za-z0-9_-]{20,})\b/;
+function scanSkillContent(content) {
+  const c = String(content || "");
+  const issues = [];
+  if (SECRET_TOKEN_RE.test(c) || /\b(?:authorization|api[_-]?key|secret|password)\s*[:=]\s*["']?[^\s"'<>]{6,}/i.test(c) || /-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(c))
+    issues.push("secret-looking credential");
+  if (/\bcurl\b[^\n|]*\|\s*(?:sudo\s+)?(?:ba)?sh\b/i.test(c) || /\bwget\b[^\n|]*\|\s*(?:ba)?sh\b/i.test(c))
+    issues.push("pipe-to-shell (curl|sh)");
+  if (/\brm\s+-[rf]{1,2}\s+(?:["']?[~/]|\$HOME|\*)/.test(c))
+    issues.push("naked rm -rf on root/home/glob");
+  if (/(?:^|[\s;&|])sudo\s+\S/i.test(c))
+    issues.push("sudo command");
+  if (Math.ceil(c.length / 4) > 5000)
+    issues.push("body > 5000 tokens (decompose into references/)");
+  if (/\bignore\s+(?:all\s+|the\s+)?(?:previous|prior|above)\s+(?:instructions|messages|prompts|rules)\b/i.test(c) || /\b(?:disregard|override)\s+(?:your\s+|the\s+)?(?:system|previous)\s+(?:prompt|instructions)\b/i.test(c))
+    issues.push("prompt-injection phrasing");
+  if (/<\/?muscle-memory-skill\b/i.test(c) || /(?:<\/?(?:system|assistant|user)>|\[(?:system|assistant)\]\s*:?)\s*[^<\n]{0,80}\b(?:you\s+are\s+now|new\s+instructions?|ignore|disregard|override)\b/i.test(c) || /\bpublish\s+this\s+skill\s+(?:anyway|without\s+review|now\b|regardless)/i.test(c))
+    issues.push("prompt-injection / context-escape directive");
+  if (/\b(?:sk-ant-[a-zA-Z0-9-]{8,}|sk-[a-zA-Z0-9]{20,}|ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|xox[baprs]-[A-Za-z0-9-]{10,})\b/.test(c))
+    issues.push("hardcoded API key/token");
+  if (/\$\([^)]*(?:cat|head|tail|less)[^)]*(?:\.ssh|id_rsa|\.env|\.aws|credentials|\.netrc|passwd|secret|token)/i.test(c) || /(?:curl|wget|nc|ncat)\b[^\n]*(?:\$\(|`)[^\n]*(?:cat|\.ssh|\.env|credentials|secret)/i.test(c))
+    issues.push("credential exfiltration pattern");
+  if (/\beval\s*\(\s*(?:atob|Buffer\.from|decodeURIComponent|unescape)\s*\(/i.test(c) || /\bbase64\s+-d\b[^\n]*\|\s*(?:ba)?sh\b/i.test(c) || /\b(?:python3?|node|ruby|perl)\b[^\n]*\s-[ec]\b[^\n]*(?:atob|base64|exec\(|eval)/i.test(c))
+    issues.push("obfuscated code execution");
+  return { ok: issues.length === 0, issues };
+}
+function scanSupportFile(path, content) {
+  const issues = [...scanSkillContent(content).issues];
+  if (/\.(?:sh|mjs|cjs|js|ts|py|rb)$/i.test(path)) {
+    const testDemo = /\b(?:test|demo|smoke|example|fixture)\b/i.test(path) || /\b(?:test|demo|smoke|example)\b/i.test(String(content).slice(0, 240));
+    if (!testDemo && /\b(?:curl|wget|fetch\s*\(|https?:\/\/|rm\s+-[rf]|dd\s+if=|mkfs|>\s*\/dev\/)\b/i.test(content))
+      issues.push("support script runs network/destructive ops without test/demo marking");
+  }
+  return { ok: issues.length === 0, issues };
+}
+var SUPPORT_SUBDIRS = new Set(["references", "templates", "scripts", "assets"]);
+function validateSupportPath(filePath) {
+  const p = String(filePath || "");
+  if (!p)
+    return { ok: false, reason: "file_path required" };
+  if (p.includes(".."))
+    return { ok: false, reason: "path traversal ('..') blocked" };
+  if (p.startsWith("/") || /^[A-Za-z]:[\\/]/.test(p) || p.startsWith("~"))
+    return { ok: false, reason: "absolute/home path blocked" };
+  const parts = p.split("/").filter(Boolean);
+  if (parts.length < 2)
+    return { ok: false, reason: "provide subdir/filename" };
+  if (!SUPPORT_SUBDIRS.has(parts[0]))
+    return { ok: false, reason: `must be under: ${[...SUPPORT_SUBDIRS].join(", ")}` };
+  if (parts.some((s) => s.startsWith(".")))
+    return { ok: false, reason: "dotfiles/segments blocked" };
+  return { ok: true };
+}
+function skillDirOf(name, ctx) {
+  return scanDirs(ctx).find((d) => existsSync(join(d, name, "SKILL.md"))) || null;
+}
+function writeSupportFile(name, filePath, content, ctx) {
+  const v = validateSupportPath(filePath);
+  if (!v.ok)
+    throw new Error(v.reason);
+  const sc = scanSupportFile(filePath, content);
+  if (!sc.ok)
+    throw new Error(`security: ${sc.issues.join("; ")}`);
+  const d = skillDirOf(name, ctx);
+  if (!d)
+    throw new Error(`no skill '${name}'`);
+  const full = join(d, name, filePath);
+  mkdirSync(dirname(full), { recursive: true });
+  const tmp = full + ".mmtmp";
+  writeFileSync(tmp, content);
+  renameSync(tmp, full);
+  return full;
+}
+function removeSupportFile(name, filePath, ctx) {
+  const v = validateSupportPath(filePath);
+  if (!v.ok)
+    throw new Error(v.reason);
+  const d = skillDirOf(name, ctx);
+  if (!d)
+    throw new Error(`no skill '${name}'`);
+  const full = join(d, name, filePath);
+  if (!existsSync(full))
+    throw new Error(`no such support file`);
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const grave = join(STATE_DIR, "removed-files", name, `${filePath.replace(/\//g, "__")}-${stamp}`);
+  mkdirSync(dirname(grave), { recursive: true });
+  renameSync(full, grave);
+  return grave;
+}
+var STAGED_DIR = join(STATE_DIR, "staged");
+function createDedupeSurface(ctx) {
+  return [...new Set([...scanDirs(ctx), STAGED_DIR])];
+}
+var STAGED_RETIRED_DIR = join(STATE_DIR, "staged-retired");
+var AUTOPILOT_STATE = join(STATE_DIR, "autopilot-state.json");
+var UI_EVENTS = join(STATE_DIR, "ui-events.jsonl");
+var UI_STATE = join(STATE_DIR, "ui-state.json");
+var REFLECT_HANDLED = join(STATE_DIR, "reflect-handled.json");
+function appendUiEvent(e) {
+  try {
+    ensureDir();
+    appendJsonl(UI_EVENTS, { ts: Date.now(), source: "muscle-memory", ...e });
+  } catch {}
+}
+var livePanel = null;
+function setLivePanel(p) {
+  livePanel = p;
+}
+var panelUpdatePending = false;
+function writeUiState(s) {
+  try {
+    ensureDir();
+    writeFileSync(UI_STATE, JSON.stringify({ ...readUiState(), ...s, ts: Date.now() }));
+  } catch {}
+  if (livePanel && !panelUpdatePending) {
+    panelUpdatePending = true;
+    setTimeout(() => {
+      panelUpdatePending = false;
+      try {
+        livePanel?.update();
+      } catch {}
+    }, 100);
+  }
+}
+function readUiState() {
+  try {
+    return existsSync(UI_STATE) ? JSON.parse(readFileSync(UI_STATE, "utf8")) : {};
+  } catch {
+    return {};
+  }
+}
+function loadUiEvents(n = 8) {
+  if (!existsSync(UI_EVENTS))
+    return [];
+  const out = [];
+  for (const l of readFileSync(UI_EVENTS, "utf8").trim().split(`
+`)) {
+    if (!l)
+      continue;
+    try {
+      out.push(JSON.parse(l));
+    } catch {}
+  }
+  return out.slice(-n);
+}
+var MESH_FEED = join(homedir(), ".local", "state", "mesh-skill-feed.jsonl");
+function meshAgentLabel() {
+  return process.env.MM_AGENT || (String(process.env.MEMORY_DIR || "").includes("be7d4413") ? "mack" : "agent");
+}
+function appendMeshFeed(e) {
+  try {
+    mkdirSync(dirname(MESH_FEED), { recursive: true });
+    appendFileSync(MESH_FEED, JSON.stringify({ agent: meshAgentLabel(), ts: Date.now(), source: "muscle-memory", ...e }) + `
+`);
+  } catch {}
+}
+function loadMeshFeed(n = 6) {
+  try {
+    if (!existsSync(MESH_FEED))
+      return [];
+    const all = [];
+    for (const l of readFileSync(MESH_FEED, "utf8").trim().split(`
+`)) {
+      if (l)
+        try {
+          all.push(JSON.parse(l));
+        } catch {}
+    }
+    const seen = new Map;
+    for (const e of all)
+      seen.set(`${e.agent}|${e.skill}|${e.type}`, e);
+    return [...seen.values()].slice(-n);
+  } catch {
+    return [];
+  }
+}
+function renderMeshFeed(entries) {
+  return entries.map((e) => `${(e.agent || "?").padEnd(5)} ${String(e.type || "").replace("skill_", "")} ${e.skill || ""}${e.route ? ` · ${e.route}` : ""}${e.signals ? ` · ${e.signals} signals` : ""}`.trim());
+}
+
+// mods/lifecycle.ts
+import { mkdirSync as mkdirSync4, readFileSync as readFileSync4, existsSync as existsSync4, writeFileSync as writeFileSync4, readdirSync as readdirSync2, renameSync as renameSync3 } from "node:fs";
+import { join as join5 } from "node:path";
+
+// mods/autopilot.ts
+import { mkdirSync as mkdirSync3, readFileSync as readFileSync3, existsSync as existsSync3, writeFileSync as writeFileSync3, renameSync as renameSync2 } from "node:fs";
+import { join as join4 } from "node:path";
+
 // mods/gate.ts
 import { join as join2 } from "node:path";
 function dedupCheck(name, description, dirs = [GLOBAL_SKILLS]) {
@@ -1212,9 +1238,6 @@ A recovery discipline distilled from ${repair.count} real \`${repair.verifyStep}
 - [ ] A second run also passes.`;
   return { name, description, body: body + workedMd };
 }
-// mods/autopilot.ts
-import { mkdirSync as mkdirSync4, readFileSync as readFileSync4, existsSync as existsSync4, writeFileSync as writeFileSync4, renameSync as renameSync3 } from "node:fs";
-import { join as join5 } from "node:path";
 
 // mods/publish.ts
 import { mkdirSync as mkdirSync2, readFileSync as readFileSync2, existsSync as existsSync2, writeFileSync as writeFileSync2 } from "node:fs";
@@ -1475,9 +1498,945 @@ function publishSkillToCatalog(name, ctx) {
   return join3(dstDir, "SKILL.md");
 }
 
+// mods/autopilot.ts
+var AUTOPILOT_DEFAULT = { mode: "staged", dailyBudget: 5, minImpact: 4 };
+function repairForRows(c, rows) {
+  if (!c.fixes)
+    return;
+  const first = c.key.split(/\s*→\s*/)[0];
+  return detectRepairChains(rows).find((r) => r.trigger === first || r.verifyStep === first || c.key.includes(r.trigger) || c.key.includes(r.verifyStep));
+}
+function autopilotPlan(input) {
+  const cfg = input.config || AUTOPILOT_DEFAULT;
+  const decisions = [];
+  const skipped = [];
+  let used = input.budgetUsedToday || 0;
+  if (cfg.mode === "off")
+    return { decisions, skipped: [{ what: "all", why: "autopilot off" }], budget: { used, limit: cfg.dailyBudget }, mode: cfg.mode };
+  const existing = new Set(input.managed.map((m) => m.name));
+  const refineTargets = new Set;
+  const apSteps = detectAntiPatterns(input.rows).map((p) => p.step.toLowerCase());
+  for (const m of input.managed) {
+    if (m.pinned)
+      continue;
+    const verbs = skillVerbs(m.body);
+    if (verbs.length && verbs.some((v) => apSteps.some((s) => s === v || s.includes(v) || v.includes(s)))) {
+      decisions.push({ op: "refine", skill: m.name, reason: "documented failure recurring — strengthen the pitfall" });
+      refineTargets.add(m.name);
+    }
+  }
+  for (const c of detect(input.rows).candidates) {
+    if (used >= cfg.dailyBudget) {
+      skipped.push({ what: c.key, why: "daily budget reached" });
+      continue;
+    }
+    if (DESTRUCTIVE.test(c.key)) {
+      skipped.push({ what: c.key, why: "destructive workflow — never auto-distilled" });
+      continue;
+    }
+    const imp = impactScore(c).score;
+    if (imp < cfg.minImpact) {
+      skipped.push({ what: c.key, why: `impact ${imp} < ${cfg.minImpact}` });
+      continue;
+    }
+    const draft = draftWithRepair(c, repairForRows(c, input.rows));
+    const nm = slug(draft.name);
+    if (existing.has(nm)) {
+      skipped.push({ what: nm, why: "already managed — refine, don't re-distill" });
+      continue;
+    }
+    const dc = dedupCheck(nm, draft.description, input.dirsForDedup);
+    if (dc.dup) {
+      skipped.push({ what: nm, why: `dedup: ${dc.reason}` });
+      continue;
+    }
+    const lint = lintSkillDraft({ name: nm, description: draft.description, body: draft.body }, { needsPitfalls: !!c.fixes });
+    if (!lint.ok) {
+      skipped.push({ what: nm, why: `lint: ${lint.issues[0]}` });
+      continue;
+    }
+    const verified = c.fixes > 0 || c.count >= MM.STRONG_SINGLE;
+    const gate = cfg.mode === "auto" && verified ? "graduate" : "stage";
+    decisions.push({ op: "distill", candidate: c, name: nm, reason: `impact ${imp}, ${c.count} reps${verified ? ", verified" : ""}`, gate });
+    existing.add(nm);
+    used++;
+  }
+  for (const m of input.managed) {
+    if (m.pinned || refineTargets.has(m.name))
+      continue;
+    const drift = specDrift(m.body, input.rows).drift;
+    const ev = effectivenessVerdict({ uses: m.uses, ageDays: m.ageDays, staleAntiPattern: false });
+    if (drift)
+      decisions.push({ op: "retire", skill: m.name, reason: "spec-drift: referenced commands no longer occur" });
+    else if (ev.verdict === "retire_candidate")
+      decisions.push({ op: "retire", skill: m.name, reason: ev.reason });
+  }
+  return { decisions, skipped, budget: { used, limit: cfg.dailyBudget }, mode: cfg.mode };
+}
+function provenanceBlock(c) {
+  return `
+<!-- ${MM_TAG}: autopilot ${new Date().toISOString().slice(0, 10)}; candidate=${c.kind}:${c.key}; reps=${c.count}; convs=${c.convs}; fixes=${c.fixes}; impact=${impactScore(c).score} -->
+`;
+}
+function appendRecurrenceNote(dir, name, note) {
+  if (!existsSync3(join4(dir, name, "SKILL.md")))
+    return false;
+  let t = readSkill(dir, name);
+  const stamp = new Date().toISOString().slice(0, 10);
+  const line = `- (${stamp}) autopilot: ${note}
+`;
+  if (/##\s+Pitfalls/i.test(t))
+    t = t.replace(/(##\s+Pitfalls[^\n]*\n)/i, `$1${line}`);
+  else
+    t = t.replace(/(\n## Verification)/, `
+## Pitfalls (autopilot)
+${line}
+$1`);
+  writeSkill(dir, name, t);
+  return true;
+}
+function executeAutopilotPlan(plan, opts) {
+  const author = opts.author || ((c, r) => draftWithRepair(c, r));
+  const graduated = [], staged = [], refined = [], retired = [];
+  const receipts = [];
+  for (const d of plan.decisions) {
+    try {
+      if (d.op === "distill") {
+        const draft = author(d.candidate, repairForRows(d.candidate, opts.rows));
+        const content = `---
+name: ${d.name}
+description: ${draft.description}
+---
+
+${draft.body}${provenanceBlock(d.candidate)}
+`;
+        const sec = scanSkillContent(content);
+        if (!sec.ok) {
+          receipts.push({ op: "distill", name: d.name, blocked: `security: ${sec.issues.join("; ")}`, ts: Date.now() });
+          continue;
+        }
+        if (d.gate === "graduate") {
+          writeSkill(opts.skillsDir, d.name, content);
+          graduated.push(d.name);
+        } else {
+          writeSkill(STAGED_DIR, d.name, content);
+          staged.push(d.name);
+        }
+        receipts.push({ op: "distill", name: d.name, gate: d.gate, reason: d.reason, ts: Date.now() });
+      } else if (d.op === "refine") {
+        if (appendRecurrenceNote(opts.skillsDir, d.skill, d.reason)) {
+          refined.push(d.skill);
+          receipts.push({ op: "refine", name: d.skill, reason: d.reason, ts: Date.now() });
+        }
+      } else if (d.op === "retire") {
+        const target = retireManagedSkill(d.skill, d.reason, opts.ctx, d.absorbedInto);
+        retired.push(d.skill);
+        receipts.push({ op: "retire", name: d.skill, reason: d.reason, target, ts: Date.now() });
+      }
+    } catch (e) {
+      receipts.push({ op: d.op, error: String(e?.message ?? e) });
+    }
+  }
+  return { graduated, staged, refined, retired, receipts };
+}
+function loadAutopilotState() {
+  try {
+    const s = JSON.parse(readFileSync3(AUTOPILOT_STATE, "utf8"));
+    const today = new Date().toISOString().slice(0, 10);
+    return s.date === today ? s : { date: today, used: 0 };
+  } catch {
+    return { date: new Date().toISOString().slice(0, 10), used: 0 };
+  }
+}
+function saveAutopilotState(s) {
+  try {
+    ensureDir();
+    writeFileSync3(AUTOPILOT_STATE, JSON.stringify(s));
+  } catch {}
+}
+function managedView(dirs) {
+  const usage = loadUsage();
+  const out = [];
+  for (const d of dirs)
+    for (const n of listSkillNames(d)) {
+      if (!isManaged(d, n))
+        continue;
+      const u = usage[n] || {};
+      const created = u.created || Date.now();
+      out.push({ name: n, description: skillDesc(d, n), body: readSkill(d, n), uses: u.uses || 0, ageDays: Math.floor((Date.now() - created) / 86400000), pinned: !!u.pinned });
+    }
+  return out;
+}
+function streamChunkText(c) {
+  if (c == null)
+    return "";
+  if (typeof c === "string")
+    return c;
+  if (typeof c.text === "string")
+    return c.text;
+  if (typeof c.delta === "string")
+    return c.delta;
+  if (typeof c.content === "string")
+    return c.content;
+  if (typeof c.delta?.text === "string")
+    return c.delta.text;
+  if (typeof c.delta?.content === "string")
+    return c.delta.content;
+  if (typeof c.content?.text === "string")
+    return c.content.text;
+  if (Array.isArray(c.content))
+    return c.content.map((x) => typeof x === "string" ? x : x?.text ?? "").join("");
+  if (typeof c.choices?.[0]?.delta?.content === "string")
+    return c.choices[0].delta.content;
+  if (typeof c.choices?.[0]?.text === "string")
+    return c.choices[0].text;
+  return "";
+}
+async function consumeStreamBounded(stream) {
+  const ms = Number(process.env.MM_FORK_TIMEOUT_MS) || 60000;
+  let out = "";
+  const reader = (async () => {
+    try {
+      for await (const c of stream)
+        out += streamChunkText(c);
+    } catch {}
+    return out;
+  })();
+  const timer = new Promise((resolve) => setTimeout(() => resolve(out), ms));
+  return Promise.race([reader, timer]);
+}
+async function forkAuthor(ctx, c, repair) {
+  try {
+    if (typeof ctx?.conversation?.fork !== "function")
+      return null;
+    const det = draftWithRepair(c, repair);
+    const prompt = `You are muscle-memory's skill author. Write ONLY the markdown BODY (no YAML frontmatter) of a SKILL.md capturing this recurring real workflow. Keep it under 120 lines. Required sections in order: "## Trigger", "## Observed pattern" (include the exact pattern in a code block), "## Procedure" (numbered, concrete, adaptable), ${repair ? `"## Pitfalls" (the observed error "${repair.errClass}" and its fix "${repair.fixStep}"), ` : ""}"## Verification". Pattern: ${c.key}. Reps: ${c.count} across ${c.convs} conversation(s). Output ONLY the markdown body, nothing else.`;
+    const forked = await ctx.conversation.fork({ hidden: true });
+    const stream = await forked.sendMessageStream([{ role: "user", content: prompt }]);
+    let body = await consumeStreamBounded(stream);
+    body = body.trim().replace(/^```(?:markdown|md)?\n?|\n?```$/g, "");
+    if (body.length < 80 || !/##\s*Procedure/i.test(body) || !/##\s*Verification/i.test(body))
+      return null;
+    const lint = lintSkillDraft({ name: det.name, description: det.description, body }, { needsPitfalls: !!c.fixes });
+    if (!lint.ok)
+      return null;
+    const sec = scanSkillContent(body);
+    if (!sec.ok)
+      return null;
+    return { name: det.name, description: det.description, body };
+  } catch {
+    return null;
+  }
+}
+function judgeViaFork(ctx) {
+  if (typeof ctx?.conversation?.fork !== "function")
+    return;
+  return async (evidence, skill) => {
+    try {
+      const forked = await ctx.conversation.fork({ hidden: true });
+      const stream = await forked.sendMessageStream([{ role: "user", content: `${RERANK_SYSTEM_PROMPT}
+
+${rerankUserPrompt(evidence, skill.name, skill.description)}` }]);
+      const raw = await consumeStreamBounded(stream);
+      return parseJudgement(raw);
+    } catch {
+      return null;
+    }
+  };
+}
+async function runAutopilot(ctx, config) {
+  const cfg = config || AUTOPILOT_DEFAULT;
+  const dirs = scanDirs(ctx);
+  const rows = loadExperience();
+  const st = loadAutopilotState();
+  const plan = autopilotPlan({ rows, managed: managedView(dirs), dirsForDedup: dirs, config: cfg, budgetUsedToday: st.used });
+  if (cfg.mode === "off" || !plan.decisions.length)
+    return plan;
+  const result = executeAutopilotPlan(plan, { skillsDir: agentSkillsDir(ctx), rows, ctx });
+  saveAutopilotState({ date: st.date, used: st.used + result.graduated.length + result.staged.length });
+  if (result.graduated.length || result.staged.length) {
+    const g = result.graduated[0], s = result.staged[0];
+    const summary = g ? `graduated '${g}'${result.graduated.length > 1 ? ` +${result.graduated.length - 1}` : ""}` : `staged '${s}'${result.staged.length > 1 ? ` +${result.staged.length - 1}` : ""} for review`;
+    appendUiEvent({ phase: g ? "skill_graduated" : "skill_staged", summary, skill: g || s, action: g ? "graduate" : "stage", route: "autopilot" });
+    writeUiState({ phase: "done", last: summary, route: `AUTOPILOT · ${g ? "graduate" : "stage"}` });
+    for (const n of result.graduated)
+      appendMeshFeed({ type: "skill_graduated", skill: n, route: "AUTOPILOT", signals: 0 });
+    for (const n of result.graduated) {
+      try {
+        const _d = agentSkillsDir(ctx);
+        const _b = readSkill(_d, n);
+        if (_b) {
+          const _p = publishPlan({ name: n, description: skillDesc(_d, n), body: _b, shelf: "agent" });
+          appendUiEvent({ phase: "skill_publish_preflight", summary: `${n}: ${_p.publishability}/100 · tier=${publishTier(_p)} · ${_p.recommended}`, skill: n, route: "auto-after-graduate" });
+        }
+      } catch {}
+    }
+  }
+  const published = [];
+  if (process.env.MM_PUBLISH === "auto" && result.graduated.length) {
+    for (const n of result.graduated) {
+      try {
+        publishSkillToCatalog(n, ctx);
+        published.push(n);
+      } catch {}
+    }
+    if (published.length) {
+      appendUiEvent({ phase: "skill_published", summary: `published ${published.length} to catalog (Custom Skills)`, skill: published[0], action: "publish", route: "autopilot" });
+      writeUiState({ phase: "done", last: `published '${published[0]}' to catalog`, route: "AUTOPILOT · publish" });
+      for (const n of published)
+        appendMeshFeed({ type: "skill_published", skill: n, route: "CATALOG", signals: 0 });
+    }
+  }
+  try {
+    ensureDir();
+    mkdirSync3(RECEIPTS_DIR, { recursive: true });
+    writeFileSync3(join4(RECEIPTS_DIR, `autopilot-${Date.now()}.json`), JSON.stringify({ mode: cfg.mode, ...result, published, ts: Date.now() }, null, 2));
+  } catch {}
+  return { ...plan, result };
+}
+var REVIEW_PROMPT = `You are the skill-library reviewer for a self-improving AI coding agent (agentskills.io). From the cross-session evidence, author ONE genuinely valuable CLASS-LEVEL skill IF a durable reusable lesson emerged.
+
+Write a COMPLETE skill — completeness matters more than brevity. Structure: frontmatter (name + description with triggers), then "## When to use" (concrete triggers), "## Procedure" (numbered, concrete, safe-first), "## Pitfalls" (one entry per genuinely-distinct hard-won failure, each as the real symptom → the exact fix → a one-line diagnostic TELL), "## Verification", and — when the evidence is diverse — a "## Worked examples (real cases)" section. MATCH LENGTH TO EVIDENCE: a short skill is right for simple/sparse evidence; a RICH, exhaustive skill is right when the evidence is diverse (many distinct real failures) — never sacrifice a real pitfall or worked-example to hit a length target. FINISH every section — never trail off mid-sentence or mid-code-block. Stay organized + hygienic (clear sections, short fenced snippets), never a wall of text.
+
+HARD RULES:
+- CAPTURE EVERY REAL PITFALL: include each genuinely-distinct hard-won failure in the evidence (this breadth of real, cross-session lessons IS the whole advantage), each with its exact fix. Cut filler, redundancy, and obvious steps ruthlessly — but never drop a real pitfall to save space.
+- DECISION-AWARE: for recovery/debugging/troubleshooting skills especially, structure the Procedure as a DECISION GUIDE — symptom → safest fix first → fallback — so the reader knows WHICH path to take, not just a menu of options.
+- CONCRETE + ACCURATE: show exact, CORRECT code/commands in fenced blocks (a wrong or hand-wavy example is worse than none — verify it actually fixes the stated problem). Keep code snippets short + self-contained so they never get cut off. Every step specific.
+- SAFE FIRST: ALWAYS make a non-destructive safety net (a backup branch/tag, a stash, or a copy) the EXPLICIT first step before any destructive/irreversible command (reset --hard, force-push, rm, drop, db migrate) — and name it as the safety net so a wrong move is recoverable.
+- NAMING: class-level only; never an x-to-y transition, error string, PR number, date, codename, or fix-/debug-/audit-today artifact.
+- NEGATIVE FILTER: never capture environment-dependent failures (command-not-found, missing binaries, uninstalled packages, creds) or tool-negatives ("X is broken").
+- WORKED EXAMPLES (the edge — use them FULLY): the evidence may include real, cross-session symptom→fix examples. Do TWO things, not one: (1) GENERALIZE them into a high-altitude decision guide in the Procedure/Pitfalls (transfers across languages/projects), giving each a one-line diagnostic TELL; AND (2) when the evidence is diverse, ALSO include an explicit "## Worked examples (real cases)" section that catalogs EACH distinct real case compactly — symptom (one line) → the exact fix → the TELL. The generalized guide gives ALTITUDE; the worked-examples catalog gives CONCRETENESS — include BOTH; the catalog is a strength when the cases are real and diverse, not a weakness. CRITICAL: do NOT collapse genuinely-distinct failure classes (e.g. float-truncation vs type-coercion vs input-mutation vs off-by-one are DIFFERENT bugs) into one generic bucket — emit a distinct pitfall + example for EACH. Beyond the observed examples, also cover the 2-3 most common ADJACENT failure modes for this class (e.g. order/state-dependence, import/path errors, masked cascading failures) so the skill is broad. Include a safe-first step (inspect/diff before editing; change source not tests; smallest reversible edit). Still emit the required frontmatter: a CLASS-level name (a noun phrase like debugging-failing-tests; obey the NAMING rule) and a description that STARTS WITH "Use when".
+Output ONLY the complete SKILL.md (no preamble, not truncated), or exactly "NOTHING-TO-SAVE".`;
+var REVIEW_PROMPT_COMPACT = `From the cross-session evidence below, author ONE class-level reusable skill as a COMPLETE SKILL.md, IF a durable lesson emerged. Format: YAML frontmatter (name: a class-level lowercase-hyphen slug; description: STARTS WITH "Use when"), then "## Procedure" (numbered, safe-first), "## Pitfalls" (each: symptom → exact fix → one-line TELL), "## Verification". Concrete correct fenced code; no preamble. Output ONLY the SKILL.md markdown, or exactly "NOTHING-TO-SAVE".`;
+var SEARCH_STOP = new Set("the and for with via use using used run running runs tool tools command commands file files validate validating validation build builds building test testing tests check checking code into from that this your you any new real step steps workflow workflows work works working session sessions across before after fix fixed fixing error errors fail failed failing not add get set make made need want call calls called when then them they here there what which how its has have will can may also same each only over under out off across recurring observed".split(" "));
+var SEARCH_DISTINCT_MIN = 3;
+function searchSkills(dirs, query, k = 5) {
+  const terms = [...new Set(String(query).toLowerCase().split(/[^a-z0-9.]+/).filter((t) => t.length > 2 && !SEARCH_STOP.has(t)))];
+  const out = [];
+  for (const d of dirs)
+    for (const n of listSkillNames(d)) {
+      const body = readSkill(d, n).toLowerCase();
+      const desc = skillDesc(d, n);
+      const nl = n.toLowerCase(), dl = desc.toLowerCase();
+      let score = 0, matched = 0;
+      for (const t of terms) {
+        const esc = t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const inName = nl.includes(t), inDesc = dl.includes(t);
+        if (inName || inDesc)
+          matched++;
+        const bc = Math.min((body.match(new RegExp("\\b" + esc, "g")) || []).length, 3);
+        score += (inName ? 8 : 0) + (inDesc ? 4 : 0) + bc;
+      }
+      if (matched > 0)
+        out.push({ name: n, description: desc, dir: d, score, matched });
+    }
+  const best = new Map;
+  for (const e of out) {
+    const p = best.get(e.name);
+    if (!p || e.score > p.score || e.score === p.score && e.matched > p.matched)
+      best.set(e.name, e);
+  }
+  return [...best.values()].sort((a, b) => b.score - a.score || b.matched - a.matched).slice(0, k);
+}
+function pickUpdateTarget(matches, threshold = 18) {
+  const top = matches[0];
+  if (!top)
+    return null;
+  const second = matches[1];
+  const clearlyLeads = !second || top.score >= 1.5 * second.score;
+  const topDir = String(top.dir || "");
+  const topIsStaged = topDir === STAGED_DIR || /[\\/]staged$/.test(topDir);
+  if (top.score >= threshold && top.matched >= SEARCH_DISTINCT_MIN && (clearlyLeads || topIsStaged))
+    return { ...top, confidence: "high" };
+  return null;
+}
+function isAmbiguousExistingRoute(matches, threshold = 18) {
+  const top = matches[0], second = matches[1];
+  if (!top || !second)
+    return false;
+  if (pickUpdateTarget(matches, threshold))
+    return false;
+  const topStrong = top.score >= threshold && top.matched >= SEARCH_DISTINCT_MIN;
+  const secondStrong = second.score >= Math.max(threshold, top.score * 0.65) && second.matched > top.matched;
+  return topStrong && secondStrong;
+}
+var SEMANTIC_RANK_BONUS = [12, 6, 3];
+function applySemanticEvidence(matches, hits, onShelf, threshold = 18) {
+  if (!hits.length)
+    return { matches, suspect: null };
+  const boosted = matches.map((m) => {
+    const hit = hits.find((h) => h.name === m.name);
+    return hit && m.matched > 0 ? { ...m, score: m.score + (SEMANTIC_RANK_BONUS[hit.rank] ?? 0) } : m;
+  }).sort((a, b) => b.score - a.score || b.matched - a.matched);
+  const top = hits.some((h) => h.aboveCanary !== undefined) ? hits.find((h) => h.aboveCanary === true && onShelf(h.name)) : hits[0];
+  const lex = top ? boosted.find((m) => m.name === top.name) : undefined;
+  const suspect = top && onShelf(top.name) && (!lex || lex.matched < SEARCH_DISTINCT_MIN || lex.score < threshold) ? top.name : null;
+  return { matches: boosted, suspect };
+}
+function routeSkill(lexical, hits, onShelf, threshold = 18) {
+  const { matches, suspect } = applySemanticEvidence(lexical, hits, onShelf, threshold);
+  const target = pickUpdateTarget(matches, threshold);
+  if (target)
+    return { route: "update", target, matches, suspect };
+  if (isAmbiguousExistingRoute(matches, threshold))
+    return { route: "park-ambiguous", target: null, matches, suspect };
+  if (suspect)
+    return { route: "park-semantic", target: null, matches, suspect };
+  return { route: "create", target: null, matches, suspect };
+}
+var RERANK_CONF_FLOOR = 0.6;
+var RERANK_SYSTEM_PROMPT = `You are a precision gate for a skill library. Decide whether a coding-session incident should be filed UNDER an existing skill (same underlying job-to-be-done, so the skill's procedure would actually resolve THIS incident) or logged as a NEW skill. Be strict: same_job=true ONLY if a good engineer would say 'that existing skill already covers this.' Reply STRICT JSON only: {"same_job": true|false, "confidence": 0.0-1.0}.`;
+function rerankUserPrompt(evidence, name, description) {
+  return `Incident: ${evidence}
+Existing skill — name: ${name}; description: ${description}
+Same job?`;
+}
+function parseJudgement(raw) {
+  const text = String(raw || "").replace(/<\/?think>/gi, "");
+  const m = text.match(/\{[^{}]*"same_job"[^{}]*\}/);
+  if (!m)
+    return null;
+  try {
+    const o = JSON.parse(m[0]);
+    if (typeof o.same_job !== "boolean")
+      return null;
+    const conf = typeof o.confidence === "number" && Number.isFinite(o.confidence) ? Math.min(1, Math.max(0, o.confidence)) : 0;
+    return { same_job: o.same_job, confidence: conf };
+  } catch {
+    return null;
+  }
+}
+async function routeSkillReranked(evidence, lexical, hits, onShelf, describe, judge, threshold = 18) {
+  const { matches, suspect } = applySemanticEvidence(lexical, hits, onShelf, threshold);
+  const target = pickUpdateTarget(matches, threshold);
+  if (target)
+    return { route: "update", target, matches, suspect, judged: null };
+  if (isAmbiguousExistingRoute(matches, threshold))
+    return { route: "park-ambiguous", target: null, matches, suspect, judged: null };
+  const candidate = hits.find((h) => onShelf(h.name)) ?? null;
+  if (candidate) {
+    const j = await judge(evidence, { name: candidate.name, description: describe(candidate.name) }).catch(() => null);
+    if (j) {
+      if (j.same_job === true && j.confidence >= RERANK_CONF_FLOOR) {
+        return { route: "park-semantic", target: null, matches, suspect: candidate.name, judged: { name: candidate.name, ...j } };
+      }
+      return { route: "create", target: null, matches, suspect: null, judged: { name: candidate.name, ...j } };
+    }
+  }
+  if (suspect)
+    return { route: "park-semantic", target: null, matches, suspect, judged: null };
+  return { route: "create", target: null, matches, suspect: null, judged: null };
+}
+function frontmatterOf(content) {
+  return (String(content || "").match(/^---\n([\s\S]*?)\n---\s*/)?.[1] || "").trimEnd();
+}
+function metadataBlockFromFrontmatter(fm) {
+  const lines = fm.split(`
+`);
+  const start = lines.findIndex((l) => /^metadata\s*:/i.test(l.trim()));
+  if (start < 0)
+    return "";
+  const out = [lines[start]];
+  for (let i = start + 1;i < lines.length; i++) {
+    const line = lines[i];
+    if (/^[A-Za-z0-9_-]+\s*:/.test(line) && !/^\s/.test(line))
+      break;
+    out.push(line);
+  }
+  return out.join(`
+`).trimEnd();
+}
+function preserveExistingFrontmatterMetadata(newContent, oldContent) {
+  if (!oldContent)
+    return newContent;
+  const oldMeta = metadataBlockFromFrontmatter(frontmatterOf(oldContent));
+  if (!oldMeta || /^---\n[\s\S]*?\nmetadata\s*:/im.test(newContent))
+    return newContent;
+  return newContent.replace(/^---\n([\s\S]*?)\n---\s*/m, (_m, fm) => `---
+${String(fm).trimEnd()}
+${oldMeta}
+---
+
+`);
+}
+function skillSectionNames(content) {
+  const out = [];
+  const text = String(content || "").replace(/```[\s\S]*?```/g, "");
+  for (const m of text.matchAll(/^##\s+(.+?)\s*$/gim)) {
+    const section = m[1].trim().replace(/[`*_]/g, "").toLowerCase();
+    if (section && !out.includes(section))
+      out.push(section);
+  }
+  return out;
+}
+function compareSkillSections(oldContent, newContent) {
+  const oldSections = skillSectionNames(oldContent || "");
+  const newSections = skillSectionNames(newContent || "");
+  const preservedSections = oldSections.filter((s) => newSections.includes(s));
+  const droppedSections = oldSections.filter((s) => !newSections.includes(s));
+  const addedSections = newSections.filter((s) => !oldSections.includes(s));
+  return { oldSections, newSections, preservedSections, droppedSections, addedSections };
+}
+async function reviewAndAuthor(evidence, dirs, authorFn, opts = {}) {
+  const threshold = opts.updateThreshold ?? 18;
+  const useRerank = process.env.MM_RERANK === "on" && !!opts.judgeFn && !!opts.semanticFn;
+  const hits = opts.semanticFn ? await opts.semanticFn(evidence, useRerank ? 12 : 3).catch(() => []) : [];
+  const onShelfFn = (n) => dirs.some((x) => existsSync3(join4(x, n, "SKILL.md")));
+  const descOf = (n) => {
+    for (const x of dirs) {
+      try {
+        if (existsSync3(join4(x, n, "SKILL.md")))
+          return (readSkill(x, n).match(/^description:\s*(.+)$/im)?.[1] || "").trim();
+      } catch {}
+    }
+    return "";
+  };
+  const d = useRerank ? await routeSkillReranked(evidence, searchSkills(dirs, evidence, 3), hits, onShelfFn, descOf, opts.judgeFn, threshold) : { ...routeSkill(searchSkills(dirs, evidence, 3), hits, onShelfFn, threshold), judged: null };
+  const { matches } = d;
+  const updTarget = d.target;
+  const slimEarly = matches.map((m) => ({ name: m.name, score: m.score, matched: m.matched }));
+  if (d.route === "park-ambiguous") {
+    return { action: "none", reason: `ambiguous existing skills: ${matches.slice(0, 3).map((m) => `${m.name}(s${m.score}/m${m.matched})`).join(", ")}; refusing autonomous create`, matches: slimEarly };
+  }
+  if (d.route === "park-semantic") {
+    const how = d.judged ? `LLM job-match confirmed, confidence ${d.judged.confidence.toFixed(2)}` : "embedding match without distinctive lexical overlap";
+    return { action: "none", reason: `possible semantic duplicate of '${d.suspect}' (${how}); refusing autonomous create — review or absorb manually`, matches: slimEarly };
+  }
+  const existingForUpdate = updTarget ? (() => {
+    try {
+      const d2 = dirs.find((x) => existsSync3(join4(x, updTarget.name, "SKILL.md")));
+      return d2 ? readSkill(d2, updTarget.name) : "";
+    } catch {
+      return "";
+    }
+  })() : "";
+  const updateContext = existingForUpdate ? `
+
+EXISTING SKILL CONTENT (preserve proven core; patch in new lessons, do not rewrite from scratch):
+\`\`\`markdown
+${existingForUpdate.slice(0, 3500)}
+\`\`\`` : "";
+  const hint = updTarget ? `
+
+UPDATE-FIRST (anti-bloat): an existing skill already covers this territory — "${updTarget.name}": ${updTarget.description}. Extend it: keep that exact name, preserve useful existing sections/frontmatter metadata/provenance, and fold ONLY the new pitfalls/steps into one improved full SKILL.md. Do not delete valuable original structure just to make a cleaner rewrite. Only use a different name if the territory is genuinely distinct.${updateContext}` : matches.length ? `
+
+Existing skills (avoid duplicating): ${matches.map((m) => m.name).join(", ")}.` : "";
+  const _classes = (evidence.match(/^- recovered failure:/gm) || []).length;
+  const _examples = (evidence.match(/·\s*example\s*—/g) || []).length;
+  const _diverse = Math.max(_classes, _examples) >= 4;
+  const depthDirective = _diverse ? `
+
+EVIDENCE DEPTH: this evidence holds ${_examples} concrete worked-example${_examples === 1 ? "" : "s"} spanning distinct failure classes. HIGH-DIVERSITY regime — completeness matters more than brevity. The skill should have ALL of these sections (a Procedure-only skill is INCOMPLETE and will be REJECTED):
+- "## Procedure" — a generalized decision guide (symptom → safest fix path).
+- "## Pitfalls" — ONE entry per DISTINCT failure class (symptom → exact fix → one-line diagnostic TELL). Never merge different bugs into one generic bucket; emit a separate pitfall for each of the ${_examples} cases' classes.
+- "## Verification" — how to confirm green with no regressions.
+- "## Worked examples (real cases)" — catalog ALL ${_examples} real cases compactly: symptom (one line) → exact fix → TELL.
+The ~70-line cap is LIFTED (target a rich ~120-180 lines); be EXHAUSTIVE on the diverse evidence — that breadth is the whole edge — but stay sectioned + hygienic (no wall of text).` : "";
+  const parseDraft = (raw2) => {
+    let skill = (raw2 || "").replace(/<\/?think>/gi, "").trim();
+    const startIdx = skill.search(/(^|\n)\s*(---\s*\n|#\s+|name:\s)/i);
+    if (startIdx > 0)
+      skill = skill.slice(startIdx).trim();
+    skill = skill.replace(/^```(?:markdown|md|yaml)?\n?/i, "").replace(/\n?```\s*$/i, "").trim();
+    if (/^NOTHING-TO-SAVE/i.test(skill) || skill.length < 40)
+      return null;
+    const rawName = (skill.match(/^name:\s*["']?(.+?)["']?\s*$/im)?.[1] || "").trim();
+    if (rawName && (/[\/\\;|&]|\.\./.test(rawName) || rawName.length > 64))
+      return { name: "", description: "", body: "", unsafeName: rawName };
+    let name2 = slug(rawName);
+    if (rawName && name2 && !isValidSkillName(name2))
+      return { name: name2, description: "", body: "", invalidName: name2 };
+    if (!name2)
+      name2 = slug((skill.match(/^#\s+(.+?)\s*$/m)?.[1] || "").trim());
+    if (!name2 && updTarget)
+      name2 = updTarget.name;
+    let description2 = (skill.match(/^description:\s*["']?(.+?)["']?\s*$/im)?.[1] || "").trim();
+    if (!description2)
+      description2 = (skill.split(`
+`).find((l) => {
+        const t = l.trim();
+        return t.length > 25 && !/^([#`>*-]|---|name:|title:|description:)/i.test(t);
+      }) || "").trim();
+    if (!description2 && updTarget)
+      description2 = updTarget.description;
+    let body2 = skill;
+    const secStart = body2.search(/(^|\n)##\s+/);
+    if (secStart >= 0)
+      body2 = body2.slice(secStart);
+    else
+      body2 = body2.replace(/^---[\s\S]*?\n---\s*\n?/, "").replace(/^#\s+.+\n+/, "");
+    body2 = body2.replace(/\n---\s*(\n[\s\S]*)?$/, "").trim();
+    return { name: name2, description: description2, body: body2 };
+  };
+  const isCleanDraft = (p) => isValidSkillName(p.name) && !!p.description && p.description.length >= 20 && lintSkillDraft(p).ok;
+  let _fb;
+  const fallback = () => {
+    if (_fb === undefined) {
+      try {
+        const c = findCandidate();
+        _fb = c ? draftWithRepair(c, repairForCandidate(c)) : null;
+      } catch {
+        _fb = null;
+      }
+    }
+    return _fb;
+  };
+  const fbUsable = (f) => !!f && isValidSkillName(f.name) && !!f.body && f.body.trim().length >= 40 && lintSkillDraft(f).ok && scanSkillContent(f.body).ok;
+  const looksEmpty = (s) => {
+    const t = (s || "").replace(/<\/?think>/gi, "").trim();
+    return t.length < 40 && !/^NOTHING-TO-SAVE/i.test(t);
+  };
+  const saidNothing = (s) => /^NOTHING-TO-SAVE/i.test((s || "").replace(/<\/?think>/gi, "").trim());
+  let degraded;
+  let raw = await authorFn(REVIEW_PROMPT, evidence + hint + depthDirective) || "";
+  if (looksEmpty(raw)) {
+    degraded = "author-empty→retry-same";
+    try {
+      raw = await authorFn(REVIEW_PROMPT, evidence + hint + depthDirective) || raw;
+    } catch {}
+  }
+  if (looksEmpty(raw)) {
+    degraded = "author-empty→retry-compressed";
+    try {
+      raw = await authorFn(REVIEW_PROMPT_COMPACT, evidence) || raw;
+    } catch {}
+  }
+  try {
+    ensureDir();
+    writeFileSync3(join4(STATE_DIR, "reflect-last-raw.txt"), `=== ${new Date().toISOString()}${degraded ? " [" + degraded + "]" : ""} ===
+${raw}
+`);
+  } catch {}
+  let parsed = parseDraft(raw);
+  if (parsed?.unsafeName)
+    return { action: "reject", reason: `name "${parsed.unsafeName.slice(0, 40)}" has unsafe characters (path/injection)`, degraded };
+  if (parsed?.invalidName)
+    return { action: "reject", reason: `name "${parsed.invalidName}" not class-level`, degraded };
+  if (!parsed) {
+    if (saidNothing(raw))
+      return { action: "none", reason: "author judged NOTHING-TO-SAVE" };
+    const f = fallback();
+    if (fbUsable(f)) {
+      parsed = { name: f.name, description: f.description, body: f.body };
+      degraded = (degraded ? degraded + "→" : "author-empty→") + "deterministic-fallback";
+    } else
+      return { action: "reject", reason: `author produced no usable skill after same+compressed retries; deterministic fallback ${f ? "sub-threshold" : "unavailable"}`, degraded: (degraded || "author-empty") + "→no-usable-skill" };
+  }
+  if (!parsed.body || parsed.body.trim().length < 10)
+    return { action: "reject", reason: "body too thin" };
+  const depthComplete = (b) => !_diverse || /##\s+pitfalls/i.test(b) && /##\s+worked\s+examples/i.test(b);
+  const sotaGaps = sotaQualityGaps(parsed);
+  if ((!isCleanDraft(parsed) || !depthComplete(parsed.body) || sotaGaps.length) && !(degraded || "").includes("deterministic-fallback")) {
+    const why = lintSkillDraft(parsed).issues.concat(isValidSkillName(parsed.name) ? [] : ["name must be a class-level lowercase-hyphen slug"]).concat((parsed.description || "").length >= 20 ? [] : ["description too short"]).concat(depthComplete(parsed.body) ? [] : [`HIGH-DIVERSITY skill is MISSING required depth sections (needs both "## Pitfalls" with one entry per distinct class AND "## Worked examples (real cases)" cataloging all ${_examples} cases) — a Procedure-only skill is too thin`]).concat(sotaGaps);
+    const corrective = `
+
+YOUR PREVIOUS DRAFT IS NOT YET SOTA (${why.join("; ")}). A top-tier skill ALWAYS has: concrete correct fenced code, a one-line diagnostic TELL on every Pitfall, an explicit safe-first step before any destructive command, and a class-level (not one-off) frame. Re-output ONE complete SKILL.md and NOTHING else, fixing every issue above: YAML frontmatter with a class-level "name:" (lowercase-hyphen) + a "description:" that STARTS WITH "Use when"; a body with "## Procedure", "## Pitfalls" (each with symptom → exact fix → TELL), "## Verification"${_diverse ? ', AND "## Worked examples (real cases)" cataloging every real case' : ""}.`;
+    try {
+      const raw2 = await authorFn(REVIEW_PROMPT, evidence + hint + depthDirective + corrective) || "";
+      try {
+        writeFileSync3(join4(STATE_DIR, "reflect-last-raw.txt"), `=== ${new Date().toISOString()} (retry) ===
+${raw2}
+`);
+      } catch {}
+      const p2 = parseDraft(raw2);
+      if (p2 && !p2.unsafeName && isCleanDraft(p2) && depthComplete(p2.body) && sotaQualityGaps(p2).length <= sotaGaps.length) {
+        parsed = p2;
+        raw = raw2;
+      }
+    } catch {}
+  }
+  let { name, description, body } = parsed;
+  if (!isValidSkillName(name)) {
+    const f = fallback();
+    name = updTarget && isValidSkillName(updTarget.name) ? updTarget.name : f && isValidSkillName(f.name) ? f.name : name;
+  }
+  if (!isValidSkillName(name))
+    return { action: "reject", reason: `name "${name}" not class-level`, degraded };
+  const secEarly = scanSkillContent(body);
+  if (!secEarly.ok)
+    return { action: "reject", reason: `security: ${secEarly.issues.join("; ")}`, degraded };
+  const descOk = (d2) => !!d2 && d2.length >= 20 && /\b(use when|trigger|when )/i.test(d2);
+  if (!descOk(description)) {
+    if (description && description.length >= 12 && !/\b(use when|trigger|when )/i.test(description))
+      description = `Use when ${description}`.slice(0, 700);
+    if (!descOk(description)) {
+      const f = fallback();
+      description = f && descOk(f.description) ? f.description : updTarget && descOk(updTarget.description) ? updTarget.description : description;
+    }
+  }
+  if (!/##\s+procedure/i.test(body) || !/##\s+verification/i.test(body)) {
+    const f = fallback();
+    if (f) {
+      if (!/##\s+procedure/i.test(body)) {
+        const m = f.body.match(/(##\s+Procedure[\s\S]*?)(?=\n##\s|\s*$)/i);
+        body += `
+
+${m ? m[1].trim() : `## Procedure
+1. Repeat the observed workflow, adapting paths/args to the current context.
+2. Capture the success/failure receipt before moving on.`}`;
+      }
+      if (!/##\s+verification/i.test(body)) {
+        const m = f.body.match(/(##\s+Verification[\s\S]*?)(?=\n##\s|\s*$)/i);
+        body += `
+
+${m ? m[1].trim() : `## Verification
+- Confirm via concrete command/tool output that the workflow actually succeeded.`}`;
+      }
+    }
+  }
+  const sec = scanSkillContent(body);
+  if (!sec.ok)
+    return { action: "reject", reason: `security: ${sec.issues.join("; ")}`, degraded };
+  const lint = lintSkillDraft({ name, description, body });
+  if (!lint.ok) {
+    const f = fallback();
+    if (f && lintSkillDraft(f).ok && isValidSkillName(f.name)) {
+      ({ name, description, body } = f);
+      degraded = (degraded ? degraded + "→" : "") + "lint-repair-fallback";
+    } else
+      return { action: "reject", reason: `lint: ${lint.issues.join("; ")}`, degraded };
+  }
+  const content = `---
+name: ${name}
+description: ${description}
+---
+
+${body}
+`;
+  const slim = matches.map((m) => ({ name: m.name, score: m.score, matched: m.matched }));
+  const existingNames = new Set(matches.map((m) => m.name));
+  if (existingNames.has(name)) {
+    const preserved = preserveExistingFrontmatterMetadata(content, existingForUpdate);
+    return { action: "update", name, description, body, content: preserved, updateTarget: name, matches: slim, degraded };
+  }
+  return { action: "create", name, description, body, content, matches: slim, degraded };
+}
+function buildEvidenceManifest(i) {
+  const sd = i.oldContent ? compareSkillSections(i.oldContent, i.newContent) : undefined;
+  return { ts: new Date().toISOString(), action: i.action, skill: i.skill, updateTarget: i.updateTarget, sources: { conversations: i.convs, durableSignals: i.signals }, memfsHits: i.memfsHits.map((m) => ({ name: m.name, score: m.score, matched: m.matched })), preferencesInjected: i.preferences, rejectedNoise: i.rejected, newHash: hash(i.newContent), oldHash: i.oldContent ? hash(i.oldContent) : undefined, sectionDiff: sd ? { preserved: sd.preservedSections, dropped: sd.droppedSections, added: sd.addedSections } : undefined, gates: { naming: true, security: true, lint: true } };
+}
+function retrievePreferences(evidence, memDir) {
+  const dir = memDir || process.env.MEMORY_DIR;
+  if (!dir)
+    return [];
+  const prefs = [];
+  for (const s of ["persona.md", "system/persona.md", "system/human.md", "human.md", "system/human/preferences.md"]) {
+    const p = join4(dir, s);
+    if (!existsSync3(p))
+      continue;
+    try {
+      for (const line of readFileSync3(p, "utf8").split(`
+`)) {
+        const l = line.trim().replace(/^[-*#>\s]+/, "");
+        if (/\b(prefer|preference|always|never|wants?|likes?|hates?|style|format|verbos|concise|terse|tone|don'?t)\b/i.test(l) && l.length > 20 && l.length < 220)
+          prefs.push(l);
+      }
+    } catch {}
+  }
+  return [...new Set(prefs)].slice(0, 6);
+}
+function reflectSignature(ev) {
+  return hash(`${ev.convs}
+${ev.items}
+${ev.digest}`);
+}
+function loadHandledReflects() {
+  try {
+    return existsSync3(REFLECT_HANDLED) ? JSON.parse(readFileSync3(REFLECT_HANDLED, "utf8")) : {};
+  } catch {
+    return {};
+  }
+}
+function markHandledReflect(sig, route) {
+  try {
+    ensureDir();
+    const h = loadHandledReflects();
+    h[sig] = { ts: Date.now(), route };
+    writeFileSync3(REFLECT_HANDLED, JSON.stringify(h, null, 2));
+  } catch {}
+}
+function isHighConfidenceCreate(res, ev) {
+  if (res.action !== "create")
+    return false;
+  const top = res.matches?.[0];
+  const cleanRoute = !pickUpdateTarget(res.matches || [], 18);
+  const richDraft = !!res.description && res.description.length >= 80 && /##\s+Pitfalls/i.test(res.body || "") && /##\s+Verification/i.test(res.body || "");
+  return ev.convs >= 3 && ev.items >= 1 && cleanRoute && richDraft;
+}
+function graduateStagedSkill(name, ctx) {
+  const nm = slug(name);
+  if (!nm)
+    throw new Error("name required");
+  const srcDir = join4(STAGED_DIR, nm);
+  const src = join4(srcDir, "SKILL.md");
+  if (!existsSync3(src))
+    throw new Error(`no staged skill '${nm}'`);
+  const retiredBlock = retiredSkillBlocker(nm, ctx);
+  if (retiredBlock)
+    throw new Error(`retire-sticky blocked graduate: ${retiredBlock}`);
+  const content = readFileSync3(src, "utf8");
+  const desc = (content.match(/^description:\s*(.+)$/im)?.[1] || "").trim();
+  const body = content.replace(/^---[\s\S]*?\n---\s*\n?/, "");
+  const lint = lintSkillDraft({ name: nm, description: desc, body });
+  if (!lint.ok)
+    throw new Error(`linter blocked: ${lint.issues.join("; ")}`);
+  const sec = scanSkillContent(body);
+  if (!sec.ok)
+    throw new Error(`security blocked: ${sec.issues.join("; ")}`);
+  const dstRoot = agentSkillsDir(ctx);
+  const dst = writeSkill(dstRoot, nm, content.includes(MM_TAG) ? content : content + `
+<!-- ${MM_TAG}: graduated ${new Date().toISOString().slice(0, 10)} -->
+`);
+  mkdirSync3(STAGED_RETIRED_DIR, { recursive: true });
+  try {
+    renameSync2(srcDir, join4(STAGED_RETIRED_DIR, `${nm}-graduated-${Date.now()}`));
+  } catch {}
+  appendUiEvent({ phase: "skill_graduated", summary: `graduated '${nm}'`, skill: nm, action: "graduate", route: "manual" });
+  appendMeshFeed({ type: "skill_graduated", skill: nm, route: "GRADUATE", signals: 0 });
+  writeUiState({ phase: "done", last: `graduated '${nm}'`, route: "GRADUATE · live" });
+  try {
+    const _b = readSkill(dstRoot, nm);
+    if (_b) {
+      const _p = publishPlan({ name: nm, description: skillDesc(dstRoot, nm), body: _b, shelf: "agent" });
+      appendUiEvent({ phase: "skill_publish_preflight", summary: `${nm}: ${_p.publishability}/100 · tier=${publishTier(_p)} · ${_p.recommended}`, skill: nm, route: "auto-after-graduate" });
+    }
+  } catch {}
+  return dst;
+}
+function reviewForkAuthor(ctx) {
+  return async (sys, user) => {
+    try {
+      if (typeof ctx?.conversation?.fork !== "function")
+        return "";
+      const forked = await ctx.conversation.fork({ hidden: true });
+      const stream = await forked.sendMessageStream([{ role: "user", content: `${sys}
+
+${user}` }]);
+      const out = await consumeStreamBounded(stream);
+      return out.trim();
+    } catch {
+      return "";
+    }
+  };
+}
+async function runReflectiveReview(ctx, config = {}) {
+  const dirs = config.dirs ?? scanDirs(ctx);
+  const stagedShelf = config.stagedDir ?? STAGED_DIR;
+  const reviewDirs = config.mode === "auto" ? dirs : [...dirs, stagedShelf];
+  const exp = config.experience ?? loadExperience();
+  const ev = buildCrossConversationEvidence(exp);
+  const engram = engramConsolidate(exp, managedView(reviewDirs).map((m) => ({ name: m.name, body: m.body })));
+  appendUiEvent({ phase: "review_started", summary: `reviewing ${ev.convs} sessions / ${ev.items} durable signals` });
+  writeUiState({ phase: "reviewing", detail: `${ev.convs} sessions / ${ev.items} signals` });
+  if (ev.items < (config.minItems ?? 2)) {
+    appendUiEvent({ phase: "reflect_none", summary: `nothing to save yet (${ev.items} signals)` });
+    writeUiState({ phase: "idle", last: "nothing to save yet" });
+    return { action: "none", reason: `only ${ev.items} cross-session signals (need ≥${config.minItems ?? 2})` };
+  }
+  const prefs = retrievePreferences(ev.digest, process.env.MEMORY_DIR);
+  const digest = `${engram.digest}
+
+${ev.digest}` + (prefs.length ? `
+
+USER PREFERENCES (from this agent's memory — bake the relevant ones into the skill's guidance):
+${prefs.map((p) => `- ${p}`).join(`
+`)}` : "");
+  const preTgt = pickUpdateTarget(searchSkills(reviewDirs, digest, 3), 18);
+  const routeKey = preTgt ? `UPDATE:${preTgt.name}` : "CREATE";
+  const sig = reflectSignature(ev);
+  if (loadHandledReflects()[sig]) {
+    const summary = `already reflected ${routeKey.toLowerCase()} for this evidence signature`;
+    appendUiEvent({ phase: "reflect_none", summary });
+    writeUiState({ phase: "idle", last: summary, route: "SKIP · handled" });
+    return { action: "none", reason: summary };
+  }
+  writeUiState({ phase: "routing", route: preTgt ? `UPDATE → ${preTgt.name}` : "CREATE (new skill)" });
+  appendUiEvent({ phase: "review_planned", summary: preTgt ? `route UPDATE → ${preTgt.name}` : "route CREATE — no existing skill safely covers this" });
+  writeUiState({ phase: "writing", skill: preTgt?.name, route: preTgt ? `UPDATE → ${preTgt.name}` : "CREATE" });
+  const author = config.authorFn || reviewForkAuthor(ctx);
+  let res;
+  try {
+    res = await reviewAndAuthor(digest, reviewDirs, author, { semanticFn: config.semanticFn, judgeFn: config.judgeFn ?? judgeViaFork(ctx) });
+  } catch (e) {
+    appendUiEvent({ phase: "reflect_error", summary: `author failed: ${String(e?.message ?? e).slice(0, 80)}` });
+    writeUiState({ phase: "idle", last: "review interrupted — will retry next session", route: "ERROR · safe" });
+    return { action: "none", reason: `author error: ${String(e?.message ?? e).slice(0, 120)}` };
+  }
+  if ((res.action === "create" || res.action === "update") && res.name && res.content) {
+    const live = config.mode === "auto";
+    const graduate = live || res.action === "update" || isHighConfidenceCreate(res, ev);
+    const dir = graduate ? agentSkillsDir(ctx) : stagedShelf;
+    const tagged = res.content.includes(MM_TAG) ? res.content : res.content + `
+<!-- ${MM_TAG}: reflective ${new Date().toISOString().slice(0, 10)}; action=${res.action}; convs=${ev.convs}; ${graduate ? "graduated=true" : "staged=true"} -->
+`;
+    try {
+      if (res.action === "create" && !res.updateTarget) {
+        const retiredBlock = retiredSkillBlocker(res.name, ctx);
+        if (retiredBlock) {
+          markHandledReflect(sig, `RETIRED:${res.name}`);
+          appendUiEvent({ phase: "reflect_none", summary: `retire-sticky blocked '${res.name}'` });
+          writeUiState({ phase: "idle", last: `retire-sticky blocked '${res.name}'`, route: "SKIP · retired" });
+          return { action: "none", name: res.name, reason: retiredBlock };
+        }
+        const n1 = multiInstanceSupport(`${res.name} ${res.description ?? ""}`, ev.signals ?? [], config.minInstances ?? 2);
+        if (!n1.ok) {
+          markHandledReflect(sig, `N1-PARKED:${res.name}`);
+          appendUiEvent({ phase: "reflect_none", summary: `n=1 gate parked '${res.name}': ${n1.reason.slice(0, 120)}` });
+          writeUiState({ phase: "idle", last: `n=1 gate parked '${res.name}'`, route: "SKIP · n=1" });
+          return { action: "none", name: res.name, reason: `n=1 gate: ${n1.reason}` };
+        }
+      }
+      const oldContent = res.action === "update" && res.updateTarget ? (() => {
+        const d = reviewDirs.find((x) => existsSync3(join4(x, res.updateTarget, "SKILL.md")));
+        return d ? readSkill(d, res.updateTarget) : undefined;
+      })() : undefined;
+      writeSkill(dir, res.name, tagged);
+      const manifest = buildEvidenceManifest({ action: res.action, skill: res.name, updateTarget: res.updateTarget, convs: ev.convs, signals: ev.items, memfsHits: res.matches || [], preferences: prefs, rejected: ev.rejected, newContent: tagged, oldContent });
+      const evDir = join4(dir, res.name, "references", "evidence");
+      mkdirSync3(evDir, { recursive: true });
+      writeFileSync3(join4(evDir, `${Date.now()}.json`), JSON.stringify(manifest, null, 2));
+      ensureDir();
+      mkdirSync3(RECEIPTS_DIR, { recursive: true });
+      writeFileSync3(join4(RECEIPTS_DIR, `reflect-${Date.now()}.json`), JSON.stringify({ action: res.action, name: res.name, updateTarget: res.updateTarget, convs: ev.convs, items: ev.items, prefsInjected: prefs.length, rejected: ev.rejected.length, degraded: res.degraded || null, dir, ts: Date.now() }, null, 2));
+      if (res.degraded)
+        appendUiEvent({ phase: "author_degraded", summary: `authored via graceful degradation: ${res.degraded}`, skill: res.name });
+      const phase = graduate ? "skill_graduated" : "skill_staged";
+      const verb = graduate ? "graduated" : res.action === "update" ? "staged update to" : "staged";
+      const summary = `${verb} '${res.name}' (${res.action === "update" ? "update-first" : "new"}, ${ev.convs} sessions/${ev.items} signals)`;
+      appendUiEvent({ phase, summary, skill: res.name, action: res.action, route: res.updateTarget ? `update ${res.updateTarget}` : "create" });
+      appendMeshFeed({ type: phase, skill: res.name, route: graduate ? "GRADUATE" : res.action.toUpperCase(), signals: ev.items });
+      markHandledReflect(sig, routeKey);
+      appendUiEvent({ phase: "evidence_manifest_written", summary: "wrote evidence manifest" });
+      if (ev.rejected.length)
+        appendUiEvent({ phase: "noise_rejected", summary: `rejected ${ev.rejected.length} env-noise items` });
+      if (prefs.length)
+        appendUiEvent({ phase: "memory_pref_injected", summary: `injected ${prefs.length} user preferences` });
+      writeUiState({ phase: "done", last: summary, route: `${graduate ? "GRADUATE" : res.action.toUpperCase()}${res.updateTarget ? " " + res.updateTarget : ""} · ${graduate ? "live" : "staged"}` });
+      return { ...res, wrote: join4(dir, res.name) };
+    } catch (e) {
+      appendUiEvent({ phase: "reflect_error", summary: `write failed: ${String(e?.message ?? e).slice(0, 80)}` });
+      return { ...res, reason: String(e?.message ?? e) };
+    }
+  }
+  if (res.action === "reject") {
+    const safe = /\bsecurity:/i.test(res.reason || "");
+    markHandledReflect(sig, routeKey);
+    try {
+      ensureDir();
+      mkdirSync3(RECEIPTS_DIR, { recursive: true });
+      writeFileSync3(join4(RECEIPTS_DIR, `reflect-rejected-${Date.now()}.json`), JSON.stringify({ action: "reject", safe, reason: res.reason || "(none)", degraded: res.degraded || null, convs: ev.convs, items: ev.items, ts: Date.now() }, null, 2));
+    } catch {}
+    appendUiEvent({ phase: safe ? "blocked_unsafe" : "reflect_none", summary: safe ? `\uD83D\uDEE1️ blocked unsafe content (safe): ${res.reason}` : `draft rejected; nothing saved (${res.reason})${res.degraded ? " [degraded: " + res.degraded + "]" : ""}` });
+    writeUiState({ phase: safe ? "protected" : "idle", last: safe ? "blocked unsafe content (safe)" : `draft rejected; nothing saved`, route: safe ? "BLOCKED · protected" : "SKIP · rejected-draft" });
+  } else {
+    markHandledReflect(sig, routeKey);
+    appendUiEvent({ phase: "reflect_none", summary: "nothing durable to save" });
+    writeUiState({ phase: "idle", last: "nothing to save" });
+  }
+  return res;
+}
+
 // mods/lifecycle.ts
-import { mkdirSync as mkdirSync3, readFileSync as readFileSync3, existsSync as existsSync3, writeFileSync as writeFileSync3, readdirSync as readdirSync2, renameSync as renameSync2 } from "node:fs";
-import { join as join4 } from "node:path";
 function managedSkillUsage(name, rows = loadRows()) {
   const n = slug(name);
   return rows.filter((r) => (r.tmpl || r.fp || "").toLowerCase().includes(`skill ${n}`)).length;
@@ -1504,7 +2463,7 @@ function curateManagedSkills(ctx) {
 }
 function retireManagedSkill(name, reason, ctx, absorbedInto, restrictDirs) {
   const dirs = restrictDirs ?? scanDirs(ctx);
-  const d = dirs.find((x) => existsSync3(join4(x, name, "SKILL.md")));
+  const d = dirs.find((x) => existsSync4(join5(x, name, "SKILL.md")));
   if (!d)
     throw new Error(`no skill '${name}'`);
   if (!isManaged(d, name))
@@ -1512,15 +2471,15 @@ function retireManagedSkill(name, reason, ctx, absorbedInto, restrictDirs) {
   if (isPinned(name))
     throw new Error(`'${name}' is pinned — unpin first (pin protects from retire, not from patch)`);
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const retiredRoot = join4(d, "_retired");
-  mkdirSync3(retiredRoot, { recursive: true });
-  const target = join4(retiredRoot, `${name}-${stamp}`);
+  const retiredRoot = join5(d, "_retired");
+  mkdirSync4(retiredRoot, { recursive: true });
+  const target = join5(retiredRoot, `${name}-${stamp}`);
   const forward = absorbedInto ? `absorbed_into: ${absorbedInto}
 ` : "";
-  writeFileSync3(join4(d, name, "RETIRE-REASON.txt"), `${new Date().toISOString()}
+  writeFileSync4(join5(d, name, "RETIRE-REASON.txt"), `${new Date().toISOString()}
 ${reason || "retired by muscle-memory curate"}
 ${forward}`);
-  renameSync2(join4(d, name), target);
+  renameSync3(join5(d, name), target);
   const u = loadUsage();
   u[name] = { ...u[name] || {}, state: "archived", absorbedInto: absorbedInto || undefined };
   saveUsage(u);
@@ -1535,9 +2494,9 @@ function retiredSkillBlocker(name, ctx) {
     return `skill '${nm}' is archived/retired; restore it before recreating or patch an existing replacement`;
   }
   for (const d of scanDirs(ctx)) {
-    const retiredRoot = join4(d, "_retired");
+    const retiredRoot = join5(d, "_retired");
     try {
-      if (!existsSync3(retiredRoot))
+      if (!existsSync4(retiredRoot))
         continue;
       const match = readdirSync2(retiredRoot).find((n) => n === nm || n.startsWith(`${nm}-`));
       if (match)
@@ -1546,9 +2505,43 @@ function retiredSkillBlocker(name, ctx) {
   }
   return null;
 }
+var FIXTURE_SKILL_RE = /^ref-skill-/;
+function renderBoxscore(dirs, opts = {}) {
+  const reg = buildRegistry(dirs);
+  const ledger = loadPlusMinus();
+  const seen = new Set;
+  const rows = reg.skills.filter((s) => s.state !== "archived" && !FIXTURE_SKILL_RE.test(s.name)).filter((s) => seen.has(s.name) ? false : (seen.add(s.name), true)).map((s) => {
+    const r = ledger[s.name];
+    const net = r ? r.plus - r.minus : null;
+    const ten = tenureFor(s.name);
+    return { name: s.name, ten, uses: s.uses || 0, net, rec: r ? `+${r.plus}/-${r.minus}` : "—" };
+  }).sort((a, b) => (b.net ?? -99) - (a.net ?? -99) || b.uses - a.uses);
+  const icon = (t) => t === "pinned" ? "\uD83D\uDCCC" : t === "tenured" ? "\uD83C\uDFC6" : "·";
+  const body = rows.map((r) => `  ${icon(r.ten)} ${(r.net === null ? "  —" : r.net >= 0 ? "+" + r.net : String(r.net)).padStart(3)}  ${r.name}  (${r.rec} · ${r.uses} min)`).join(`
+`);
+  const autonomy = opts.renderAutonomy ? `
+
+THE PROGRAM ITSELF (autonomy tenure — trust as a ledger):
+${opts.renderAutonomy()}` : "";
+  return `\uD83C\uDFC0 HARDWOOD BOX SCORE — tenure · net ± · record · minutes
+
+${body || "(no managed skills yet)"}${autonomy}
+
+\uD83D\uDCCC pinned · \uD83C\uDFC6 tenured (earned) · rate plays: /muscle-memory rate <skill> up|down`;
+}
+function tenureFor(name, usage = loadUsage(), ledger = loadPlusMinus()) {
+  const u = usage[name] || {};
+  if (u.pinned)
+    return "pinned";
+  const net = skillUtility(ledger, name);
+  if (net !== null && net >= 3 || (u.uses || 0) >= 10)
+    return "tenured";
+  return "labile";
+}
 function runAutonomousPrune(ctx, opts = {}) {
   const maxRetire = Math.max(0, opts.maxRetire ?? 1);
   const usage = loadUsage();
+  const ledger = loadPlusMinus();
   const now = Date.now();
   const retired = [];
   const retiredPaths = [];
@@ -1566,6 +2559,20 @@ function runAutonomousPrune(ctx, opts = {}) {
         continue;
       }
       const uses = u.uses || 0;
+      const net = skillUtility(ledger, n);
+      if (net !== null && net <= -2 && retired.length < maxRetire) {
+        const reason = `referee-prune: plus-minus net ${net} — evidence-backed retirement (reversible)`;
+        const target = retireManagedSkill(n, reason, ctx, undefined, [d]);
+        retired.push(n);
+        retiredPaths.push(target);
+        appendUiEvent({ phase: "skill_retired", summary: `retired '${n}' (net ${net} plus-minus) — the record says it hurts`, skill: n, action: "retire", route: "referee-prune" });
+        appendMeshFeed({ type: "skill_retired", skill: n, route: "REFEREE-PRUNE", signals: net });
+        continue;
+      }
+      if (net !== null && net > 0) {
+        kept.push(n);
+        continue;
+      }
       if (uses > 0 || u.lastActivity) {
         kept.push(n);
         continue;
@@ -1652,7 +2659,7 @@ function lifecycleTransition(input) {
 }
 function loadUsage() {
   try {
-    return existsSync3(USAGE_PATH) ? JSON.parse(readFileSync3(USAGE_PATH, "utf8")) : {};
+    return existsSync4(USAGE_PATH) ? JSON.parse(readFileSync4(USAGE_PATH, "utf8")) : {};
   } catch {
     return {};
   }
@@ -1660,7 +2667,7 @@ function loadUsage() {
 function saveUsage(u) {
   try {
     ensureDir();
-    writeFileSync3(USAGE_PATH, JSON.stringify(u, null, 2));
+    writeFileSync4(USAGE_PATH, JSON.stringify(u, null, 2));
   } catch {}
 }
 function bumpUsage(name) {
@@ -1684,18 +2691,18 @@ function isPinned(name) {
 function restoreManagedSkill(name, ctx) {
   const dirs = scanDirs(ctx);
   for (const d of dirs) {
-    const retiredRoot = join4(d, "_retired");
-    if (!existsSync3(retiredRoot))
+    const retiredRoot = join5(d, "_retired");
+    if (!existsSync4(retiredRoot))
       continue;
     const matches = readdirSync2(retiredRoot).filter((n) => n === name || n.startsWith(`${name}-`)).sort().reverse();
     if (matches.length) {
-      if (existsSync3(join4(d, name, "SKILL.md")))
+      if (existsSync4(join5(d, name, "SKILL.md")))
         throw new Error(`'${name}' already active`);
-      renameSync2(join4(retiredRoot, matches[0]), join4(d, name));
+      renameSync3(join5(retiredRoot, matches[0]), join5(d, name));
       const u = loadUsage();
       u[name] = { ...u[name] || {}, state: "active", lastActivity: Date.now() };
       saveUsage(u);
-      return join4(d, name);
+      return join5(d, name);
     }
   }
   throw new Error(`no retired skill '${name}' to restore`);
@@ -1754,7 +2761,7 @@ function coachOnFailure(step, output, defenses) {
     hit
   };
 }
-var ENGRAM = {
+var ENGRAM2 = {
   W_PE: 3,
   W_RW: 2,
   W_NOV: 1,
@@ -1803,16 +2810,16 @@ function tagExperience(rows, opts = {}) {
       } else if (highSignal.has(r.tool))
         rw = 1;
     }
-    const rec = Math.pow(0.5, Math.max(0, now - (r.ts ?? now)) / ENGRAM.TAG_HALFLIFE_MS);
-    const score = +(ENGRAM.W_PE * pe + ENGRAM.W_RW * rw + ENGRAM.W_NOV * nov + ENGRAM.W_REC * rec).toFixed(3);
+    const rec = Math.pow(0.5, Math.max(0, now - (r.ts ?? now)) / ENGRAM2.TAG_HALFLIFE_MS);
+    const score = +(ENGRAM2.W_PE * pe + ENGRAM2.W_RW * rw + ENGRAM2.W_NOV * nov + ENGRAM2.W_REC * rec).toFixed(3);
     out.push({ ...r, sal: { score, pe, rw, nov, rec: +rec.toFixed(3) } });
   }
   return out;
 }
 function captureTagged(tagged, opts = {}) {
-  const window = opts.window ?? ENGRAM.CAPTURE_WINDOW_MS;
-  const prp = opts.prpThreshold ?? ENGRAM.PRP_THRESHOLD;
-  const weakMax = opts.weakMax ?? ENGRAM.WEAK_MAX;
+  const window = opts.window ?? ENGRAM2.CAPTURE_WINDOW_MS;
+  const prp = opts.prpThreshold ?? ENGRAM2.PRP_THRESHOLD;
+  const weakMax = opts.weakMax ?? ENGRAM2.WEAK_MAX;
   const count = new Map;
   for (const t of tagged) {
     const h = String(t.h ?? t.fp ?? stepSig(t));
@@ -1942,7 +2949,7 @@ function engramConsolidate(rows, skills, opts = {}) {
 function guardDecision(toolName, args, defenses, mode) {
   if (mode === "off")
     return null;
-  const { fp, tmpl } = fingerprint2(toolName, args ?? {});
+  const { fp, tmpl } = fingerprint(toolName, args ?? {});
   const hit = preActionDefense(stepSig({ tool: toolName, fp, tmpl }), defenses);
   if (!hit || hit.kind !== "avoid" || hit.severity < 2)
     return null;
@@ -2084,865 +3091,60 @@ async function syncSkillPassages(client, agentId, managed) {
   return synced;
 }
 
-// mods/autopilot.ts
-var AUTOPILOT_DEFAULT = { mode: "staged", dailyBudget: 5, minImpact: 4 };
-function repairForRows(c, rows) {
-  if (!c.fixes)
-    return;
-  const first = c.key.split(/\s*→\s*/)[0];
-  return detectRepairChains(rows).find((r) => r.trigger === first || r.verifyStep === first || c.key.includes(r.trigger) || c.key.includes(r.verifyStep));
-}
-function autopilotPlan(input) {
-  const cfg = input.config || AUTOPILOT_DEFAULT;
-  const decisions = [];
-  const skipped = [];
-  let used = input.budgetUsedToday || 0;
-  if (cfg.mode === "off")
-    return { decisions, skipped: [{ what: "all", why: "autopilot off" }], budget: { used, limit: cfg.dailyBudget }, mode: cfg.mode };
-  const existing = new Set(input.managed.map((m) => m.name));
-  const refineTargets = new Set;
-  const apSteps = detectAntiPatterns(input.rows).map((p) => p.step.toLowerCase());
-  for (const m of input.managed) {
-    if (m.pinned)
-      continue;
-    const verbs = skillVerbs(m.body);
-    if (verbs.length && verbs.some((v) => apSteps.some((s) => s === v || s.includes(v) || v.includes(s)))) {
-      decisions.push({ op: "refine", skill: m.name, reason: "documented failure recurring — strengthen the pitfall" });
-      refineTargets.add(m.name);
-    }
-  }
-  for (const c of detect(input.rows).candidates) {
-    if (used >= cfg.dailyBudget) {
-      skipped.push({ what: c.key, why: "daily budget reached" });
-      continue;
-    }
-    if (DESTRUCTIVE.test(c.key)) {
-      skipped.push({ what: c.key, why: "destructive workflow — never auto-distilled" });
-      continue;
-    }
-    const imp = impactScore(c).score;
-    if (imp < cfg.minImpact) {
-      skipped.push({ what: c.key, why: `impact ${imp} < ${cfg.minImpact}` });
-      continue;
-    }
-    const draft = draftWithRepair(c, repairForRows(c, input.rows));
-    const nm = slug(draft.name);
-    if (existing.has(nm)) {
-      skipped.push({ what: nm, why: "already managed — refine, don't re-distill" });
-      continue;
-    }
-    const dc = dedupCheck(nm, draft.description, input.dirsForDedup);
-    if (dc.dup) {
-      skipped.push({ what: nm, why: `dedup: ${dc.reason}` });
-      continue;
-    }
-    const lint = lintSkillDraft({ name: nm, description: draft.description, body: draft.body }, { needsPitfalls: !!c.fixes });
-    if (!lint.ok) {
-      skipped.push({ what: nm, why: `lint: ${lint.issues[0]}` });
-      continue;
-    }
-    const verified = c.fixes > 0 || c.count >= MM.STRONG_SINGLE;
-    const gate = cfg.mode === "auto" && verified ? "graduate" : "stage";
-    decisions.push({ op: "distill", candidate: c, name: nm, reason: `impact ${imp}, ${c.count} reps${verified ? ", verified" : ""}`, gate });
-    existing.add(nm);
-    used++;
-  }
-  for (const m of input.managed) {
-    if (m.pinned || refineTargets.has(m.name))
-      continue;
-    const drift = specDrift(m.body, input.rows).drift;
-    const ev = effectivenessVerdict({ uses: m.uses, ageDays: m.ageDays, staleAntiPattern: false });
-    if (drift)
-      decisions.push({ op: "retire", skill: m.name, reason: "spec-drift: referenced commands no longer occur" });
-    else if (ev.verdict === "retire_candidate")
-      decisions.push({ op: "retire", skill: m.name, reason: ev.reason });
-  }
-  return { decisions, skipped, budget: { used, limit: cfg.dailyBudget }, mode: cfg.mode };
-}
-function provenanceBlock(c) {
-  return `
-<!-- ${MM_TAG}: autopilot ${new Date().toISOString().slice(0, 10)}; candidate=${c.kind}:${c.key}; reps=${c.count}; convs=${c.convs}; fixes=${c.fixes}; impact=${impactScore(c).score} -->
-`;
-}
-function appendRecurrenceNote(dir, name, note) {
-  if (!existsSync4(join5(dir, name, "SKILL.md")))
-    return false;
-  let t = readSkill(dir, name);
-  const stamp = new Date().toISOString().slice(0, 10);
-  const line = `- (${stamp}) autopilot: ${note}
-`;
-  if (/##\s+Pitfalls/i.test(t))
-    t = t.replace(/(##\s+Pitfalls[^\n]*\n)/i, `$1${line}`);
-  else
-    t = t.replace(/(\n## Verification)/, `
-## Pitfalls (autopilot)
-${line}
-$1`);
-  writeSkill(dir, name, t);
-  return true;
-}
-function executeAutopilotPlan(plan, opts) {
-  const author = opts.author || ((c, r) => draftWithRepair(c, r));
-  const graduated = [], staged = [], refined = [], retired = [];
-  const receipts = [];
-  for (const d of plan.decisions) {
-    try {
-      if (d.op === "distill") {
-        const draft = author(d.candidate, repairForRows(d.candidate, opts.rows));
-        const content = `---
-name: ${d.name}
-description: ${draft.description}
----
-
-${draft.body}${provenanceBlock(d.candidate)}
-`;
-        const sec = scanSkillContent(content);
-        if (!sec.ok) {
-          receipts.push({ op: "distill", name: d.name, blocked: `security: ${sec.issues.join("; ")}`, ts: Date.now() });
-          continue;
-        }
-        if (d.gate === "graduate") {
-          writeSkill(opts.skillsDir, d.name, content);
-          graduated.push(d.name);
-        } else {
-          writeSkill(STAGED_DIR, d.name, content);
-          staged.push(d.name);
-        }
-        receipts.push({ op: "distill", name: d.name, gate: d.gate, reason: d.reason, ts: Date.now() });
-      } else if (d.op === "refine") {
-        if (appendRecurrenceNote(opts.skillsDir, d.skill, d.reason)) {
-          refined.push(d.skill);
-          receipts.push({ op: "refine", name: d.skill, reason: d.reason, ts: Date.now() });
-        }
-      } else if (d.op === "retire") {
-        const target = retireManagedSkill(d.skill, d.reason, opts.ctx, d.absorbedInto);
-        retired.push(d.skill);
-        receipts.push({ op: "retire", name: d.skill, reason: d.reason, target, ts: Date.now() });
-      }
-    } catch (e) {
-      receipts.push({ op: d.op, error: String(e?.message ?? e) });
-    }
-  }
-  return { graduated, staged, refined, retired, receipts };
-}
-function loadAutopilotState() {
+// mods/referee.ts
+var PLUSMINUS_PATH = join6(STATE_DIR, "skill-plusminus.json");
+function loadPlusMinus() {
   try {
-    const s = JSON.parse(readFileSync4(AUTOPILOT_STATE, "utf8"));
-    const today = new Date().toISOString().slice(0, 10);
-    return s.date === today ? s : { date: today, used: 0 };
-  } catch {
-    return { date: new Date().toISOString().slice(0, 10), used: 0 };
-  }
-}
-function saveAutopilotState(s) {
-  try {
-    ensureDir();
-    writeFileSync4(AUTOPILOT_STATE, JSON.stringify(s));
-  } catch {}
-}
-function managedView(dirs) {
-  const usage = loadUsage();
-  const out = [];
-  for (const d of dirs)
-    for (const n of listSkillNames(d)) {
-      if (!isManaged(d, n))
-        continue;
-      const u = usage[n] || {};
-      const created = u.created || Date.now();
-      out.push({ name: n, description: skillDesc(d, n), body: readSkill(d, n), uses: u.uses || 0, ageDays: Math.floor((Date.now() - created) / 86400000), pinned: !!u.pinned });
-    }
-  return out;
-}
-function streamChunkText(c) {
-  if (c == null)
-    return "";
-  if (typeof c === "string")
-    return c;
-  if (typeof c.text === "string")
-    return c.text;
-  if (typeof c.delta === "string")
-    return c.delta;
-  if (typeof c.content === "string")
-    return c.content;
-  if (typeof c.delta?.text === "string")
-    return c.delta.text;
-  if (typeof c.delta?.content === "string")
-    return c.delta.content;
-  if (typeof c.content?.text === "string")
-    return c.content.text;
-  if (Array.isArray(c.content))
-    return c.content.map((x) => typeof x === "string" ? x : x?.text ?? "").join("");
-  if (typeof c.choices?.[0]?.delta?.content === "string")
-    return c.choices[0].delta.content;
-  if (typeof c.choices?.[0]?.text === "string")
-    return c.choices[0].text;
-  return "";
-}
-async function consumeStreamBounded(stream) {
-  const ms = Number(process.env.MM_FORK_TIMEOUT_MS) || 60000;
-  let out = "";
-  const reader = (async () => {
-    try {
-      for await (const c of stream)
-        out += streamChunkText(c);
-    } catch {}
-    return out;
-  })();
-  const timer = new Promise((resolve) => setTimeout(() => resolve(out), ms));
-  return Promise.race([reader, timer]);
-}
-async function forkAuthor(ctx, c, repair) {
-  try {
-    if (typeof ctx?.conversation?.fork !== "function")
-      return null;
-    const det = draftWithRepair(c, repair);
-    const prompt = `You are muscle-memory's skill author. Write ONLY the markdown BODY (no YAML frontmatter) of a SKILL.md capturing this recurring real workflow. Keep it under 120 lines. Required sections in order: "## Trigger", "## Observed pattern" (include the exact pattern in a code block), "## Procedure" (numbered, concrete, adaptable), ${repair ? `"## Pitfalls" (the observed error "${repair.errClass}" and its fix "${repair.fixStep}"), ` : ""}"## Verification". Pattern: ${c.key}. Reps: ${c.count} across ${c.convs} conversation(s). Output ONLY the markdown body, nothing else.`;
-    const forked = await ctx.conversation.fork({ hidden: true });
-    const stream = await forked.sendMessageStream([{ role: "user", content: prompt }]);
-    let body = await consumeStreamBounded(stream);
-    body = body.trim().replace(/^```(?:markdown|md)?\n?|\n?```$/g, "");
-    if (body.length < 80 || !/##\s*Procedure/i.test(body) || !/##\s*Verification/i.test(body))
-      return null;
-    const lint = lintSkillDraft({ name: det.name, description: det.description, body }, { needsPitfalls: !!c.fixes });
-    if (!lint.ok)
-      return null;
-    const sec = scanSkillContent(body);
-    if (!sec.ok)
-      return null;
-    return { name: det.name, description: det.description, body };
-  } catch {
-    return null;
-  }
-}
-async function runAutopilot(ctx, config) {
-  const cfg = config || AUTOPILOT_DEFAULT;
-  const dirs = scanDirs(ctx);
-  const rows = loadExperience();
-  const st = loadAutopilotState();
-  const plan = autopilotPlan({ rows, managed: managedView(dirs), dirsForDedup: dirs, config: cfg, budgetUsedToday: st.used });
-  if (cfg.mode === "off" || !plan.decisions.length)
-    return plan;
-  const result = executeAutopilotPlan(plan, { skillsDir: agentSkillsDir(ctx), rows, ctx });
-  saveAutopilotState({ date: st.date, used: st.used + result.graduated.length + result.staged.length });
-  if (result.graduated.length || result.staged.length) {
-    const g = result.graduated[0], s = result.staged[0];
-    const summary = g ? `graduated '${g}'${result.graduated.length > 1 ? ` +${result.graduated.length - 1}` : ""}` : `staged '${s}'${result.staged.length > 1 ? ` +${result.staged.length - 1}` : ""} for review`;
-    appendUiEvent({ phase: g ? "skill_graduated" : "skill_staged", summary, skill: g || s, action: g ? "graduate" : "stage", route: "autopilot" });
-    writeUiState({ phase: "done", last: summary, route: `AUTOPILOT · ${g ? "graduate" : "stage"}` });
-    for (const n of result.graduated)
-      appendMeshFeed({ type: "skill_graduated", skill: n, route: "AUTOPILOT", signals: 0 });
-    for (const n of result.graduated) {
-      try {
-        const _d = agentSkillsDir(ctx);
-        const _b = readSkill(_d, n);
-        if (_b) {
-          const _p = publishPlan({ name: n, description: skillDesc(_d, n), body: _b, shelf: "agent" });
-          appendUiEvent({ phase: "skill_publish_preflight", summary: `${n}: ${_p.publishability}/100 · tier=${publishTier(_p)} · ${_p.recommended}`, skill: n, route: "auto-after-graduate" });
-        }
-      } catch {}
-    }
-  }
-  const published = [];
-  if (process.env.MM_PUBLISH === "auto" && result.graduated.length) {
-    for (const n of result.graduated) {
-      try {
-        publishSkillToCatalog(n, ctx);
-        published.push(n);
-      } catch {}
-    }
-    if (published.length) {
-      appendUiEvent({ phase: "skill_published", summary: `published ${published.length} to catalog (Custom Skills)`, skill: published[0], action: "publish", route: "autopilot" });
-      writeUiState({ phase: "done", last: `published '${published[0]}' to catalog`, route: "AUTOPILOT · publish" });
-      for (const n of published)
-        appendMeshFeed({ type: "skill_published", skill: n, route: "CATALOG", signals: 0 });
-    }
-  }
-  try {
-    ensureDir();
-    mkdirSync4(RECEIPTS_DIR, { recursive: true });
-    writeFileSync4(join5(RECEIPTS_DIR, `autopilot-${Date.now()}.json`), JSON.stringify({ mode: cfg.mode, ...result, published, ts: Date.now() }, null, 2));
-  } catch {}
-  return { ...plan, result };
-}
-var REVIEW_PROMPT = `You are the skill-library reviewer for a self-improving AI coding agent (agentskills.io). From the cross-session evidence, author ONE genuinely valuable CLASS-LEVEL skill IF a durable reusable lesson emerged.
-
-Write a COMPLETE skill — completeness matters more than brevity. Structure: frontmatter (name + description with triggers), then "## When to use" (concrete triggers), "## Procedure" (numbered, concrete, safe-first), "## Pitfalls" (one entry per genuinely-distinct hard-won failure, each as the real symptom → the exact fix → a one-line diagnostic TELL), "## Verification", and — when the evidence is diverse — a "## Worked examples (real cases)" section. MATCH LENGTH TO EVIDENCE: a short skill is right for simple/sparse evidence; a RICH, exhaustive skill is right when the evidence is diverse (many distinct real failures) — never sacrifice a real pitfall or worked-example to hit a length target. FINISH every section — never trail off mid-sentence or mid-code-block. Stay organized + hygienic (clear sections, short fenced snippets), never a wall of text.
-
-HARD RULES:
-- CAPTURE EVERY REAL PITFALL: include each genuinely-distinct hard-won failure in the evidence (this breadth of real, cross-session lessons IS the whole advantage), each with its exact fix. Cut filler, redundancy, and obvious steps ruthlessly — but never drop a real pitfall to save space.
-- DECISION-AWARE: for recovery/debugging/troubleshooting skills especially, structure the Procedure as a DECISION GUIDE — symptom → safest fix first → fallback — so the reader knows WHICH path to take, not just a menu of options.
-- CONCRETE + ACCURATE: show exact, CORRECT code/commands in fenced blocks (a wrong or hand-wavy example is worse than none — verify it actually fixes the stated problem). Keep code snippets short + self-contained so they never get cut off. Every step specific.
-- SAFE FIRST: ALWAYS make a non-destructive safety net (a backup branch/tag, a stash, or a copy) the EXPLICIT first step before any destructive/irreversible command (reset --hard, force-push, rm, drop, db migrate) — and name it as the safety net so a wrong move is recoverable.
-- NAMING: class-level only; never an x-to-y transition, error string, PR number, date, codename, or fix-/debug-/audit-today artifact.
-- NEGATIVE FILTER: never capture environment-dependent failures (command-not-found, missing binaries, uninstalled packages, creds) or tool-negatives ("X is broken").
-- WORKED EXAMPLES (the edge — use them FULLY): the evidence may include real, cross-session symptom→fix examples. Do TWO things, not one: (1) GENERALIZE them into a high-altitude decision guide in the Procedure/Pitfalls (transfers across languages/projects), giving each a one-line diagnostic TELL; AND (2) when the evidence is diverse, ALSO include an explicit "## Worked examples (real cases)" section that catalogs EACH distinct real case compactly — symptom (one line) → the exact fix → the TELL. The generalized guide gives ALTITUDE; the worked-examples catalog gives CONCRETENESS — include BOTH; the catalog is a strength when the cases are real and diverse, not a weakness. CRITICAL: do NOT collapse genuinely-distinct failure classes (e.g. float-truncation vs type-coercion vs input-mutation vs off-by-one are DIFFERENT bugs) into one generic bucket — emit a distinct pitfall + example for EACH. Beyond the observed examples, also cover the 2-3 most common ADJACENT failure modes for this class (e.g. order/state-dependence, import/path errors, masked cascading failures) so the skill is broad. Include a safe-first step (inspect/diff before editing; change source not tests; smallest reversible edit). Still emit the required frontmatter: a CLASS-level name (a noun phrase like debugging-failing-tests; obey the NAMING rule) and a description that STARTS WITH "Use when".
-Output ONLY the complete SKILL.md (no preamble, not truncated), or exactly "NOTHING-TO-SAVE".`;
-var REVIEW_PROMPT_COMPACT = `From the cross-session evidence below, author ONE class-level reusable skill as a COMPLETE SKILL.md, IF a durable lesson emerged. Format: YAML frontmatter (name: a class-level lowercase-hyphen slug; description: STARTS WITH "Use when"), then "## Procedure" (numbered, safe-first), "## Pitfalls" (each: symptom → exact fix → one-line TELL), "## Verification". Concrete correct fenced code; no preamble. Output ONLY the SKILL.md markdown, or exactly "NOTHING-TO-SAVE".`;
-var SEARCH_STOP = new Set("the and for with via use using used run running runs tool tools command commands file files validate validating validation build builds building test testing tests check checking code into from that this your you any new real step steps workflow workflows work works working session sessions across before after fix fixed fixing error errors fail failed failing not add get set make made need want call calls called when then them they here there what which how its has have will can may also same each only over under out off across recurring observed".split(" "));
-var SEARCH_DISTINCT_MIN = 3;
-function searchSkills(dirs, query, k = 5) {
-  const terms = [...new Set(String(query).toLowerCase().split(/[^a-z0-9.]+/).filter((t) => t.length > 2 && !SEARCH_STOP.has(t)))];
-  const out = [];
-  for (const d of dirs)
-    for (const n of listSkillNames(d)) {
-      const body = readSkill(d, n).toLowerCase();
-      const desc = skillDesc(d, n);
-      const nl = n.toLowerCase(), dl = desc.toLowerCase();
-      let score = 0, matched = 0;
-      for (const t of terms) {
-        const esc = t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        const inName = nl.includes(t), inDesc = dl.includes(t);
-        if (inName || inDesc)
-          matched++;
-        const bc = Math.min((body.match(new RegExp("\\b" + esc, "g")) || []).length, 3);
-        score += (inName ? 8 : 0) + (inDesc ? 4 : 0) + bc;
-      }
-      if (matched > 0)
-        out.push({ name: n, description: desc, dir: d, score, matched });
-    }
-  return out.sort((a, b) => b.score - a.score || b.matched - a.matched).slice(0, k);
-}
-function pickUpdateTarget(matches, threshold = 18) {
-  const top = matches[0];
-  if (!top)
-    return null;
-  const second = matches[1];
-  const clearlyLeads = !second || top.score >= 1.5 * second.score;
-  const topDir = String(top.dir || "");
-  const topIsStaged = topDir === STAGED_DIR || /[\\/]staged$/.test(topDir);
-  if (top.score >= threshold && top.matched >= SEARCH_DISTINCT_MIN && (clearlyLeads || topIsStaged))
-    return { ...top, confidence: "high" };
-  return null;
-}
-function isAmbiguousExistingRoute(matches, threshold = 18) {
-  const top = matches[0], second = matches[1];
-  if (!top || !second)
-    return false;
-  if (pickUpdateTarget(matches, threshold))
-    return false;
-  const topStrong = top.score >= threshold && top.matched >= SEARCH_DISTINCT_MIN;
-  const secondStrong = second.score >= Math.max(threshold, top.score * 0.65) && second.matched > top.matched;
-  return topStrong && secondStrong;
-}
-var SEMANTIC_RANK_BONUS = [12, 6, 3];
-function applySemanticEvidence(matches, hits, onShelf, threshold = 18) {
-  if (!hits.length)
-    return { matches, suspect: null };
-  const boosted = matches.map((m) => {
-    const hit = hits.find((h) => h.name === m.name);
-    return hit && m.matched > 0 ? { ...m, score: m.score + (SEMANTIC_RANK_BONUS[hit.rank] ?? 0) } : m;
-  }).sort((a, b) => b.score - a.score || b.matched - a.matched);
-  const top = hits.some((h) => h.aboveCanary !== undefined) ? hits.find((h) => h.aboveCanary === true && onShelf(h.name)) : hits[0];
-  const lex = top ? boosted.find((m) => m.name === top.name) : undefined;
-  const suspect = top && onShelf(top.name) && (!lex || lex.matched < SEARCH_DISTINCT_MIN || lex.score < threshold) ? top.name : null;
-  return { matches: boosted, suspect };
-}
-function routeSkill(lexical, hits, onShelf, threshold = 18) {
-  const { matches, suspect } = applySemanticEvidence(lexical, hits, onShelf, threshold);
-  const target = pickUpdateTarget(matches, threshold);
-  if (target)
-    return { route: "update", target, matches, suspect };
-  if (isAmbiguousExistingRoute(matches, threshold))
-    return { route: "park-ambiguous", target: null, matches, suspect };
-  if (suspect)
-    return { route: "park-semantic", target: null, matches, suspect };
-  return { route: "create", target: null, matches, suspect };
-}
-function frontmatterOf(content) {
-  return (String(content || "").match(/^---\n([\s\S]*?)\n---\s*/)?.[1] || "").trimEnd();
-}
-function metadataBlockFromFrontmatter(fm) {
-  const lines = fm.split(`
-`);
-  const start = lines.findIndex((l) => /^metadata\s*:/i.test(l.trim()));
-  if (start < 0)
-    return "";
-  const out = [lines[start]];
-  for (let i = start + 1;i < lines.length; i++) {
-    const line = lines[i];
-    if (/^[A-Za-z0-9_-]+\s*:/.test(line) && !/^\s/.test(line))
-      break;
-    out.push(line);
-  }
-  return out.join(`
-`).trimEnd();
-}
-function preserveExistingFrontmatterMetadata(newContent, oldContent) {
-  if (!oldContent)
-    return newContent;
-  const oldMeta = metadataBlockFromFrontmatter(frontmatterOf(oldContent));
-  if (!oldMeta || /^---\n[\s\S]*?\nmetadata\s*:/im.test(newContent))
-    return newContent;
-  return newContent.replace(/^---\n([\s\S]*?)\n---\s*/m, (_m, fm) => `---
-${String(fm).trimEnd()}
-${oldMeta}
----
-
-`);
-}
-function skillSectionNames(content) {
-  const out = [];
-  const text = String(content || "").replace(/```[\s\S]*?```/g, "");
-  for (const m of text.matchAll(/^##\s+(.+?)\s*$/gim)) {
-    const section = m[1].trim().replace(/[`*_]/g, "").toLowerCase();
-    if (section && !out.includes(section))
-      out.push(section);
-  }
-  return out;
-}
-function compareSkillSections(oldContent, newContent) {
-  const oldSections = skillSectionNames(oldContent || "");
-  const newSections = skillSectionNames(newContent || "");
-  const preservedSections = oldSections.filter((s) => newSections.includes(s));
-  const droppedSections = oldSections.filter((s) => !newSections.includes(s));
-  const addedSections = newSections.filter((s) => !oldSections.includes(s));
-  return { oldSections, newSections, preservedSections, droppedSections, addedSections };
-}
-async function reviewAndAuthor(evidence, dirs, authorFn, opts = {}) {
-  const threshold = opts.updateThreshold ?? 18;
-  const hits = opts.semanticFn ? await opts.semanticFn(evidence, 3).catch(() => []) : [];
-  const d = routeSkill(searchSkills(dirs, evidence, 3), hits, (n) => dirs.some((x) => existsSync4(join5(x, n, "SKILL.md"))), threshold);
-  const { matches } = d;
-  const updTarget = d.target;
-  const slimEarly = matches.map((m) => ({ name: m.name, score: m.score, matched: m.matched }));
-  if (d.route === "park-ambiguous") {
-    return { action: "none", reason: `ambiguous existing skills: ${matches.slice(0, 3).map((m) => `${m.name}(s${m.score}/m${m.matched})`).join(", ")}; refusing autonomous create`, matches: slimEarly };
-  }
-  if (d.route === "park-semantic") {
-    return { action: "none", reason: `possible semantic duplicate of '${d.suspect}' (embedding match without distinctive lexical overlap); refusing autonomous create — review or absorb manually`, matches: slimEarly };
-  }
-  const existingForUpdate = updTarget ? (() => {
-    try {
-      const d2 = dirs.find((x) => existsSync4(join5(x, updTarget.name, "SKILL.md")));
-      return d2 ? readSkill(d2, updTarget.name) : "";
-    } catch {
-      return "";
-    }
-  })() : "";
-  const updateContext = existingForUpdate ? `
-
-EXISTING SKILL CONTENT (preserve proven core; patch in new lessons, do not rewrite from scratch):
-\`\`\`markdown
-${existingForUpdate.slice(0, 3500)}
-\`\`\`` : "";
-  const hint = updTarget ? `
-
-UPDATE-FIRST (anti-bloat): an existing skill already covers this territory — "${updTarget.name}": ${updTarget.description}. Extend it: keep that exact name, preserve useful existing sections/frontmatter metadata/provenance, and fold ONLY the new pitfalls/steps into one improved full SKILL.md. Do not delete valuable original structure just to make a cleaner rewrite. Only use a different name if the territory is genuinely distinct.${updateContext}` : matches.length ? `
-
-Existing skills (avoid duplicating): ${matches.map((m) => m.name).join(", ")}.` : "";
-  const _classes = (evidence.match(/^- recovered failure:/gm) || []).length;
-  const _examples = (evidence.match(/·\s*example\s*—/g) || []).length;
-  const _diverse = Math.max(_classes, _examples) >= 4;
-  const depthDirective = _diverse ? `
-
-EVIDENCE DEPTH: this evidence holds ${_examples} concrete worked-example${_examples === 1 ? "" : "s"} spanning distinct failure classes. HIGH-DIVERSITY regime — completeness matters more than brevity. The skill should have ALL of these sections (a Procedure-only skill is INCOMPLETE and will be REJECTED):
-- "## Procedure" — a generalized decision guide (symptom → safest fix path).
-- "## Pitfalls" — ONE entry per DISTINCT failure class (symptom → exact fix → one-line diagnostic TELL). Never merge different bugs into one generic bucket; emit a separate pitfall for each of the ${_examples} cases' classes.
-- "## Verification" — how to confirm green with no regressions.
-- "## Worked examples (real cases)" — catalog ALL ${_examples} real cases compactly: symptom (one line) → exact fix → TELL.
-The ~70-line cap is LIFTED (target a rich ~120-180 lines); be EXHAUSTIVE on the diverse evidence — that breadth is the whole edge — but stay sectioned + hygienic (no wall of text).` : "";
-  const parseDraft = (raw2) => {
-    let skill = (raw2 || "").replace(/<\/?think>/gi, "").trim();
-    const startIdx = skill.search(/(^|\n)\s*(---\s*\n|#\s+|name:\s)/i);
-    if (startIdx > 0)
-      skill = skill.slice(startIdx).trim();
-    skill = skill.replace(/^```(?:markdown|md|yaml)?\n?/i, "").replace(/\n?```\s*$/i, "").trim();
-    if (/^NOTHING-TO-SAVE/i.test(skill) || skill.length < 40)
-      return null;
-    const rawName = (skill.match(/^name:\s*["']?(.+?)["']?\s*$/im)?.[1] || "").trim();
-    if (rawName && (/[\/\\;|&]|\.\./.test(rawName) || rawName.length > 64))
-      return { name: "", description: "", body: "", unsafeName: rawName };
-    let name2 = slug(rawName);
-    if (rawName && name2 && !isValidSkillName(name2))
-      return { name: name2, description: "", body: "", invalidName: name2 };
-    if (!name2)
-      name2 = slug((skill.match(/^#\s+(.+?)\s*$/m)?.[1] || "").trim());
-    if (!name2 && updTarget)
-      name2 = updTarget.name;
-    let description2 = (skill.match(/^description:\s*["']?(.+?)["']?\s*$/im)?.[1] || "").trim();
-    if (!description2)
-      description2 = (skill.split(`
-`).find((l) => {
-        const t = l.trim();
-        return t.length > 25 && !/^([#`>*-]|---|name:|title:|description:)/i.test(t);
-      }) || "").trim();
-    if (!description2 && updTarget)
-      description2 = updTarget.description;
-    let body2 = skill;
-    const secStart = body2.search(/(^|\n)##\s+/);
-    if (secStart >= 0)
-      body2 = body2.slice(secStart);
-    else
-      body2 = body2.replace(/^---[\s\S]*?\n---\s*\n?/, "").replace(/^#\s+.+\n+/, "");
-    body2 = body2.replace(/\n---\s*(\n[\s\S]*)?$/, "").trim();
-    return { name: name2, description: description2, body: body2 };
-  };
-  const isCleanDraft = (p) => isValidSkillName(p.name) && !!p.description && p.description.length >= 20 && lintSkillDraft(p).ok;
-  let _fb;
-  const fallback = () => {
-    if (_fb === undefined) {
-      try {
-        const c = findCandidate();
-        _fb = c ? draftWithRepair(c, repairForCandidate(c)) : null;
-      } catch {
-        _fb = null;
-      }
-    }
-    return _fb;
-  };
-  const fbUsable = (f) => !!f && isValidSkillName(f.name) && !!f.body && f.body.trim().length >= 40 && lintSkillDraft(f).ok && scanSkillContent(f.body).ok;
-  const looksEmpty = (s) => {
-    const t = (s || "").replace(/<\/?think>/gi, "").trim();
-    return t.length < 40 && !/^NOTHING-TO-SAVE/i.test(t);
-  };
-  const saidNothing = (s) => /^NOTHING-TO-SAVE/i.test((s || "").replace(/<\/?think>/gi, "").trim());
-  let degraded;
-  let raw = await authorFn(REVIEW_PROMPT, evidence + hint + depthDirective) || "";
-  if (looksEmpty(raw)) {
-    degraded = "author-empty→retry-same";
-    try {
-      raw = await authorFn(REVIEW_PROMPT, evidence + hint + depthDirective) || raw;
-    } catch {}
-  }
-  if (looksEmpty(raw)) {
-    degraded = "author-empty→retry-compressed";
-    try {
-      raw = await authorFn(REVIEW_PROMPT_COMPACT, evidence) || raw;
-    } catch {}
-  }
-  try {
-    ensureDir();
-    writeFileSync4(join5(STATE_DIR, "reflect-last-raw.txt"), `=== ${new Date().toISOString()}${degraded ? " [" + degraded + "]" : ""} ===
-${raw}
-`);
-  } catch {}
-  let parsed = parseDraft(raw);
-  if (parsed?.unsafeName)
-    return { action: "reject", reason: `name "${parsed.unsafeName.slice(0, 40)}" has unsafe characters (path/injection)`, degraded };
-  if (parsed?.invalidName)
-    return { action: "reject", reason: `name "${parsed.invalidName}" not class-level`, degraded };
-  if (!parsed) {
-    if (saidNothing(raw))
-      return { action: "none", reason: "author judged NOTHING-TO-SAVE" };
-    const f = fallback();
-    if (fbUsable(f)) {
-      parsed = { name: f.name, description: f.description, body: f.body };
-      degraded = (degraded ? degraded + "→" : "author-empty→") + "deterministic-fallback";
-    } else
-      return { action: "reject", reason: `author produced no usable skill after same+compressed retries; deterministic fallback ${f ? "sub-threshold" : "unavailable"}`, degraded: (degraded || "author-empty") + "→no-usable-skill" };
-  }
-  if (!parsed.body || parsed.body.trim().length < 10)
-    return { action: "reject", reason: "body too thin" };
-  const depthComplete = (b) => !_diverse || /##\s+pitfalls/i.test(b) && /##\s+worked\s+examples/i.test(b);
-  const sotaGaps = sotaQualityGaps(parsed);
-  if ((!isCleanDraft(parsed) || !depthComplete(parsed.body) || sotaGaps.length) && !(degraded || "").includes("deterministic-fallback")) {
-    const why = lintSkillDraft(parsed).issues.concat(isValidSkillName(parsed.name) ? [] : ["name must be a class-level lowercase-hyphen slug"]).concat((parsed.description || "").length >= 20 ? [] : ["description too short"]).concat(depthComplete(parsed.body) ? [] : [`HIGH-DIVERSITY skill is MISSING required depth sections (needs both "## Pitfalls" with one entry per distinct class AND "## Worked examples (real cases)" cataloging all ${_examples} cases) — a Procedure-only skill is too thin`]).concat(sotaGaps);
-    const corrective = `
-
-YOUR PREVIOUS DRAFT IS NOT YET SOTA (${why.join("; ")}). A top-tier skill ALWAYS has: concrete correct fenced code, a one-line diagnostic TELL on every Pitfall, an explicit safe-first step before any destructive command, and a class-level (not one-off) frame. Re-output ONE complete SKILL.md and NOTHING else, fixing every issue above: YAML frontmatter with a class-level "name:" (lowercase-hyphen) + a "description:" that STARTS WITH "Use when"; a body with "## Procedure", "## Pitfalls" (each with symptom → exact fix → TELL), "## Verification"${_diverse ? ', AND "## Worked examples (real cases)" cataloging every real case' : ""}.`;
-    try {
-      const raw2 = await authorFn(REVIEW_PROMPT, evidence + hint + depthDirective + corrective) || "";
-      try {
-        writeFileSync4(join5(STATE_DIR, "reflect-last-raw.txt"), `=== ${new Date().toISOString()} (retry) ===
-${raw2}
-`);
-      } catch {}
-      const p2 = parseDraft(raw2);
-      if (p2 && !p2.unsafeName && isCleanDraft(p2) && depthComplete(p2.body) && sotaQualityGaps(p2).length <= sotaGaps.length) {
-        parsed = p2;
-        raw = raw2;
-      }
-    } catch {}
-  }
-  let { name, description, body } = parsed;
-  if (!isValidSkillName(name)) {
-    const f = fallback();
-    name = updTarget && isValidSkillName(updTarget.name) ? updTarget.name : f && isValidSkillName(f.name) ? f.name : name;
-  }
-  if (!isValidSkillName(name))
-    return { action: "reject", reason: `name "${name}" not class-level`, degraded };
-  const secEarly = scanSkillContent(body);
-  if (!secEarly.ok)
-    return { action: "reject", reason: `security: ${secEarly.issues.join("; ")}`, degraded };
-  const descOk = (d2) => !!d2 && d2.length >= 20 && /\b(use when|trigger|when )/i.test(d2);
-  if (!descOk(description)) {
-    if (description && description.length >= 12 && !/\b(use when|trigger|when )/i.test(description))
-      description = `Use when ${description}`.slice(0, 700);
-    if (!descOk(description)) {
-      const f = fallback();
-      description = f && descOk(f.description) ? f.description : updTarget && descOk(updTarget.description) ? updTarget.description : description;
-    }
-  }
-  if (!/##\s+procedure/i.test(body) || !/##\s+verification/i.test(body)) {
-    const f = fallback();
-    if (f) {
-      if (!/##\s+procedure/i.test(body)) {
-        const m = f.body.match(/(##\s+Procedure[\s\S]*?)(?=\n##\s|\s*$)/i);
-        body += `
-
-${m ? m[1].trim() : `## Procedure
-1. Repeat the observed workflow, adapting paths/args to the current context.
-2. Capture the success/failure receipt before moving on.`}`;
-      }
-      if (!/##\s+verification/i.test(body)) {
-        const m = f.body.match(/(##\s+Verification[\s\S]*?)(?=\n##\s|\s*$)/i);
-        body += `
-
-${m ? m[1].trim() : `## Verification
-- Confirm via concrete command/tool output that the workflow actually succeeded.`}`;
-      }
-    }
-  }
-  const sec = scanSkillContent(body);
-  if (!sec.ok)
-    return { action: "reject", reason: `security: ${sec.issues.join("; ")}`, degraded };
-  const lint = lintSkillDraft({ name, description, body });
-  if (!lint.ok) {
-    const f = fallback();
-    if (f && lintSkillDraft(f).ok && isValidSkillName(f.name)) {
-      ({ name, description, body } = f);
-      degraded = (degraded ? degraded + "→" : "") + "lint-repair-fallback";
-    } else
-      return { action: "reject", reason: `lint: ${lint.issues.join("; ")}`, degraded };
-  }
-  const content = `---
-name: ${name}
-description: ${description}
----
-
-${body}
-`;
-  const slim = matches.map((m) => ({ name: m.name, score: m.score, matched: m.matched }));
-  const existingNames = new Set(matches.map((m) => m.name));
-  if (existingNames.has(name)) {
-    const preserved = preserveExistingFrontmatterMetadata(content, existingForUpdate);
-    return { action: "update", name, description, body, content: preserved, updateTarget: name, matches: slim, degraded };
-  }
-  return { action: "create", name, description, body, content, matches: slim, degraded };
-}
-function buildEvidenceManifest(i) {
-  const sd = i.oldContent ? compareSkillSections(i.oldContent, i.newContent) : undefined;
-  return { ts: new Date().toISOString(), action: i.action, skill: i.skill, updateTarget: i.updateTarget, sources: { conversations: i.convs, durableSignals: i.signals }, memfsHits: i.memfsHits.map((m) => ({ name: m.name, score: m.score, matched: m.matched })), preferencesInjected: i.preferences, rejectedNoise: i.rejected, newHash: hash(i.newContent), oldHash: i.oldContent ? hash(i.oldContent) : undefined, sectionDiff: sd ? { preserved: sd.preservedSections, dropped: sd.droppedSections, added: sd.addedSections } : undefined, gates: { naming: true, security: true, lint: true } };
-}
-function retrievePreferences(evidence, memDir) {
-  const dir = memDir || process.env.MEMORY_DIR;
-  if (!dir)
-    return [];
-  const prefs = [];
-  for (const s of ["persona.md", "system/persona.md", "system/human.md", "human.md", "system/human/preferences.md"]) {
-    const p = join5(dir, s);
-    if (!existsSync4(p))
-      continue;
-    try {
-      for (const line of readFileSync4(p, "utf8").split(`
-`)) {
-        const l = line.trim().replace(/^[-*#>\s]+/, "");
-        if (/\b(prefer|preference|always|never|wants?|likes?|hates?|style|format|verbos|concise|terse|tone|don'?t)\b/i.test(l) && l.length > 20 && l.length < 220)
-          prefs.push(l);
-      }
-    } catch {}
-  }
-  return [...new Set(prefs)].slice(0, 6);
-}
-function reflectSignature(ev) {
-  return hash(`${ev.convs}
-${ev.items}
-${ev.digest}`);
-}
-function loadHandledReflects() {
-  try {
-    return existsSync4(REFLECT_HANDLED) ? JSON.parse(readFileSync4(REFLECT_HANDLED, "utf8")) : {};
+    if (!existsSync5(PLUSMINUS_PATH))
+      return {};
+    const parsed = JSON.parse(readFileSync5(PLUSMINUS_PATH, "utf8"));
+    return parsed && typeof parsed === "object" ? parsed : {};
   } catch {
     return {};
   }
 }
-function markHandledReflect(sig, route) {
+function recordPlusMinus(skillName, up, stepId) {
+  const ledger = loadPlusMinus();
+  const cur = ledger[skillName] ?? { plus: 0, minus: 0, lastTs: 0, lastStepId: null };
+  const next = { plus: cur.plus + (up ? 1 : 0), minus: cur.minus + (up ? 0 : 1), lastTs: Date.now(), lastStepId: stepId ?? null };
+  ledger[skillName] = next;
   try {
     ensureDir();
-    const h = loadHandledReflects();
-    h[sig] = { ts: Date.now(), route };
-    writeFileSync4(REFLECT_HANDLED, JSON.stringify(h, null, 2));
+    writeFileSync5(PLUSMINUS_PATH, JSON.stringify(ledger, null, 2));
   } catch {}
+  return next;
 }
-function isHighConfidenceCreate(res, ev) {
-  if (res.action !== "create")
-    return false;
-  const top = res.matches?.[0];
-  const cleanRoute = !pickUpdateTarget(res.matches || [], 18);
-  const richDraft = !!res.description && res.description.length >= 80 && /##\s+Pitfalls/i.test(res.body || "") && /##\s+Verification/i.test(res.body || "");
-  return ev.convs >= 3 && ev.items >= 1 && cleanRoute && richDraft;
+function skillUtility(ledger, skillName) {
+  const r = ledger[skillName];
+  if (!r || r.plus + r.minus === 0)
+    return null;
+  return r.plus - r.minus;
 }
-function graduateStagedSkill(name, ctx) {
-  const nm = slug(name);
-  if (!nm)
-    throw new Error("name required");
-  const srcDir = join5(STAGED_DIR, nm);
-  const src = join5(srcDir, "SKILL.md");
-  if (!existsSync4(src))
-    throw new Error(`no staged skill '${nm}'`);
-  const retiredBlock = retiredSkillBlocker(nm, ctx);
-  if (retiredBlock)
-    throw new Error(`retire-sticky blocked graduate: ${retiredBlock}`);
-  const content = readFileSync4(src, "utf8");
-  const desc = (content.match(/^description:\s*(.+)$/im)?.[1] || "").trim();
-  const body = content.replace(/^---[\s\S]*?\n---\s*\n?/, "");
-  const lint = lintSkillDraft({ name: nm, description: desc, body });
-  if (!lint.ok)
-    throw new Error(`linter blocked: ${lint.issues.join("; ")}`);
-  const sec = scanSkillContent(body);
-  if (!sec.ok)
-    throw new Error(`security blocked: ${sec.issues.join("; ")}`);
-  const dstRoot = agentSkillsDir(ctx);
-  const dst = writeSkill(dstRoot, nm, content.includes(MM_TAG) ? content : content + `
-<!-- ${MM_TAG}: graduated ${new Date().toISOString().slice(0, 10)} -->
+async function rateSkill(client, skillName, up, stepId) {
+  if (!isValidSkillName(skillName))
+    return { skill: skillName, rating: { plus: 0, minus: 0, lastTs: 0, lastStepId: null }, nativePosted: false, reason: `invalid skill name '${skillName}'` };
+  const rating = recordPlusMinus(skillName, up, stepId);
+  let nativePosted = false;
+  if (stepId) {
+    const post = reachFn(client, ["steps", "feedback", "create"]);
+    if (post) {
+      try {
+        await post(stepId, { feedback: up ? "positive" : "negative" });
+        nativePosted = true;
+      } catch {}
+    }
+  }
+  return { skill: skillName, rating, nativePosted, reason: nativePosted ? "ledger + native steps.feedback" : stepId ? "ledger only (native post unavailable/failed)" : "ledger only (no step id)" };
+}
+function renderPlusMinus(ledger) {
+  const rows = Object.entries(ledger).sort((a, b) => b[1].plus - b[1].minus - (a[1].plus - a[1].minus));
+  if (!rows.length)
+    return "(no skill ratings yet — rate with /muscle-memory rate <skill> up|down [step-id])";
+  return rows.map(([name, r]) => {
+    const net = r.plus - r.minus;
+    return `  ${net >= 0 ? "+" : ""}${net}  ${name}  (+${r.plus}/-${r.minus})`;
+  }).join(`
 `);
-  mkdirSync4(STAGED_RETIRED_DIR, { recursive: true });
-  try {
-    renameSync3(srcDir, join5(STAGED_RETIRED_DIR, `${nm}-graduated-${Date.now()}`));
-  } catch {}
-  appendUiEvent({ phase: "skill_graduated", summary: `graduated '${nm}'`, skill: nm, action: "graduate", route: "manual" });
-  appendMeshFeed({ type: "skill_graduated", skill: nm, route: "GRADUATE", signals: 0 });
-  writeUiState({ phase: "done", last: `graduated '${nm}'`, route: "GRADUATE · live" });
-  try {
-    const _b = readSkill(dstRoot, nm);
-    if (_b) {
-      const _p = publishPlan({ name: nm, description: skillDesc(dstRoot, nm), body: _b, shelf: "agent" });
-      appendUiEvent({ phase: "skill_publish_preflight", summary: `${nm}: ${_p.publishability}/100 · tier=${publishTier(_p)} · ${_p.recommended}`, skill: nm, route: "auto-after-graduate" });
-    }
-  } catch {}
-  return dst;
-}
-function reviewForkAuthor(ctx) {
-  return async (sys, user) => {
-    try {
-      if (typeof ctx?.conversation?.fork !== "function")
-        return "";
-      const forked = await ctx.conversation.fork({ hidden: true });
-      const stream = await forked.sendMessageStream([{ role: "user", content: `${sys}
-
-${user}` }]);
-      const out = await consumeStreamBounded(stream);
-      return out.trim();
-    } catch {
-      return "";
-    }
-  };
-}
-async function runReflectiveReview(ctx, config = {}) {
-  const dirs = config.dirs ?? scanDirs(ctx);
-  const stagedShelf = config.stagedDir ?? STAGED_DIR;
-  const reviewDirs = config.mode === "auto" ? dirs : [...dirs, stagedShelf];
-  const exp = config.experience ?? loadExperience();
-  const ev = buildCrossConversationEvidence(exp);
-  const engram = engramConsolidate(exp, managedView(reviewDirs).map((m) => ({ name: m.name, body: m.body })));
-  appendUiEvent({ phase: "review_started", summary: `reviewing ${ev.convs} sessions / ${ev.items} durable signals` });
-  writeUiState({ phase: "reviewing", detail: `${ev.convs} sessions / ${ev.items} signals` });
-  if (ev.items < (config.minItems ?? 2)) {
-    appendUiEvent({ phase: "reflect_none", summary: `nothing to save yet (${ev.items} signals)` });
-    writeUiState({ phase: "idle", last: "nothing to save yet" });
-    return { action: "none", reason: `only ${ev.items} cross-session signals (need ≥${config.minItems ?? 2})` };
-  }
-  const prefs = retrievePreferences(ev.digest, process.env.MEMORY_DIR);
-  const digest = `${engram.digest}
-
-${ev.digest}` + (prefs.length ? `
-
-USER PREFERENCES (from this agent's memory — bake the relevant ones into the skill's guidance):
-${prefs.map((p) => `- ${p}`).join(`
-`)}` : "");
-  const preTgt = pickUpdateTarget(searchSkills(reviewDirs, digest, 3), 18);
-  const routeKey = preTgt ? `UPDATE:${preTgt.name}` : "CREATE";
-  const sig = reflectSignature(ev);
-  if (loadHandledReflects()[sig]) {
-    const summary = `already reflected ${routeKey.toLowerCase()} for this evidence signature`;
-    appendUiEvent({ phase: "reflect_none", summary });
-    writeUiState({ phase: "idle", last: summary, route: "SKIP · handled" });
-    return { action: "none", reason: summary };
-  }
-  writeUiState({ phase: "routing", route: preTgt ? `UPDATE → ${preTgt.name}` : "CREATE (new skill)" });
-  appendUiEvent({ phase: "review_planned", summary: preTgt ? `route UPDATE → ${preTgt.name}` : "route CREATE — no existing skill safely covers this" });
-  writeUiState({ phase: "writing", skill: preTgt?.name, route: preTgt ? `UPDATE → ${preTgt.name}` : "CREATE" });
-  const author = config.authorFn || reviewForkAuthor(ctx);
-  let res;
-  try {
-    res = await reviewAndAuthor(digest, reviewDirs, author, { semanticFn: config.semanticFn });
-  } catch (e) {
-    appendUiEvent({ phase: "reflect_error", summary: `author failed: ${String(e?.message ?? e).slice(0, 80)}` });
-    writeUiState({ phase: "idle", last: "review interrupted — will retry next session", route: "ERROR · safe" });
-    return { action: "none", reason: `author error: ${String(e?.message ?? e).slice(0, 120)}` };
-  }
-  if ((res.action === "create" || res.action === "update") && res.name && res.content) {
-    const live = config.mode === "auto";
-    const graduate = live || res.action === "update" || isHighConfidenceCreate(res, ev);
-    const dir = graduate ? agentSkillsDir(ctx) : stagedShelf;
-    const tagged = res.content.includes(MM_TAG) ? res.content : res.content + `
-<!-- ${MM_TAG}: reflective ${new Date().toISOString().slice(0, 10)}; action=${res.action}; convs=${ev.convs}; ${graduate ? "graduated=true" : "staged=true"} -->
-`;
-    try {
-      if (res.action === "create" && !res.updateTarget) {
-        const retiredBlock = retiredSkillBlocker(res.name, ctx);
-        if (retiredBlock) {
-          markHandledReflect(sig, `RETIRED:${res.name}`);
-          appendUiEvent({ phase: "reflect_none", summary: `retire-sticky blocked '${res.name}'` });
-          writeUiState({ phase: "idle", last: `retire-sticky blocked '${res.name}'`, route: "SKIP · retired" });
-          return { action: "none", name: res.name, reason: retiredBlock };
-        }
-        const n1 = multiInstanceSupport(`${res.name} ${res.description ?? ""}`, ev.signals ?? [], config.minInstances ?? 2);
-        if (!n1.ok) {
-          markHandledReflect(sig, `N1-PARKED:${res.name}`);
-          appendUiEvent({ phase: "reflect_none", summary: `n=1 gate parked '${res.name}': ${n1.reason.slice(0, 120)}` });
-          writeUiState({ phase: "idle", last: `n=1 gate parked '${res.name}'`, route: "SKIP · n=1" });
-          return { action: "none", name: res.name, reason: `n=1 gate: ${n1.reason}` };
-        }
-      }
-      const oldContent = res.action === "update" && res.updateTarget ? (() => {
-        const d = reviewDirs.find((x) => existsSync4(join5(x, res.updateTarget, "SKILL.md")));
-        return d ? readSkill(d, res.updateTarget) : undefined;
-      })() : undefined;
-      writeSkill(dir, res.name, tagged);
-      const manifest = buildEvidenceManifest({ action: res.action, skill: res.name, updateTarget: res.updateTarget, convs: ev.convs, signals: ev.items, memfsHits: res.matches || [], preferences: prefs, rejected: ev.rejected, newContent: tagged, oldContent });
-      const evDir = join5(dir, res.name, "references", "evidence");
-      mkdirSync4(evDir, { recursive: true });
-      writeFileSync4(join5(evDir, `${Date.now()}.json`), JSON.stringify(manifest, null, 2));
-      ensureDir();
-      mkdirSync4(RECEIPTS_DIR, { recursive: true });
-      writeFileSync4(join5(RECEIPTS_DIR, `reflect-${Date.now()}.json`), JSON.stringify({ action: res.action, name: res.name, updateTarget: res.updateTarget, convs: ev.convs, items: ev.items, prefsInjected: prefs.length, rejected: ev.rejected.length, degraded: res.degraded || null, dir, ts: Date.now() }, null, 2));
-      if (res.degraded)
-        appendUiEvent({ phase: "author_degraded", summary: `authored via graceful degradation: ${res.degraded}`, skill: res.name });
-      const phase = graduate ? "skill_graduated" : "skill_staged";
-      const verb = graduate ? "graduated" : res.action === "update" ? "staged update to" : "staged";
-      const summary = `${verb} '${res.name}' (${res.action === "update" ? "update-first" : "new"}, ${ev.convs} sessions/${ev.items} signals)`;
-      appendUiEvent({ phase, summary, skill: res.name, action: res.action, route: res.updateTarget ? `update ${res.updateTarget}` : "create" });
-      appendMeshFeed({ type: phase, skill: res.name, route: graduate ? "GRADUATE" : res.action.toUpperCase(), signals: ev.items });
-      markHandledReflect(sig, routeKey);
-      appendUiEvent({ phase: "evidence_manifest_written", summary: "wrote evidence manifest" });
-      if (ev.rejected.length)
-        appendUiEvent({ phase: "noise_rejected", summary: `rejected ${ev.rejected.length} env-noise items` });
-      if (prefs.length)
-        appendUiEvent({ phase: "memory_pref_injected", summary: `injected ${prefs.length} user preferences` });
-      writeUiState({ phase: "done", last: summary, route: `${graduate ? "GRADUATE" : res.action.toUpperCase()}${res.updateTarget ? " " + res.updateTarget : ""} · ${graduate ? "live" : "staged"}` });
-      return { ...res, wrote: join5(dir, res.name) };
-    } catch (e) {
-      appendUiEvent({ phase: "reflect_error", summary: `write failed: ${String(e?.message ?? e).slice(0, 80)}` });
-      return { ...res, reason: String(e?.message ?? e) };
-    }
-  }
-  if (res.action === "reject") {
-    const safe = /\bsecurity:/i.test(res.reason || "");
-    markHandledReflect(sig, routeKey);
-    try {
-      ensureDir();
-      mkdirSync4(RECEIPTS_DIR, { recursive: true });
-      writeFileSync4(join5(RECEIPTS_DIR, `reflect-rejected-${Date.now()}.json`), JSON.stringify({ action: "reject", safe, reason: res.reason || "(none)", degraded: res.degraded || null, convs: ev.convs, items: ev.items, ts: Date.now() }, null, 2));
-    } catch {}
-    appendUiEvent({ phase: safe ? "blocked_unsafe" : "reflect_none", summary: safe ? `\uD83D\uDEE1️ blocked unsafe content (safe): ${res.reason}` : `draft rejected; nothing saved (${res.reason})${res.degraded ? " [degraded: " + res.degraded + "]" : ""}` });
-    writeUiState({ phase: safe ? "protected" : "idle", last: safe ? "blocked unsafe content (safe)" : `draft rejected; nothing saved`, route: safe ? "BLOCKED · protected" : "SKIP · rejected-draft" });
-  } else {
-    markHandledReflect(sig, routeKey);
-    appendUiEvent({ phase: "reflect_none", summary: "nothing durable to save" });
-    writeUiState({ phase: "idle", last: "nothing to save" });
-  }
-  return res;
 }
 // mods/ui.ts
 function summarizeReflectActions(events, mode = "compact") {
@@ -2981,14 +3183,288 @@ function renderMuscleMemoryPanel(state) {
   }
 }
 
+// mods/filmroom.ts
+import { existsSync as existsSync7, mkdirSync as mkdirSync5, readFileSync as readFileSync7, writeFileSync as writeFileSync6 } from "node:fs";
+import { join as join8 } from "node:path";
+
+// mods/autonomy.ts
+import { existsSync as existsSync6, readFileSync as readFileSync6 } from "node:fs";
+import { join as join7 } from "node:path";
+var AUTONOMY_LEDGER = join7(STATE_DIR, "autonomy-ledger.jsonl");
+var LANES = ["distill-create", "distill-update", "film-room-patch", "prune-retire", "catalog-sync"];
+var SHARED_STATE_LANES = new Set(["catalog-sync", "prune-retire"]);
+var PROMOTE_L2_STREAK = 20;
+var PROMOTE_L3_ACTIONS = 60;
+var COLD_START_DAYS = 14;
+function recordAutonomy(lane, outcome, opts = {}) {
+  const path = opts.path ?? AUTONOMY_LEDGER;
+  const entries = readLedger(path);
+  const e = { seq: entries.length, ts: Date.now(), lane, outcome, ref: opts.ref, rung: opts.rung, weak: opts.weak };
+  ensureDir();
+  appendJsonl(path, e);
+  return e;
+}
+function readLedger(path = AUTONOMY_LEDGER) {
+  try {
+    if (!existsSync6(path))
+      return [];
+    return readFileSync6(path, "utf8").trim().split(`
+`).filter(Boolean).map((l) => JSON.parse(l));
+  } catch {
+    return [];
+  }
+}
+function laneState(lane, opts = {}) {
+  const path = opts.path ?? AUTONOMY_LEDGER;
+  const env = opts.env ?? process.env.MM_AUTONOMY ?? "off";
+  const now = opts.now ?? Date.now();
+  const all = readLedger(path);
+  const tampered = all.some((e, i) => e.seq !== i);
+  const entries = all.filter((e) => e.lane === lane);
+  const frozen = env === "off";
+  let pinned = null;
+  let rung = 1;
+  let streak = 0, actionsAtRung = 0, misses = 0;
+  let lastDemotion = null;
+  const installTs = all.length ? all[0].ts : now;
+  const coldStartOver = now - installTs >= COLD_START_DAYS * 86400000;
+  for (const e of entries) {
+    if (e.outcome === "pin") {
+      pinned = e.rung ?? 1;
+      continue;
+    }
+    if (e.outcome === "approved" || e.outcome === "untouched_used") {
+      streak++;
+      actionsAtRung++;
+    } else if (e.outcome === "proposed") {
+      actionsAtRung++;
+    } else if (e.outcome === "rejected" || e.outcome === "reverted") {
+      misses++;
+      streak = 0;
+      if (rung > 1) {
+        rung = rung - 1;
+        lastDemotion = { ts: e.ts, reason: e.outcome };
+      }
+      actionsAtRung = 0;
+      continue;
+    }
+    if (rung === 1 && streak >= PROMOTE_L2_STREAK && misses === 0 && coldStartOver && !SHARED_STATE_LANES.has(lane)) {
+      rung = 2;
+      actionsAtRung = 0;
+    } else if (rung === 2 && actionsAtRung >= PROMOTE_L3_ACTIONS && streak >= PROMOTE_L3_ACTIONS) {
+      rung = 3;
+      actionsAtRung = 0;
+    }
+  }
+  if (tampered)
+    rung = 0;
+  if (frozen && rung > 1)
+    rung = 1;
+  if (pinned !== null && !tampered)
+    rung = frozen ? Math.min(pinned, 1) : pinned;
+  return { lane, rung, pinned, streak, actionsAtRung, misses, lastDemotion, tampered, frozen };
+}
+function renderAutonomy(opts = {}) {
+  return LANES.map((l) => {
+    const st = laneState(l, opts);
+    const tag = st.tampered ? "⛔ L0 (ledger tamper — fail closed)" : `L${st.rung}${st.pinned !== null ? " \uD83D\uDCCC" : ""}`;
+    return `  \uD83E\uDD16 ${tag}  ${l}  (streak ${st.streak} · misses ${st.misses}${st.frozen ? " · FROZEN" : ""})`;
+  }).join(`
+`);
+}
+
+// mods/filmroom.ts
+var FILMROOM_MAX_LINES = 8;
+var FILMROOM_MAX_PATCHES = 2;
+var FILMROOM_STEP_BUDGET = 3;
+var FILMROOM_SECTIONS = ["Procedure", "Pitfalls", "Verification", "Worked examples"];
+var FILMROOM_SHADOW_DIR = join8(STATE_DIR, "filmroom-shadow");
+var FILMROOM_SNAP_DIR = join8(STATE_DIR, "filmroom-snapshots");
+var FILMROOM_PARKED = join8(STATE_DIR, "filmroom-parked.jsonl");
+var FILMROOM_RECEIPTS = join8(STATE_DIR, "filmroom-receipts.jsonl");
+function parsePatchNotes(raw) {
+  const text = String(raw || "").replace(/<\/?think>/gi, "");
+  const m = text.match(/\[[\s\S]*\]/);
+  if (!m)
+    return null;
+  try {
+    const arr = JSON.parse(m[0]);
+    if (!Array.isArray(arr) || arr.length === 0 || arr.length > FILMROOM_MAX_PATCHES)
+      return null;
+    const out = [];
+    for (const o of arr) {
+      if (!o || typeof o !== "object")
+        return null;
+      const n = o;
+      const lines = String(n.lines ?? "");
+      if (typeof n.skill !== "string" || !n.skill.trim())
+        return null;
+      if (!FILMROOM_SECTIONS.includes(n.section))
+        return null;
+      if (n.op !== "append")
+        return null;
+      if (!lines.trim() || lines.split(`
+`).length > FILMROOM_MAX_LINES)
+        return null;
+      if (typeof n.evidence_ref !== "string" || !n.evidence_ref.trim())
+        return null;
+      out.push({ skill: n.skill.trim(), section: n.section, op: "append", lines: lines.trim(), evidence_ref: n.evidence_ref.trim() });
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+function tenureOf(name, dirs) {
+  try {
+    return tenureFor(name);
+  } catch {
+    return "labile";
+  }
+}
+function applyNoteToContent(content, note) {
+  const fmMatch = content.match(/^(---\n[\s\S]*?\n---\s*\n?)/);
+  const fm = fmMatch ? fmMatch[1] : "";
+  let body = content.slice(fm.length);
+  const marker = `
+_[filmroom ${new Date().toISOString().slice(0, 10)} · ${note.evidence_ref}]_`;
+  const block = `${note.lines}${marker}`;
+  const re = new RegExp(`(##\\s*${note.section.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[^\\n]*\\n)`, "i");
+  if (re.test(body)) {
+    const headIdx = body.search(re);
+    const afterHead = body.slice(headIdx);
+    const nextSec = afterHead.slice(2).search(/\n##\s/);
+    const insertAt = nextSec === -1 ? body.length : headIdx + 2 + nextSec + 1;
+    body = body.slice(0, insertAt).replace(/\s*$/, `
+`) + block + `
+` + body.slice(insertAt);
+  } else {
+    body = body.replace(/\s*$/, `
+`) + `
+## ${note.section}
+${block}
+`;
+  }
+  return fm + body;
+}
+function applyPatchNote(note, dirs, opts = {}) {
+  const dir = dirs.find((d) => existsSync7(join8(d, note.skill, "SKILL.md")));
+  if (!dir)
+    return { skill: note.skill, status: "parked", reason: "target skill not found on managed shelves" };
+  if (!isManaged(dir, note.skill))
+    return { skill: note.skill, status: "rejected", reason: "unmanaged skill — the film room only maintains muscle-memory-managed skills" };
+  const original = readSkill(dir, note.skill);
+  const next = applyNoteToContent(original, note);
+  const sec = scanSkillContent(next);
+  if (!sec.ok)
+    return { skill: note.skill, status: "rejected", reason: `security scan: ${sec.reason ?? "flagged"}` };
+  const diff = compareSkillSections(original, next);
+  if (diff.droppedSections.length)
+    return { skill: note.skill, status: "rejected", reason: `sections dropped: ${diff.droppedSections.join(",")}` };
+  const fmOld = original.match(/^---\n[\s\S]*?\n---/)?.[0] ?? "";
+  const fmNew = next.match(/^---\n[\s\S]*?\n---/)?.[0] ?? "";
+  if (fmOld !== fmNew)
+    return { skill: note.skill, status: "rejected", reason: "frontmatter mutated — immutable in the film room" };
+  ensureDir();
+  mkdirSync5(FILMROOM_SNAP_DIR, { recursive: true });
+  const snap = join8(FILMROOM_SNAP_DIR, `${note.skill}-${Date.now()}.md`);
+  writeFileSync6(snap, original);
+  const tenure = opts.tenure ?? tenureOf(note.skill, dirs);
+  const mode = opts.mode ?? "staged";
+  if (tenure === "pinned" || tenure === "tenured" || mode === "staged") {
+    mkdirSync5(FILMROOM_SHADOW_DIR, { recursive: true });
+    const shadow = writeSkill(FILMROOM_SHADOW_DIR, note.skill, next);
+    appendJsonl(FILMROOM_RECEIPTS, { ts: Date.now(), kind: "shadow", note, snapshot: snap, shadow, tenure, reviewFlag: tenure === "pinned" });
+    return { skill: note.skill, status: "shadowed", reason: tenure === "pinned" ? "pinned — shadow diff + explicit review flag" : tenure === "tenured" ? "tenured — shadow diff, promote via review/referee evidence" : "staged mode — shadow diff for review", snapshot: snap, shadow };
+  }
+  writeSkill(dir, note.skill, next);
+  appendJsonl(FILMROOM_RECEIPTS, { ts: Date.now(), kind: "live-patch", note, snapshot: snap, dir });
+  appendUiEvent({ phase: "skill_patched", summary: `film room: +${note.lines.split(`
+`).length} lines → ${note.skill} (${note.section})`, skill: note.skill, action: "patch", route: "filmroom" });
+  return { skill: note.skill, status: "patched-live", reason: "labile + auto mode", snapshot: snap };
+}
+async function runFilmRoom(opts) {
+  const flag = opts.enabled ?? process.env.MM_FILMROOM ?? "off";
+  if (flag === "off")
+    return { ran: false, patched: [], parked: [], reason: "MM_FILMROOM=off", stepsUsed: 0 };
+  if (!opts.summary?.trim() || !opts.authorFn)
+    return { ran: false, patched: [], parked: [], reason: "no summary or author available", stepsUsed: 0 };
+  let steps = 0;
+  const budget = opts.stepBudget ?? FILMROOM_STEP_BUDGET;
+  const shelf = opts.dirs.flatMap((d) => {
+    try {
+      return searchSkills([d], opts.summary, 6);
+    } catch {
+      return [];
+    }
+  });
+  let ledger = {};
+  try {
+    ledger = loadPlusMinus();
+  } catch {}
+  const recLine = (n) => {
+    const r = ledger[n];
+    return r ? ` [record +${r.plus}/-${r.minus}${r.minus > r.plus ? " — LOSING: aim the patch at why" : ""}]` : "";
+  };
+  const shelfList = [...new Set(shelf.map((s) => `${s.name}: ${s.description}${recLine(s.name)}`))].slice(0, 12).join(`
+`);
+  const system = `You are muscle-memory's FILM ROOM — a maintenance editor for EXISTING skills. From the session summary, extract at most ${FILMROOM_MAX_PATCHES} small durable lessons that IMPROVE an existing skill below. Reply STRICT JSON only: an array of {"skill": "<existing name>", "section": "Procedure"|"Pitfalls"|"Verification"|"Worked examples", "op": "append", "lines": "<=8 lines of markdown>", "evidence_ref": "<one-line receipt>"}. Rules: NEVER invent a new skill name; if no lesson clearly belongs to an existing skill, reply []. Small and specific beats broad.`;
+  const user = `SESSION SUMMARY:
+${opts.summary.slice(0, 4000)}
+
+EXISTING SKILLS:
+${shelfList || "(none)"}`;
+  steps++;
+  let raw = "";
+  try {
+    raw = await opts.authorFn(system, user);
+  } catch {
+    return { ran: true, patched: [], parked: [], reason: "author call failed — clean no-op", stepsUsed: steps };
+  }
+  const notes = parsePatchNotes(raw);
+  if (!notes)
+    return { ran: true, patched: [], parked: [], reason: "no valid PATCH_NOTEs (malformed or empty) — nothing written", stepsUsed: steps };
+  const patched = [];
+  const parked = [];
+  for (const note of notes) {
+    if (steps >= budget && patched.length === 0) {
+      parked.push(note);
+      continue;
+    }
+    const lex = searchSkills(opts.dirs, `${note.skill} ${note.lines}`, 3);
+    const d = routeSkill(lex, [], (n) => opts.dirs.some((x) => existsSync7(join8(x, n, "SKILL.md"))));
+    let confirmed;
+    if (opts.judgeFn && steps < budget) {
+      steps++;
+      const desc = lex.find((m) => m.name === note.skill)?.description ?? "";
+      const j = await opts.judgeFn(note.lines, { name: note.skill, description: desc }).catch(() => null);
+      confirmed = !!j && j.same_job === true && j.confidence >= 0.6;
+    } else {
+      confirmed = d.route === "update" && d.target?.name === note.skill || lex.some((m) => m.name === note.skill);
+    }
+    if (!confirmed) {
+      parked.push(note);
+      appendJsonl(FILMROOM_PARKED, { ts: Date.now(), note, reason: "routing + judge did not confirm target — parked for reflect lane" });
+      continue;
+    }
+    const res = applyPatchNote(note, opts.dirs, { mode: opts.mode });
+    try {
+      if (res.status === "shadowed" || res.status === "patched-live")
+        recordAutonomy("film-room-patch", "proposed", { ref: `${note.skill}:${note.section}` });
+    } catch {}
+    patched.push(res);
+  }
+  return { ran: true, patched, parked, reason: "boundary maintenance complete", stepsUsed: steps };
+}
+
 // mods/wins.ts
-import { existsSync as existsSync5, readFileSync as readFileSync5, readdirSync as readdirSync3 } from "node:fs";
-import { join as join6 } from "node:path";
+import { existsSync as existsSync8, readFileSync as readFileSync8, readdirSync as readdirSync3 } from "node:fs";
+import { join as join9 } from "node:path";
 function readJsonl(path) {
-  if (!existsSync5(path))
+  if (!existsSync8(path))
     return [];
   const out = [];
-  for (const line of readFileSync5(path, "utf8").split(`
+  for (const line of readFileSync8(path, "utf8").split(`
 `)) {
     if (!line.trim())
       continue;
@@ -3015,7 +3491,7 @@ function str(o, k) {
   return "";
 }
 function collectWins(stateDir = STATE_DIR) {
-  const exp = readJsonl(join6(stateDir, "experience.jsonl"));
+  const exp = readJsonl(join9(stateDir, "experience.jsonl"));
   const convs = new Set;
   let firstRepTs = null;
   for (const r of exp) {
@@ -3026,18 +3502,18 @@ function collectWins(stateDir = STATE_DIR) {
     if (ts !== null && (firstRepTs === null || ts < firstRepTs))
       firstRepTs = ts;
   }
-  const sessions = new Set(readJsonl(join6(stateDir, "sessions.jsonl")).map((s) => str(s, "conv")).filter(Boolean));
+  const sessions = new Set(readJsonl(join9(stateDir, "sessions.jsonl")).map((s) => str(s, "conv")).filter(Boolean));
   for (const c of convs)
     sessions.add(c);
   const skillsEarned = [];
   const updatesFolded = [];
-  const receiptsDir = join6(stateDir, "receipts");
-  if (existsSync5(receiptsDir)) {
+  const receiptsDir = join9(stateDir, "receipts");
+  if (existsSync8(receiptsDir)) {
     for (const f of readdirSync3(receiptsDir)) {
       if (!/^reflect-\d+\.json$/.test(f))
         continue;
       try {
-        const r = JSON.parse(readFileSync5(join6(receiptsDir, f), "utf8"));
+        const r = JSON.parse(readFileSync8(join9(receiptsDir, f), "utf8"));
         const action = str(r, "action");
         const name = str(r, "name");
         const ts = num(r, "ts") ?? 0;
@@ -3053,7 +3529,7 @@ function collectWins(stateDir = STATE_DIR) {
   }
   skillsEarned.sort((a, b) => b.ts - a.ts);
   updatesFolded.sort((a, b) => b.ts - a.ts);
-  const hits = readJsonl(join6(stateDir, "defense-hits.jsonl"));
+  const hits = readJsonl(join9(stateDir, "defense-hits.jsonl"));
   let knownFixSurfaced = 0;
   let lastFlag = null;
   for (const h of hits) {
@@ -3064,17 +3540,17 @@ function collectWins(stateDir = STATE_DIR) {
       lastFlag = { step: str(h, "step"), errClass: str(h, "errClass"), defense: str(h, "defense"), ts };
   }
   let noiseRejected = 0;
-  for (const e of readJsonl(join6(stateDir, "ui-events.jsonl"))) {
+  for (const e of readJsonl(join9(stateDir, "ui-events.jsonl"))) {
     if (str(e, "phase") !== "noise_rejected")
       continue;
     const m = str(e, "summary").match(/rejected (\d+)/);
     noiseRejected += m ? Number(m[1]) : 1;
   }
   const skillUses = [];
-  const usagePath = join6(stateDir, "skill-usage.json");
-  if (existsSync5(usagePath)) {
+  const usagePath = join9(stateDir, "skill-usage.json");
+  if (existsSync8(usagePath)) {
     try {
-      const u = JSON.parse(readFileSync5(usagePath, "utf8"));
+      const u = JSON.parse(readFileSync8(usagePath, "utf8"));
       if (u && typeof u === "object")
         for (const [name, rec] of Object.entries(u)) {
           const uses = num(rec, "uses") ?? (typeof rec === "number" ? rec : 0);
@@ -3152,8 +3628,8 @@ function renderWins(w, now = Date.now()) {
 
 // mods/index.ts
 var __mm = {
-  commandTemplate: commandTemplate2,
-  fingerprint: fingerprint2,
+  commandTemplate,
+  fingerprint,
   redactFragment,
   buildDiffFragment,
   detect,
@@ -3248,7 +3724,7 @@ var __mm = {
   agentSkillsDir,
   scanDirs,
   MM_TAG,
-  ENGRAM,
+  ENGRAM: ENGRAM2,
   expectationFor,
   predictionError,
   tagExperience,
@@ -3274,7 +3750,7 @@ var __mm = {
 function activate(letta) {
   const disposers = [];
   let panel = null;
-  const DEFENSE_HITS = join7(STATE_DIR, "defense-hits.jsonl");
+  const DEFENSE_HITS = join10(STATE_DIR, "defense-hits.jsonl");
   let defensesCache = [];
   const refreshDefenses = () => {
     try {
@@ -3310,7 +3786,7 @@ function activate(letta) {
         const tool = String(event?.toolName ?? "");
         if (!tool)
           return;
-        const { fp, tmpl } = fingerprint2(tool, event?.args ?? {});
+        const { fp, tmpl } = fingerprint(tool, event?.args ?? {});
         const callId = String(event?.toolCallId ?? "");
         if (callId) {
           stepByCallId.set(callId, { tool, fp, tmpl });
@@ -3373,8 +3849,8 @@ function activate(letta) {
         const span2 = { tokensIn: event?.usage?.promptTokens ?? event?.tokensIn, tokensOut: event?.usage?.completionTokens ?? event?.tokensOut, ms: Date.now() - started, stop: event?.stopReason };
         let t = {};
         try {
-          if (existsSync6(TELEMETRY_PATH))
-            t = JSON.parse(readFileSync6(TELEMETRY_PATH, "utf8"));
+          if (existsSync9(TELEMETRY_PATH))
+            t = JSON.parse(readFileSync9(TELEMETRY_PATH, "utf8"));
         } catch {}
         const agg = aggregateTelemetry([span2]);
         t.calls = (t.calls || 0) + agg.calls;
@@ -3383,7 +3859,7 @@ function activate(letta) {
         t.ms = (t.ms || 0) + agg.ms;
         try {
           ensureDir();
-          writeFileSync5(TELEMETRY_PATH, JSON.stringify(t));
+          writeFileSync7(TELEMETRY_PATH, JSON.stringify(t));
         } catch {}
       } catch {}
     }));
@@ -3392,16 +3868,27 @@ function activate(letta) {
     disposers.push(letta.events.on("compact_start", (event) => {
       try {
         ensureDir();
-        mkdirSync5(RECEIPTS_DIR, { recursive: true });
+        mkdirSync6(RECEIPTS_DIR, { recursive: true });
         const { candidates } = detect(loadExperience());
-        writeFileSync5(join7(RECEIPTS_DIR, `compact-${Date.now()}.json`), JSON.stringify({ phase: "start", conv: event?.conversationId ?? null, candidatesPreserved: candidates.length, ts: Date.now() }));
+        writeFileSync7(join10(RECEIPTS_DIR, `compact-${Date.now()}.json`), JSON.stringify({ phase: "start", conv: event?.conversationId ?? null, candidatesPreserved: candidates.length, ts: Date.now() }));
       } catch {}
     }));
-    disposers.push(letta.events.on("compact_end", (event) => {
+    disposers.push(letta.events.on("compact_end", (event, ctx) => {
+      try {
+        if ((process.env.MM_FILMROOM ?? "off") !== "off") {
+          const summary = String(ctx?.conversationSummary ?? event?.summary ?? "");
+          if (summary.trim()) {
+            runFilmRoom({ summary, dirs: scanDirs(ctx ?? {}), authorFn: reviewForkAuthor(ctx), mode: process.env.MM_FILMROOM === "auto" ? "auto" : "staged" }).then((r) => {
+              if (r.ran && (r.patched.length || r.parked.length))
+                appendUiEvent({ phase: "filmroom_ran", summary: `film room: ${r.patched.length} patch(es), ${r.parked.length} parked`, route: "filmroom" });
+            }).catch(() => {});
+          }
+        }
+      } catch {}
       try {
         ensureDir();
-        mkdirSync5(RECEIPTS_DIR, { recursive: true });
-        writeFileSync5(join7(RECEIPTS_DIR, `compact-end-${Date.now()}.json`), JSON.stringify({ phase: "end", conv: event?.conversationId ?? null, trigger: event?.trigger ?? null, messagesBefore: event?.messagesBefore ?? null, messagesAfter: event?.messagesAfter ?? null, contextTokensBefore: event?.contextTokensBefore ?? null, contextTokensAfter: event?.contextTokensAfter ?? null, ts: Date.now() }));
+        mkdirSync6(RECEIPTS_DIR, { recursive: true });
+        writeFileSync7(join10(RECEIPTS_DIR, `compact-end-${Date.now()}.json`), JSON.stringify({ phase: "end", conv: event?.conversationId ?? null, trigger: event?.trigger ?? null, messagesBefore: event?.messagesBefore ?? null, messagesAfter: event?.messagesAfter ?? null, contextTokensBefore: event?.contextTokensBefore ?? null, contextTokensAfter: event?.contextTokensAfter ?? null, ts: Date.now() }));
       } catch {}
     }));
   }
@@ -3511,7 +3998,7 @@ function activate(letta) {
         if (sub === "staged") {
           let s = [];
           try {
-            s = existsSync6(STAGED_DIR) ? readdirSync4(STAGED_DIR).filter((n) => existsSync6(join7(STAGED_DIR, n, "SKILL.md"))) : [];
+            s = existsSync9(STAGED_DIR) ? readdirSync4(STAGED_DIR).filter((n) => existsSync9(join10(STAGED_DIR, n, "SKILL.md"))) : [];
           } catch {}
           return { type: "output", output: s.length ? `staged skills (1-tap to graduate):
 ` + s.map((n) => `  · ${n}`).join(`
@@ -3622,6 +4109,22 @@ issues:
 ${issues}${reps}${dupline}
 (dry-run — nothing published.)` };
         }
+        if (sub === "boxscore") {
+          return { type: "output", output: renderBoxscore(scanDirs(ctx), { renderAutonomy }) };
+        }
+        if (sub === "rate") {
+          const target = String(argv?.[1] || "").trim();
+          const dir = String(argv?.[2] || "").toLowerCase();
+          const stepId = String(argv?.[3] || "").trim() || null;
+          if (!target || dir !== "up" && dir !== "down")
+            return { type: "output", output: "usage: /muscle-memory rate <skill> up|down [step-id]" };
+          const res = await rateSkill(letta.client, slug(target), dir === "up", stepId);
+          const net = res.rating.plus - res.rating.minus;
+          return { type: "output", output: `\uD83C\uDFC0 ${res.skill}: ${net >= 0 ? "+" : ""}${net} (+${res.rating.plus}/-${res.rating.minus}) — ${res.reason}
+
+plus-minus board:
+${renderPlusMinus(loadPlusMinus())}` };
+        }
         if (sub === "engram") {
           const dirs = scanDirs(ctx);
           const plan = engramConsolidate(loadExperience(), managedView(dirs).map((m) => ({ name: m.name, body: m.body })));
@@ -3635,7 +4138,7 @@ ${plan.digest}` };
           const reg = buildRegistry(dirs);
           let staged2 = [];
           try {
-            staged2 = existsSync6(STAGED_DIR) ? readdirSync4(STAGED_DIR).filter((n) => existsSync6(join7(STAGED_DIR, n, "SKILL.md"))) : [];
+            staged2 = existsSync9(STAGED_DIR) ? readdirSync4(STAGED_DIR).filter((n) => existsSync9(join10(STAGED_DIR, n, "SKILL.md"))) : [];
           } catch {}
           const used = reg.skills.filter((s) => s.uses > 0);
           const idle = reg.skills.filter((s) => s.uses === 0 && s.state !== "archived");
@@ -3677,7 +4180,7 @@ ${plan.digest}` };
                 managed++;
         } catch {}
         try {
-          staged = existsSync6(STAGED_DIR) ? readdirSync4(STAGED_DIR).filter((n) => existsSync6(join7(STAGED_DIR, n, "SKILL.md"))).length : 0;
+          staged = existsSync9(STAGED_DIR) ? readdirSync4(STAGED_DIR).filter((n) => existsSync9(join10(STAGED_DIR, n, "SKILL.md"))).length : 0;
         } catch {}
         const cov = (() => {
           try {
@@ -3715,7 +4218,7 @@ ${plan.digest}` };
     const readParams = {
       type: "object",
       properties: {
-        action: { type: "string", enum: ["candidates", "draft", "load", "list", "curate", "repairs", "antipatterns", "defenses", "defense_hits", "registry", "autopilot_plan", "reflect_plan", "coverage"], description: "read-only operation to perform" },
+        action: { type: "string", enum: ["candidates", "draft", "load", "list", "curate", "repairs", "antipatterns", "defenses", "defense_hits", "registry", "boxscore", "autopilot_plan", "reflect_plan", "coverage"], description: "read-only operation to perform" },
         name: { type: "string", description: "skill name — for load" },
         candidate_key: { type: "string", description: "candidate key or substring to draft; defaults to top mature candidate" },
         mode: { type: "string", enum: ["staged", "auto"], description: "autopilot mode preview — for autopilot_plan" }
@@ -3726,8 +4229,10 @@ ${plan.digest}` };
     const writeParams = {
       type: "object",
       properties: {
-        action: { type: "string", enum: ["create_from_candidate", "create", "patch", "edit_full", "write_file", "remove_file", "retire", "restore", "pin", "unpin", "autopilot_run", "reflect", "graduate"], description: "mutating operation to perform" },
+        action: { type: "string", enum: ["create_from_candidate", "create", "patch", "edit_full", "write_file", "remove_file", "retire", "restore", "pin", "unpin", "rate_skill", "autopilot_run", "reflect", "graduate"], description: "mutating operation to perform" },
         mode: { type: "string", enum: ["staged", "auto"], description: "autopilot mode — for autopilot_run (staged=draft+1-tap, auto=graduate-on-gate)" },
+        rating: { type: "string", enum: ["up", "down"], description: "referee rating — for rate_skill (did this skill help or hurt the play?)" },
+        step_id: { type: "string", description: "optional Letta step id — for rate_skill; posts native steps.feedback in addition to the ledger" },
         name: { type: "string", description: "skill name (gerund, lowercase-hyphen) — for create/patch/retire" },
         description: { type: "string", description: "skill description incl. trigger phrases — for create" },
         body: { type: "string", description: "SKILL.md markdown body — for create" },
@@ -3745,7 +4250,7 @@ ${plan.digest}` };
     const readRun = async (ctx) => {
       const a = ctx?.args || {};
       const dirs = scanDirs(ctx);
-      const findSkillDir = (name) => dirs.find((d) => existsSync6(join7(d, name, "SKILL.md")));
+      const findSkillDir = (name) => dirs.find((d) => existsSync9(join10(d, name, "SKILL.md")));
       try {
         if (a.action === "candidates") {
           const rows = loadExperience();
@@ -3770,8 +4275,8 @@ ${plan.digest}` };
         }
         if (a.action === "defense_hits") {
           const hits = [];
-          if (existsSync6(DEFENSE_HITS))
-            for (const l of readFileSync6(DEFENSE_HITS, "utf8").trim().split(`
+          if (existsSync9(DEFENSE_HITS))
+            for (const l of readFileSync9(DEFENSE_HITS, "utf8").trim().split(`
 `).slice(-20)) {
               if (l)
                 try {
@@ -3780,6 +4285,9 @@ ${plan.digest}` };
             }
           return hits.length ? hits.map((h) => `[sev${h.severity} ${h.kind}] ${h.step} → ${h.errClass} ⇒ ${h.defense}`).join(`
 `) : "(no pre-action defense hits recorded)";
+        }
+        if (a.action === "boxscore") {
+          return renderBoxscore(dirs, { renderAutonomy });
         }
         if (a.action === "registry") {
           const reg = buildRegistry(dirs);
@@ -3862,7 +4370,7 @@ ${d.body}` };
       const a = ctx?.args || {};
       const dir = agentSkillsDir(ctx);
       const dirs = scanDirs(ctx);
-      const findSkillDir = (name) => dirs.find((d) => existsSync6(join7(d, name, "SKILL.md")));
+      const findSkillDir = (name) => dirs.find((d) => existsSync9(join10(d, name, "SKILL.md")));
       try {
         if (a.action === "autopilot_run") {
           const cfg = { ...AUTOPILOT_DEFAULT, mode: a.mode === "auto" ? "auto" : "staged" };
@@ -3894,6 +4402,25 @@ ${d.body}` };
             return { status: "error", content: "name required" };
           setPinned(slug(a.name), false);
           return `unpinned '${slug(a.name)}'`;
+        }
+        if (a.action === "rate_skill") {
+          if (!a.name)
+            return { status: "error", content: "name required" };
+          const dir2 = String(a.rating || "").toLowerCase();
+          if (dir2 !== "up" && dir2 !== "down")
+            return { status: "error", content: "rating must be 'up' or 'down'" };
+          const res = await rateSkill(letta.client, slug(a.name), dir2 === "up", a.step_id ? String(a.step_id) : null);
+          if (res.reason.startsWith("invalid skill name"))
+            return { status: "error", content: res.reason };
+          try {
+            if (a.reason)
+              appendJsonl(join10(RECEIPTS_DIR, "rating-reasons.jsonl"), { ts: Date.now(), skill: res.skill, rating: dir2, reason: String(a.reason), stepId: a.step_id ?? null });
+          } catch {}
+          const net = res.rating.plus - res.rating.minus;
+          return `\uD83C\uDFC0 ${res.skill}: ${net >= 0 ? "+" : ""}${net} (+${res.rating.plus}/-${res.rating.minus}) — ${res.reason}
+
+plus-minus board:
+${renderPlusMinus(loadPlusMinus())}`;
         }
         if (a.action === "retire") {
           if (!a.name)

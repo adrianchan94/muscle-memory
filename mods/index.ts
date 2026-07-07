@@ -40,7 +40,7 @@ import { buildCrossConversationEvidence, classifyError, commandTemplate, correla
 import { auditSkills, buildDiffFragment, candidateDescription, candidateName, crossShelfDuplicates, dedupCheck, draftSkillFromCandidate, draftWithRepair, effectivenessVerdict, findCandidate, lintSkillDraft, repairForCandidate, sotaQualityGaps } from "./gate";
 import { approveStagedPublish, catalogPrivacyScan, findSimilarSkills, liveSkillVisible, publishHardBlocks, publishMetadata, publishPlan, publishSkillToCatalog, publishTier, publishVisibilityReceipt, publishabilityScore, sanitizeForPublish, stageSanitizedPublish } from "./publish";
 import { Defense, ENGRAM, GuardMode, buildDefenses, buildNeocortexBlock, captureTagged, coachOnFailure, engramConsolidate, expectationFor, guardDecision, interleave, labileSkills, nativeEnabled, preActionDefense, predictionError, renderEngramDigest, replayQueue, reverseReplay, semanticSkillCandidates, skillRetrieved, syncNeocortexBlock, syncSkillPassages, tagExperience } from "./engram";
-import { CURATOR, aggregateTelemetry, buildRegistry, bumpUsage, churnSignal, coverageMap, curateManagedSkills, curatorPass, isPinned, lifecycleTransition, managedSkillUsage, restoreManagedSkill, retireManagedSkill, retiredSkillBlocker, runAutonomousPrune, setPinned, skillVerbs, specDrift, tenureFor } from "./lifecycle";
+import { CURATOR, aggregateTelemetry, buildRegistry, bumpUsage, churnSignal, coverageMap, curateManagedSkills, curatorPass, isPinned, lifecycleTransition, managedSkillUsage, restoreManagedSkill, retireManagedSkill, retiredSkillBlocker, runAutonomousPrune, setPinned, skillVerbs, specDrift, tenureFor, renderBoxscore } from "./lifecycle";
 import { AUTOPILOT_DEFAULT, AutopilotMode, REVIEW_PROMPT, SemanticFn, applySemanticEvidence, autopilotPlan, buildEvidenceManifest, executeAutopilotPlan, forkAuthor, graduateStagedSkill, isHighConfidenceCreate, loadHandledReflects, managedView, pickUpdateTarget, reflectSignature, retrievePreferences, reviewAndAuthor, reviewForkAuthor, runAutopilot, runReflectiveReview, searchSkills, streamChunkText } from "./autopilot";
 import { renderMuscleMemoryPanel, summarizeReflectActions } from "./ui";
 import { runFilmRoom } from "./filmroom";
@@ -356,22 +356,8 @@ export default function activate(letta: any) {
           return { type: "output", output: `🚢 publish preflight — ${plan.skill}\n  ${plan.currentShelf} → ${plan.recommendedShelf}  ·  tier: ${tier}  ·  publishability ${plan.publishability}/100  ·  ${act}${blocks}\nissues:\n${issues}${reps}${dupline}\n(dry-run — nothing published.)` };
         }
         if (sub === "boxscore") {
-          // 🏀 HARDWOOD BOX SCORE — the closed loop made visible: tenure + minutes + record per skill.
-          const dirs = scanDirs(ctx);
-          const reg = buildRegistry(dirs);
-          const ledger = loadPlusMinus();
-          // dedupe across shelves (agent + global catalog-sync copies render once, by name;
-          // usage/tenure/ledger are name-keyed so the merged row is identical either way)
-          const seen = new Set<string>();
-          const rows = reg.skills.filter((s: any) => s.state !== "archived").filter((s: any) => (seen.has(s.name) ? false : (seen.add(s.name), true))).map((s: any) => {
-            const r = ledger[s.name];
-            const net = r ? r.plus - r.minus : null;
-            const ten = tenureFor(s.name);
-            return { name: s.name, ten, uses: s.uses || 0, net, rec: r ? `+${r.plus}/-${r.minus}` : "—" };
-          }).sort((a: any, b: any) => (b.net ?? -99) - (a.net ?? -99) || b.uses - a.uses);
-          const icon = (t: string) => t === "pinned" ? "📌" : t === "tenured" ? "🏆" : "·";
-          const body = rows.map((r: any) => `  ${icon(r.ten)} ${(r.net === null ? "  —" : (r.net >= 0 ? "+" + r.net : String(r.net))).padStart(3)}  ${r.name}  (${r.rec} · ${r.uses} min)`).join("\n");
-          return { type: "output", output: `🏀 HARDWOOD BOX SCORE — tenure · net ± · record · minutes\n\n${body || "(no managed skills yet)"}\n\nTHE PROGRAM ITSELF (autonomy tenure — trust as a ledger):\n${renderAutonomy()}\n\n📌 pinned · 🏆 tenured (earned) · rate plays: /muscle-memory rate <skill> up|down` };
+          // 🏀 shared renderer — same code path as the agent tool (v0.8.1)
+          return { type: "output", output: renderBoxscore(scanDirs(ctx), { renderAutonomy }) };
         }
         if (sub === "rate") {
           // E7 REFEREE: skill plus-minus — ledger always; Letta-native steps.feedback when a step id
@@ -449,7 +435,7 @@ ${renderPlusMinus(loadPlusMinus())}` };
     const readParams = {
       type: "object",
       properties: {
-        action: { type: "string", enum: ["candidates", "draft", "load", "list", "curate", "repairs", "antipatterns", "defenses", "defense_hits", "registry", "autopilot_plan", "reflect_plan", "coverage"], description: "read-only operation to perform" },
+        action: { type: "string", enum: ["candidates", "draft", "load", "list", "curate", "repairs", "antipatterns", "defenses", "defense_hits", "registry", "boxscore", "autopilot_plan", "reflect_plan", "coverage"], description: "read-only operation to perform" },
         name: { type: "string", description: "skill name — for load" },
         candidate_key: { type: "string", description: "candidate key or substring to draft; defaults to top mature candidate" },
         mode: { type: "string", enum: ["staged", "auto"], description: "autopilot mode preview — for autopilot_plan" },
@@ -460,8 +446,10 @@ ${renderPlusMinus(loadPlusMinus())}` };
     const writeParams = {
       type: "object",
       properties: {
-        action: { type: "string", enum: ["create_from_candidate", "create", "patch", "edit_full", "write_file", "remove_file", "retire", "restore", "pin", "unpin", "autopilot_run", "reflect", "graduate"], description: "mutating operation to perform" },
+        action: { type: "string", enum: ["create_from_candidate", "create", "patch", "edit_full", "write_file", "remove_file", "retire", "restore", "pin", "unpin", "rate_skill", "autopilot_run", "reflect", "graduate"], description: "mutating operation to perform" },
         mode: { type: "string", enum: ["staged", "auto"], description: "autopilot mode — for autopilot_run (staged=draft+1-tap, auto=graduate-on-gate)" },
+        rating: { type: "string", enum: ["up", "down"], description: "referee rating — for rate_skill (did this skill help or hurt the play?)" },
+        step_id: { type: "string", description: "optional Letta step id — for rate_skill; posts native steps.feedback in addition to the ledger" },
         name: { type: "string", description: "skill name (gerund, lowercase-hyphen) — for create/patch/retire" },
         description: { type: "string", description: "skill description incl. trigger phrases — for create" },
         body: { type: "string", description: "SKILL.md markdown body — for create" },
@@ -505,6 +493,10 @@ ${renderPlusMinus(loadPlusMinus())}` };
           const hits: any[] = [];
           if (existsSync(DEFENSE_HITS)) for (const l of readFileSync(DEFENSE_HITS, "utf8").trim().split("\n").slice(-20)) { if (l) try { hits.push(JSON.parse(l)); } catch { /* */ } }
           return hits.length ? hits.map((h) => `[sev${h.severity} ${h.kind}] ${h.step} → ${h.errClass} ⇒ ${h.defense}`).join("\n") : "(no pre-action defense hits recorded)";
+        }
+        if (a.action === "boxscore") {
+          // 🏀 v0.8.1: agent-callable box score — SAME renderer as the slash command.
+          return renderBoxscore(dirs, { renderAutonomy });
         }
         if (a.action === "registry") {
           const reg = buildRegistry(dirs);
@@ -595,6 +587,19 @@ ${renderPlusMinus(loadPlusMinus())}` };
           if (!a.name) return { status: "error", content: "name required" };
           setPinned(slug(a.name), false);
           return `unpinned '${slug(a.name)}'`;
+        }
+        if (a.action === "rate_skill") {
+          // 🏀 v0.8.1 REFEREE RATING, agent-callable — the SAME rateSkill code path as the
+          // slash command (ledger always; native steps.feedback when a step id is provided).
+          // reason is receipt-only: appended to the receipts log, not the ledger schema.
+          if (!a.name) return { status: "error", content: "name required" };
+          const dir2 = String(a.rating || "").toLowerCase();
+          if (dir2 !== "up" && dir2 !== "down") return { status: "error", content: "rating must be 'up' or 'down'" };
+          const res = await rateSkill(letta.client, slug(a.name), dir2 === "up", a.step_id ? String(a.step_id) : null);
+          if (res.reason.startsWith("invalid skill name")) return { status: "error", content: res.reason };
+          try { if (a.reason) appendJsonl(join(RECEIPTS_DIR, "rating-reasons.jsonl"), { ts: Date.now(), skill: res.skill, rating: dir2, reason: String(a.reason), stepId: a.step_id ?? null }); } catch { /* receipt-only */ }
+          const net = res.rating.plus - res.rating.minus;
+          return `🏀 ${res.skill}: ${net >= 0 ? "+" : ""}${net} (+${res.rating.plus}/-${res.rating.minus}) — ${res.reason}\n\nplus-minus board:\n${renderPlusMinus(loadPlusMinus())}`;
         }
         if (a.action === "retire") {
           if (!a.name) return { status: "error", content: "name required" };
