@@ -360,7 +360,10 @@ export default function activate(letta: any) {
           const dirs = scanDirs(ctx);
           const reg = buildRegistry(dirs);
           const ledger = loadPlusMinus();
-          const rows = reg.skills.filter((s: any) => s.state !== "archived").map((s: any) => {
+          // dedupe across shelves (agent + global catalog-sync copies render once, by name;
+          // usage/tenure/ledger are name-keyed so the merged row is identical either way)
+          const seen = new Set<string>();
+          const rows = reg.skills.filter((s: any) => s.state !== "archived").filter((s: any) => (seen.has(s.name) ? false : (seen.add(s.name), true))).map((s: any) => {
             const r = ledger[s.name];
             const net = r ? r.plus - r.minus : null;
             const ten = tenureFor(s.name);
