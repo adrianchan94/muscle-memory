@@ -2,9 +2,9 @@
 
 **Every session becomes practice film.**
 
-> 🏆 **Winner — Letta Mod Challenge (July 2026)**, judged by the Letta / MemGPT team — and now running on Letta's own internal agents. Ships in [Letta's official mods repo](https://github.com/letta-ai/mods/tree/main/packages/muscle-memory) and publishes under their npm org as [`@letta-ai/muscle-memory`](https://www.npmjs.com/package/@letta-ai/muscle-memory).
+> 🏆 **Winner — Letta Mod Challenge (July 2026).** After the challenge, Letta published `muscle-memory` in their [official mods repo](https://github.com/letta-ai/mods/tree/main/packages/muscle-memory) and under their npm org as [`@letta-ai/muscle-memory`](https://www.npmjs.com/package/@letta-ai/muscle-memory). Their team has also started running it on internal agents.
 >
-> *"I was impressed with Muscle Memory primarily because of its simplicity… Agents that passively learn how to do something through practice is exactly the kind of thing we want agents to improve at."* — Cameron, Letta/MemGPT team, challenge results
+> *"I was impressed with Muscle Memory primarily because of its simplicity… Agents that passively learn how to do something through practice is exactly the kind of thing we want agents to improve at."* — Cameron, Letta team, [challenge announcement](https://discord.com/channels/1161736243340640419/1162172892361015307/1522720187491815579)
 
 Built by **Adrian Chan with his agent crew — Kev (Constellation agent) and Mack (local Letta agent).**
 
