@@ -71,12 +71,12 @@ describe("renderBoxscore (shared renderer — slash + tool)", () => {
     expect(out).toContain("test-lane");
   });
   test("FILTERS ref-skill-* fixtures from the live display (synthetic-tape doctrine)", async () => {
-    const dir = shelf(["real-skill", "ref-skill-a", "ref-skill-flaky"]);
-    await rateSkill(null, "ref-skill-a", true, null); // even a rated fixture stays hidden
+    const dir = shelf(["real-skill", "ref-skill-zz-tools", "ref-skill-zz-flaky"]); // zz names: fixture-pattern match WITHOUT colliding with referee.test's ledger counts (shared state dir per process)
+    await rateSkill(null, "ref-skill-zz-tools", true, null); // even a rated fixture stays hidden
     const out = renderBoxscore([dir]);
     expect(out).toContain("real-skill");
-    expect(out).not.toContain("ref-skill-a");
-    expect(out).not.toContain("ref-skill-flaky");
+    expect(out).not.toContain("ref-skill-zz-tools");
+    expect(out).not.toContain("ref-skill-zz-flaky");
     expect(FIXTURE_SKILL_RE.test("ref-skill-anything")).toBe(true);
   });
   test("dedupes the same skill across agent + global shelves", () => {
