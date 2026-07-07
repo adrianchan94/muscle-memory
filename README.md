@@ -2,9 +2,13 @@
 
 **Every session becomes practice film.**
 
-Built by **Adrian with Kev (Constellation agent) and Mack (local Letta agent).**
+> 🏆 **Winner — Letta Mod Challenge (July 2026)**, judged by the Letta / MemGPT team — and now running on Letta's own internal agents. Ships in [Letta's official mods repo](https://github.com/letta-ai/mods/tree/main/packages/muscle-memory) and publishes under their npm org as [`@letta-ai/muscle-memory`](https://www.npmjs.com/package/@letta-ai/muscle-memory).
+>
+> *"I was impressed with Muscle Memory primarily because of its simplicity… Agents that passively learn how to do something through practice is exactly the kind of thing we want agents to improve at."* — Cameron, Letta/MemGPT team, challenge results
 
-A Hermes-inspired, Letta-native **Skill Ops** mod — the only Letta mod that treats skill-library maintenance as a whole **autonomous lifecycle**. It watches a Letta agent's real tool-use, distills reusable lessons, and runs a deterministic, opt-in lifecycle around them — **distill · dedup · quality-gate · sanitize · prune** — with no manual `/skill` handoff.
+Built by **Adrian Chan with his agent crew — Kev (Constellation agent) and Mack (local Letta agent).**
+
+A Hermes-inspired, Letta-native **Skill Ops** mod that treats skill-library maintenance as a whole **autonomous lifecycle**. It watches a Letta agent's real tool-use, distills reusable lessons, and runs a deterministic, opt-in lifecycle around them — **distill · dedup · quality-gate · sanitize · prune** — with no manual `/skill` handoff.
 
 Letta already creates, lists, installs, and deletes skills. `muscle-memory` adds the autonomous maintenance layer around those primitives.
 
@@ -13,9 +17,10 @@ Letta already creates, lists, installs, and deletes skills. `muscle-memory` adds
 Try it in 30 seconds — opt-in, staged-first, default off:
 
 ```bash
-letta install git:github.com/adrianchan94/muscle-memory   # then /reload
+letta install npm:@letta-ai/muscle-memory                 # official release — then /reload
 MM_REFLECT=staged letta    # watches your real work and stages skills — no manual /skill
 ```
+*(bleeding edge instead: `letta install git:github.com/adrianchan94/muscle-memory`)*
 
 Loud about its [limits](#limitations).
 
