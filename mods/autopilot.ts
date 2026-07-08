@@ -1,7 +1,7 @@
 // muscle-memory · autopilot module (split from index.ts — behavior-preserving).
 import { mkdirSync, readFileSync, existsSync, writeFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
-import { AUTOPILOT_STATE, Candidate, MM, MM_TAG, RECEIPTS_DIR, REFLECT_HANDLED, Row, STAGED_DIR, STAGED_RETIRED_DIR, STATE_DIR, agentSkillsDir, appendMeshFeed, appendUiEvent, ensureDir, hash, isManaged, listSkillNames, loadExperience, readSkill, scanDirs, scanSkillContent, skillDesc, slug, writeSkill, writeUiState } from "./core";
+import { AUTOPILOT_STATE, Candidate, MM, MM_TAG, RECEIPTS_DIR, REFLECT_HANDLED, Row, STAGED_DIR, STAGED_RETIRED_DIR, STATE_DIR, agentSkillsDir, appendMeshFeed, appendUiEvent, ensureDir, hash, isManaged, listSkillNames, loadExperience, readSkill, scanDirs, scanSkillContent, skillDesc, slug, syncSkillToDesktopCatalog, writeSkill, writeUiState } from "./core";
 import { DESTRUCTIVE, RepairChain, buildCrossConversationEvidence, detect, detectAntiPatterns, detectRepairChains, impactScore, isValidSkillName, multiInstanceSupport } from "./detect";
 import { dedupCheck, draftWithRepair, effectivenessVerdict, findCandidate, lintSkillDraft, repairForCandidate, sotaQualityGaps } from "./gate";
 import { publishPlan, publishSkillToCatalog, publishTier } from "./publish";
@@ -116,7 +116,7 @@ export function executeAutopilotPlan(plan: AutopilotPlan, opts: { skillsDir: str
         const content = `---\nname: ${d.name}\ndescription: ${draft.description}\n---\n\n${draft.body}${provenanceBlock(d.candidate)}\n`;
         const sec = scanSkillContent(content); // M2: security gate on autopilot graduate/stage
         if (!sec.ok) { receipts.push({ op: "distill", name: d.name, blocked: `security: ${sec.issues.join("; ")}`, ts: Date.now() }); continue; }
-        if (d.gate === "graduate") { writeSkill(opts.skillsDir, d.name, content); graduated.push(d.name); }
+        if (d.gate === "graduate") { writeSkill(opts.skillsDir, d.name, content); syncSkillToDesktopCatalog(d.name, opts.ctx); graduated.push(d.name); }
         else { writeSkill(STAGED_DIR, d.name, content); staged.push(d.name); }
         receipts.push({ op: "distill", name: d.name, gate: d.gate, reason: d.reason, ts: Date.now() });
       } else if (d.op === "refine") {
@@ -648,6 +648,7 @@ export function graduateStagedSkill(name: string, ctx?: any): string {
   const sec = scanSkillContent(body); if (!sec.ok) throw new Error(`security blocked: ${sec.issues.join("; ")}`);
   const dstRoot = agentSkillsDir(ctx);
   const dst = writeSkill(dstRoot, nm, content.includes(MM_TAG) ? content : content + `\n<!-- ${MM_TAG}: graduated ${new Date().toISOString().slice(0, 10)} -->\n`);
+  syncSkillToDesktopCatalog(nm, ctx);
   mkdirSync(STAGED_RETIRED_DIR, { recursive: true });
   try { renameSync(srcDir, join(STAGED_RETIRED_DIR, `${nm}-graduated-${Date.now()}`)); } catch { /* best-effort quarantine */ }
   appendUiEvent({ phase: "skill_graduated", summary: `graduated '${nm}'`, skill: nm, action: "graduate", route: "manual" });
@@ -750,6 +751,7 @@ export async function runReflectiveReview(ctx: any, config: { mode?: "staged" | 
       }
       const oldContent = res.action === "update" && res.updateTarget ? (() => { const d = reviewDirs.find((x) => existsSync(join(x, res.updateTarget!, "SKILL.md"))); return d ? readSkill(d, res.updateTarget!) : undefined; })() : undefined;
       writeSkill(dir, res.name, tagged);
+      if (graduate) syncSkillToDesktopCatalog(res.name, ctx);
       // EVIDENCE-PACK MANIFEST: provenance next to the skill (not model vibes — a git object).
       const manifest = buildEvidenceManifest({ action: res.action, skill: res.name, updateTarget: res.updateTarget, convs: ev.convs, signals: ev.items, memfsHits: res.matches || [], preferences: prefs, rejected: ev.rejected, newContent: tagged, oldContent });
       const evDir = join(dir, res.name, "references", "evidence"); mkdirSync(evDir, { recursive: true });

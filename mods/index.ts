@@ -34,7 +34,7 @@ export type { Defense } from "./engram";
 export { detect, detectRepairChains, isSkillWorthy } from "./detect";
 export { draftWithRepair } from "./gate";
 export { preserveExistingFrontmatterMetadata, isAmbiguousExistingRoute, compareSkillSections } from "./autopilot";
-import { GLOBAL_SKILLS, LOG_PATH, MM, MM_TAG, NEOCORTEX_BLOCK, OUTCOME_PATH, RECEIPTS_DIR, SESSIONS_PATH, STAGED_DIR, STATE_DIR, TELEMETRY_PATH, agentSkillsDir, appendJsonl, appendMeshFeed, appendUiEvent, createDedupeSurface, ensureDir, hash, isManaged, listSkillNames, loadExperience, loadMeshFeed, loadRows, loadUiEvents, readSkill, readUiState, redactFragment, removeSupportFile, renderMeshFeed, scanDirs, scanSkillContent, scanSupportFile, setLivePanel, skillDesc, slug, validateSupportPath, writeSkill, writeSupportFile, writeUiState } from "./core";
+import { GLOBAL_SKILLS, LOG_PATH, MM, MM_TAG, NEOCORTEX_BLOCK, OUTCOME_PATH, RECEIPTS_DIR, SESSIONS_PATH, STAGED_DIR, STATE_DIR, TELEMETRY_PATH, agentSkillsDir, appendJsonl, appendMeshFeed, appendUiEvent, createDedupeSurface, ensureDir, hash, isManaged, listSkillNames, loadExperience, loadMeshFeed, loadRows, loadUiEvents, readSkill, readUiState, redactFragment, removeSupportFile, renderMeshFeed, scanDirs, scanSkillContent, scanSupportFile, setLivePanel, skillDesc, slug, syncSkillToDesktopCatalog, validateSupportPath, writeSkill, writeSupportFile, writeUiState } from "./core";
 import { buildCrossConversationEvidence, classifyError, commandTemplate, correlateOutcomes, detect, detectAntiPatterns, detectInvocationGotchas, detectRepairChains, detectSequences, detectTemplates, fingerprint, impactScore, inferOutcomes, isDurableLesson, isValidSkillName, maturityScore, mergeOutcomes, stepSig } from "./detect";
 import { auditSkills, buildDiffFragment, candidateDescription, candidateName, crossShelfDuplicates, dedupCheck, draftSkillFromCandidate, draftWithRepair, effectivenessVerdict, findCandidate, lintSkillDraft, repairForCandidate, sotaQualityGaps } from "./gate";
 import { approveStagedPublish, catalogPrivacyScan, findSimilarSkills, liveSkillVisible, publishHardBlocks, publishMetadata, publishPlan, publishSkillToCatalog, publishTier, publishVisibilityReceipt, publishabilityScore, sanitizeForPublish, stageSanitizedPublish } from "./publish";
@@ -58,7 +58,7 @@ export const __mm = { commandTemplate, fingerprint, redactFragment, buildDiffFra
   // v2
   classifyError, mergeOutcomes, correlateOutcomes, inferOutcomes, detectInvocationGotchas, loadExperience, detectRepairChains, detectAntiPatterns, impactScore, lintSkillDraft, aggregateTelemetry, effectivenessVerdict, draftWithRepair, stepSig, sotaQualityGaps, auditSkills, crossShelfDuplicates, publishabilityScore, sanitizeForPublish, publishHardBlocks, publishPlan, publishTier, publishMetadata, findSimilarSkills, stageSanitizedPublish, approveStagedPublish, publishVisibilityReceipt, liveSkillVisible,
   // lifecycle file helpers (for end-to-end manage proof)
-  writeSkill, isManaged, listSkillNames, readSkill, retireManagedSkill, agentSkillsDir, scanDirs, MM_TAG,
+  writeSkill, isManaged, listSkillNames, readSkill, retireManagedSkill, agentSkillsDir, scanDirs, syncSkillToDesktopCatalog, MM_TAG,
   // v5 ENGRAM — CLS loop core (pure)
   ENGRAM, expectationFor, predictionError, tagExperience, captureTagged, skillRetrieved, labileSkills, replayQueue, reverseReplay, interleave, engramConsolidate, renderEngramDigest,
   guardDecision, buildNeocortexBlock, nativeEnabled, NEOCORTEX_BLOCK,
@@ -476,7 +476,7 @@ export default function activate(letta: any) {
     const writeParams = {
       type: "object",
       properties: {
-        action: { type: "string", enum: ["create_from_candidate", "create", "patch", "edit_full", "write_file", "remove_file", "retire", "restore", "pin", "unpin", "autopilot_run", "reflect", "graduate"], description: "mutating operation to perform" },
+        action: { type: "string", enum: ["create_from_candidate", "create", "patch", "edit_full", "write_file", "remove_file", "retire", "restore", "pin", "unpin", "autopilot_run", "reflect", "graduate", "catalog_sync"], description: "mutating operation to perform" },
         mode: { type: "string", enum: ["staged", "auto"], description: "autopilot mode — for autopilot_run (staged=draft+1-tap, auto=graduate-on-gate)" },
         name: { type: "string", description: "skill name (gerund, lowercase-hyphen) — for create/patch/retire" },
         description: { type: "string", description: "skill description incl. trigger phrases — for create" },
@@ -488,6 +488,8 @@ export default function activate(letta: any) {
         absorbed_into: { type: "string", description: "umbrella skill name this was merged into — for retire (consolidation vs prune)" },
         file_path: { type: "string", description: "support file path under references/templates/scripts/assets — for write_file/remove_file" },
         file_content: { type: "string", description: "support file content — for write_file" },
+        dry_run: { type: "boolean", description: "for catalog_sync: preview without copying" },
+        force: { type: "boolean", description: "for catalog_sync: manually replace an existing catalog copy after approval" },
       },
       required: ["action"],
       additionalProperties: false,
@@ -602,6 +604,11 @@ export default function activate(letta: any) {
           const p = graduateStagedSkill(String(a.name), ctx);
           return `graduated '${slug(a.name)}' -> ${p}`;
         }
+        if (a.action === "catalog_sync") {
+          if (!a.name) return { status: "error", content: "name required" };
+          const r = syncSkillToDesktopCatalog(String(a.name), ctx, { dryRun: !!a.dry_run, force: !!a.force });
+          return r;
+        }
         if (a.action === "pin") {
           if (!a.name) return { status: "error", content: "name required" };
           setPinned(slug(a.name), true);
@@ -634,6 +641,7 @@ export default function activate(letta: any) {
           const prov = `\n<!-- ${MM_TAG}: distilled ${new Date().toISOString().slice(0, 10)}; candidate=${c.kind}:${c.key}; reps=${c.count}; convs=${c.convs}; fixes=${c.fixes}; impact=${impactScore(c).score} -->\n`;
           const content = `---\nname: ${nm}\ndescription: ${desc}\n---\n\n${d.body}${prov}\n`;
           const p = writeSkill(dir, nm, content);
+          syncSkillToDesktopCatalog(nm, ctx);
           return `created '${nm}' from candidate '${c.key}'${repair ? ` (w/ observed Pitfall: ${repair.errClass})` : ""} -> ${p}\nLoad with muscle_memory_skill_read action:load, then invoke the normal Skill tool with skill="${nm}". Dedup max overlap ${Math.round(dc.overlap * 100)}% (${dc.name || "none"}); lint OK.`;
         }
         if (a.action === "create") {
@@ -650,6 +658,7 @@ export default function activate(letta: any) {
           const body = a.body.includes(MM_TAG) ? a.body : a.body + prov;
           const content = `---\nname: ${nm}\ndescription: ${a.description}\n---\n\n${body}\n`;
           const p = writeSkill(dir, nm, content);
+          syncSkillToDesktopCatalog(nm, ctx);
           return `created '${nm}' -> ${p}\nLoad with muscle_memory_skill_read action:load, then invoke the normal Skill tool with skill="${nm}" when you want to use it. Dedup max overlap ${Math.round(dc.overlap * 100)}% (${dc.name || "none"}).`;
         }
         if (a.action === "patch") {
@@ -661,6 +670,7 @@ export default function activate(letta: any) {
           const nt = t.replace(a.old, a.replacement);
           const secP = scanSkillContent(nt); if (!secP.ok) return { status: "error", content: `security blocked: ${secP.issues.join("; ")}` };
           writeSkill(d, a.name, nt); // pinned skills allow patch (Hermes: pin guards delete, not edit)
+          syncSkillToDesktopCatalog(String(a.name), ctx);
           return `patched '${a.name}' in ${d}`;
         }
         if (a.action === "edit_full") {
@@ -670,6 +680,7 @@ export default function activate(letta: any) {
           const lint = lintSkillDraft({ name: slug(a.name), description: desc, body: a.body }); if (!lint.ok) return { status: "error", content: `linter blocked: ${lint.issues.join("; ")}` };
           const sec = scanSkillContent(a.body); if (!sec.ok) return { status: "error", content: `security blocked: ${sec.issues.join("; ")}` };
           writeSkill(d, a.name, a.body.includes(MM_TAG) ? a.body : a.body + `\n<!-- ${MM_TAG}: edited ${new Date().toISOString().slice(0, 10)} -->\n`);
+          syncSkillToDesktopCatalog(String(a.name), ctx);
           return `full-rewrote '${a.name}'`;
         }
         if (a.action === "write_file") {

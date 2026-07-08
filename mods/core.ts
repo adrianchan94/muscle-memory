@@ -1,6 +1,6 @@
 // muscle-memory · core module (split from index.ts — behavior-preserving).
-import { appendFileSync, mkdirSync, readFileSync, existsSync, writeFileSync, readdirSync, renameSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { appendFileSync, copyFileSync, lstatSync, mkdirSync, readFileSync, existsSync, writeFileSync, readdirSync, renameSync, rmSync } from "node:fs";
+import { join, dirname, relative } from "node:path";
 import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 import { commandTemplate, correlateOutcomes, fingerprint, inferOutcomes } from "./detect";
@@ -181,6 +181,176 @@ export function writeSkill(dir: string, name: string, content: string): string {
   return join(dir, name, "SKILL.md");
 }
 
+export const CATALOG_SYNC_DIR = join(STATE_DIR, "catalog-sync");
+export const CATALOG_SYNC_BACKUP_DIR = join(CATALOG_SYNC_DIR, "backups");
+export const CATALOG_SYNC_META = ".mm-catalog-sync.json";
+export const CATALOG_SYNC_BACKUPS_PER_SKILL = 3;
+
+export type CatalogSyncResult = {
+  status: "synced" | "noop" | "dry_run" | "missing" | "blocked_unmanaged" | "blocked_different_agent" | "partial" | "error";
+  skill: string;
+  source?: string;
+  target?: string;
+  backup?: string | null;
+  copied?: string[];
+  skipped?: Array<{ path: string; reason: string }>;
+  sourceAgent?: string | null;
+  targetAgent?: string | null;
+  reason?: string;
+};
+
+type CatalogSyncMeta = { sourceAgent: string | null; syncedAt: string; source: string; skill: string };
+
+function sourceAgentId(ctx?: any): string | null {
+  return String(ctx?.agent?.id || ctx?.agentId || process.env.AGENT_ID || "").trim() || null;
+}
+
+function readCatalogSyncMeta(skill: string): CatalogSyncMeta | null {
+  try {
+    const meta = JSON.parse(readFileSync(join(GLOBAL_SKILLS, skill, CATALOG_SYNC_META), "utf8"));
+    return meta && typeof meta === "object" ? meta as CatalogSyncMeta : null;
+  } catch { return null; }
+}
+
+function writeCatalogSyncReceipt(result: CatalogSyncResult) {
+  try {
+    mkdirSync(CATALOG_SYNC_DIR, { recursive: true });
+    const file = join(CATALOG_SYNC_DIR, `${Date.now()}-${result.skill}.json`);
+    writeFileSync(file, JSON.stringify({ ...result, ts: Date.now() }, null, 2));
+  } catch { /* receipt must never break sync */ }
+}
+
+function readTextIfSafe(file: string): string | null {
+  try {
+    const buf = readFileSync(file);
+    if (buf.includes(0)) return null;
+    return buf.toString("utf8");
+  } catch { return null; }
+}
+
+function normalizedSkillForCompare(file: string): string {
+  return (readTextIfSafe(file) || "").replace(/\n?<!-- muscle-memory desktop-catalog-sync:[\s\S]*?-->\n?/g, "\n").trim();
+}
+
+function sameSkillFile(a: string, b: string): boolean {
+  try { return normalizedSkillForCompare(a) === normalizedSkillForCompare(b); } catch { return false; }
+}
+
+function pruneCatalogBackups(skill: string) {
+  try {
+    if (!existsSync(CATALOG_SYNC_BACKUP_DIR)) return;
+    const matches = readdirSync(CATALOG_SYNC_BACKUP_DIR)
+      .filter((n) => n === skill || n.startsWith(`${skill}-`))
+      .sort()
+      .reverse();
+    for (const old of matches.slice(CATALOG_SYNC_BACKUPS_PER_SKILL)) rmSync(join(CATALOG_SYNC_BACKUP_DIR, old), { recursive: true, force: true });
+  } catch { /* best-effort */ }
+}
+
+function shouldSkipCatalogPath(rel: string): string | null {
+  if (!rel || rel === CATALOG_SYNC_META) return "internal catalog metadata";
+  if (rel === "RETIRE-REASON.txt") return "retire receipt";
+  if (/^references\/evidence\//.test(rel)) return "evidence receipts stay agent-local";
+  if (rel.split("/").some((part) => part.startsWith("."))) return "dotfile/temporary file";
+  return null;
+}
+
+function copySkillFolderFiltered(srcDir: string, target: string, meta: CatalogSyncMeta): { copied: string[]; skipped: Array<{ path: string; reason: string }> } {
+  const copied: string[] = [];
+  const skipped: Array<{ path: string; reason: string }> = [];
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const src = join(dir, entry.name);
+      const rel = relative(srcDir, src).replace(/\\/g, "/");
+      const skipReason = shouldSkipCatalogPath(rel);
+      if (skipReason) { skipped.push({ path: rel, reason: skipReason }); continue; }
+      let stat;
+      try { stat = lstatSync(src); } catch { skipped.push({ path: rel, reason: "unreadable" }); continue; }
+      if (stat.isSymbolicLink()) { skipped.push({ path: rel, reason: "symlink skipped" }); continue; }
+      if (stat.isDirectory()) { walk(src); continue; }
+      if (!stat.isFile()) { skipped.push({ path: rel, reason: "not a regular file" }); continue; }
+      if (rel !== "SKILL.md") {
+        const v = validateSupportPath(rel);
+        if (!v.ok) { skipped.push({ path: rel, reason: v.reason || "invalid support path" }); continue; }
+        const text = readTextIfSafe(src);
+        if (text !== null) {
+          const sc = scanSupportFile(rel, text);
+          if (!sc.ok) { skipped.push({ path: rel, reason: `security: ${sc.issues.join("; ")}` }); continue; }
+        } else if (!/^assets\//.test(rel)) {
+          skipped.push({ path: rel, reason: "binary/non-text support file outside assets" }); continue;
+        }
+      } else {
+        const text = readTextIfSafe(src) || "";
+        const sc = scanSkillContent(text);
+        if (!sc.ok) { skipped.push({ path: rel, reason: `security: ${sc.issues.join("; ")}` }); continue; }
+      }
+      const dst = join(target, rel);
+      mkdirSync(dirname(dst), { recursive: true });
+      copyFileSync(src, dst);
+      copied.push(rel);
+    }
+  };
+  walk(srcDir);
+  writeFileSync(join(target, CATALOG_SYNC_META), JSON.stringify(meta, null, 2));
+  return { copied, skipped };
+}
+
+/** Local Desktop bridge: mirror an agent-MemFS skill into ~/.letta/skills so Desktop's local
+ * catalog-backed modal can render it. This is NOT publish/share/marketplace — it is a reversible
+ * local availability sync. Auto-sync refuses unmanaged or different-agent collisions; manual callers
+ * may pass force when they explicitly want the local catalog copy replaced. */
+export function syncSkillToDesktopCatalog(name: string, ctx?: any, opts: { dryRun?: boolean; force?: boolean } = {}): CatalogSyncResult {
+  const nm = slug(name);
+  if (!nm) return { status: "error", skill: nm, reason: "name required" };
+  const srcRoot = agentSkillsDir(ctx);
+  const srcDir = existsSync(join(srcRoot, nm, "SKILL.md"))
+    ? join(srcRoot, nm)
+    : scanDirs(ctx).filter((d) => d !== GLOBAL_SKILLS).map((d) => join(d, nm)).find((d) => existsSync(join(d, "SKILL.md")));
+  if (!srcDir) return { status: "missing", skill: nm, reason: "no agent skill to sync" };
+  const target = join(GLOBAL_SKILLS, nm);
+  const srcSkill = join(srcDir, "SKILL.md");
+  const dstSkill = join(target, "SKILL.md");
+  const sourceAgent = sourceAgentId(ctx);
+  const targetMeta = readCatalogSyncMeta(nm);
+  const targetAgent = targetMeta?.sourceAgent ?? null;
+  if (srcDir === target) return { status: "noop", skill: nm, source: srcDir, target, sourceAgent, targetAgent, reason: "source already is desktop catalog" };
+  if (existsSync(dstSkill) && sameSkillFile(srcSkill, dstSkill) && (!targetAgent || targetAgent === sourceAgent)) {
+    return { status: "noop", skill: nm, source: srcDir, target, sourceAgent, targetAgent, reason: "already in sync" };
+  }
+  if (existsSync(dstSkill) && !isManaged(GLOBAL_SKILLS, nm) && !opts.force) {
+    return { status: "blocked_unmanaged", skill: nm, source: srcDir, target, sourceAgent, targetAgent, reason: "target catalog skill is not muscle-memory-managed; pass force to replace" };
+  }
+  if (existsSync(dstSkill) && targetAgent && sourceAgent && targetAgent !== sourceAgent && !opts.force) {
+    return { status: "blocked_different_agent", skill: nm, source: srcDir, target, sourceAgent, targetAgent, reason: `target catalog skill was synced by ${targetAgent}; pass force to replace` };
+  }
+  if (existsSync(dstSkill) && isManaged(GLOBAL_SKILLS, nm) && !targetAgent && !opts.force && !sameSkillFile(srcSkill, dstSkill)) {
+    return { status: "blocked_different_agent", skill: nm, source: srcDir, target, sourceAgent, targetAgent, reason: "target catalog skill has no source-agent metadata; pass force to replace" };
+  }
+  if (opts.dryRun) return { status: "dry_run", skill: nm, source: srcDir, target, sourceAgent, targetAgent, backup: existsSync(target) ? "would-back-up-target" : null };
+  let backup: string | null = null;
+  try {
+    mkdirSync(GLOBAL_SKILLS, { recursive: true });
+    if (existsSync(target)) {
+      mkdirSync(CATALOG_SYNC_BACKUP_DIR, { recursive: true });
+      backup = join(CATALOG_SYNC_BACKUP_DIR, `${nm}-${new Date().toISOString().replace(/[:.]/g, "-")}`);
+      renameSync(target, backup);
+    }
+    mkdirSync(target, { recursive: true });
+    const meta: CatalogSyncMeta = { skill: nm, source: srcDir, sourceAgent, syncedAt: new Date().toISOString() };
+    const { copied, skipped } = copySkillFolderFiltered(srcDir, target, meta);
+    if (!copied.includes("SKILL.md")) throw new Error("SKILL.md was not copied");
+    pruneCatalogBackups(nm);
+    const result: CatalogSyncResult = { status: skipped.length ? "partial" : "synced", skill: nm, source: srcDir, target, backup, copied, skipped, sourceAgent, targetAgent };
+    writeCatalogSyncReceipt(result);
+    appendUiEvent({ phase: "skill_catalog_synced", summary: `synced '${nm}' to local Desktop catalog`, skill: nm, action: "catalog_sync", route: "desktop-catalog" });
+    return result;
+  } catch (e: any) {
+    try { rmSync(target, { recursive: true, force: true }); if (backup && existsSync(backup)) renameSync(backup, target); } catch { /* best effort rollback */ }
+    const result: CatalogSyncResult = { status: "error", skill: nm, source: srcDir, target, backup, sourceAgent, targetAgent, reason: String(e?.message ?? e) };
+    writeCatalogSyncReceipt(result);
+    return result;
+  }
+}
 
 // ════════════════════════════════════════════════════════════════════════════
 // v2 (Letta Code 0.27.18) — outcome-aware learning, repair chains, impact scoring,
