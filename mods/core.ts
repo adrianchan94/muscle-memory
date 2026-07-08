@@ -8,6 +8,10 @@ import { sotaQualityGaps } from "./gate";
 import { archivePassage, syncNeocortexBlock } from "./engram";
 
 
+if (process.env.NODE_ENV === "test" && !process.env.MM_STATE_DIR) {
+  throw new Error("Refusing to run muscle-memory tests against the real state dir — set MM_STATE_DIR to a sandbox (package script does this automatically).");
+}
+
 export const STATE_DIR = process.env.MM_STATE_DIR || join(homedir(), ".letta", "muscle-memory");
 
 export const LOG_PATH = join(STATE_DIR, "experience.jsonl");

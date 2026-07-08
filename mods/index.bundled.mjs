@@ -7,6 +7,7 @@ import { appendFileSync, copyFileSync, lstatSync, mkdirSync, readFileSync, exist
 import { join, dirname, relative } from "node:path";
 import { homedir } from "node:os";
 import { createHash } from "node:crypto";
+if (false) {}
 var STATE_DIR = process.env.MM_STATE_DIR || join(homedir(), ".letta", "muscle-memory");
 var LOG_PATH = join(STATE_DIR, "experience.jsonl");
 var SESSIONS_PATH = join(STATE_DIR, "sessions.jsonl");
