@@ -3,8 +3,8 @@ import { mkdirSync as mkdirSync6, readFileSync as readFileSync8, existsSync as e
 import { join as join10 } from "node:path";
 
 // mods/core.ts
-import { appendFileSync, mkdirSync, readFileSync, existsSync, writeFileSync, readdirSync, renameSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { appendFileSync, copyFileSync, lstatSync, mkdirSync, readFileSync, existsSync, writeFileSync, readdirSync, renameSync, rmSync } from "node:fs";
+import { join, dirname, relative } from "node:path";
 import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 var STATE_DIR = process.env.MM_STATE_DIR || join(homedir(), ".letta", "muscle-memory");
@@ -145,6 +145,194 @@ function writeSkill(dir, name, content) {
   writeFileSync(tmp, content);
   renameSync(tmp, join(dir, name, "SKILL.md"));
   return join(dir, name, "SKILL.md");
+}
+var CATALOG_SYNC_DIR = join(STATE_DIR, "catalog-sync");
+var CATALOG_SYNC_BACKUP_DIR = join(CATALOG_SYNC_DIR, "backups");
+var CATALOG_SYNC_META = ".mm-catalog-sync.json";
+var CATALOG_SYNC_BACKUPS_PER_SKILL = 3;
+function sourceAgentId(ctx) {
+  return String(ctx?.agent?.id || ctx?.agentId || process.env.AGENT_ID || "").trim() || null;
+}
+function readCatalogSyncMeta(skill) {
+  try {
+    const meta = JSON.parse(readFileSync(join(GLOBAL_SKILLS, skill, CATALOG_SYNC_META), "utf8"));
+    return meta && typeof meta === "object" ? meta : null;
+  } catch {
+    return null;
+  }
+}
+function writeCatalogSyncReceipt(result) {
+  try {
+    mkdirSync(CATALOG_SYNC_DIR, { recursive: true });
+    const file = join(CATALOG_SYNC_DIR, `${Date.now()}-${result.skill}.json`);
+    writeFileSync(file, JSON.stringify({ ...result, ts: Date.now() }, null, 2));
+  } catch {}
+}
+function readTextIfSafe(file) {
+  try {
+    const buf = readFileSync(file);
+    if (buf.includes(0))
+      return null;
+    return buf.toString("utf8");
+  } catch {
+    return null;
+  }
+}
+function normalizedSkillForCompare(file) {
+  return (readTextIfSafe(file) || "").replace(/\n?<!-- muscle-memory desktop-catalog-sync:[\s\S]*?-->\n?/g, `
+`).trim();
+}
+function sameSkillFile(a, b) {
+  try {
+    return normalizedSkillForCompare(a) === normalizedSkillForCompare(b);
+  } catch {
+    return false;
+  }
+}
+function pruneCatalogBackups(skill) {
+  try {
+    if (!existsSync(CATALOG_SYNC_BACKUP_DIR))
+      return;
+    const matches = readdirSync(CATALOG_SYNC_BACKUP_DIR).filter((n) => n === skill || n.startsWith(`${skill}-`)).sort().reverse();
+    for (const old of matches.slice(CATALOG_SYNC_BACKUPS_PER_SKILL))
+      rmSync(join(CATALOG_SYNC_BACKUP_DIR, old), { recursive: true, force: true });
+  } catch {}
+}
+function shouldSkipCatalogPath(rel) {
+  if (!rel || rel === CATALOG_SYNC_META)
+    return "internal catalog metadata";
+  if (rel === "RETIRE-REASON.txt")
+    return "retire receipt";
+  if (/^references\/evidence\//.test(rel))
+    return "evidence receipts stay agent-local";
+  if (rel.split("/").some((part) => part.startsWith(".")))
+    return "dotfile/temporary file";
+  return null;
+}
+function copySkillFolderFiltered(srcDir, target, meta) {
+  const copied = [];
+  const skipped = [];
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const src = join(dir, entry.name);
+      const rel = relative(srcDir, src).replace(/\\/g, "/");
+      const skipReason = shouldSkipCatalogPath(rel);
+      if (skipReason) {
+        skipped.push({ path: rel, reason: skipReason });
+        continue;
+      }
+      let stat;
+      try {
+        stat = lstatSync(src);
+      } catch {
+        skipped.push({ path: rel, reason: "unreadable" });
+        continue;
+      }
+      if (stat.isSymbolicLink()) {
+        skipped.push({ path: rel, reason: "symlink skipped" });
+        continue;
+      }
+      if (stat.isDirectory()) {
+        walk(src);
+        continue;
+      }
+      if (!stat.isFile()) {
+        skipped.push({ path: rel, reason: "not a regular file" });
+        continue;
+      }
+      if (rel !== "SKILL.md") {
+        const v = validateSupportPath(rel);
+        if (!v.ok) {
+          skipped.push({ path: rel, reason: v.reason || "invalid support path" });
+          continue;
+        }
+        const text = readTextIfSafe(src);
+        if (text !== null) {
+          const sc = scanSupportFile(rel, text);
+          if (!sc.ok) {
+            skipped.push({ path: rel, reason: `security: ${sc.issues.join("; ")}` });
+            continue;
+          }
+        } else if (!/^assets\//.test(rel)) {
+          skipped.push({ path: rel, reason: "binary/non-text support file outside assets" });
+          continue;
+        }
+      } else {
+        const text = readTextIfSafe(src) || "";
+        const sc = scanSkillContent(text);
+        if (!sc.ok) {
+          skipped.push({ path: rel, reason: `security: ${sc.issues.join("; ")}` });
+          continue;
+        }
+      }
+      const dst = join(target, rel);
+      mkdirSync(dirname(dst), { recursive: true });
+      copyFileSync(src, dst);
+      copied.push(rel);
+    }
+  };
+  walk(srcDir);
+  writeFileSync(join(target, CATALOG_SYNC_META), JSON.stringify(meta, null, 2));
+  return { copied, skipped };
+}
+function syncSkillToDesktopCatalog(name, ctx, opts = {}) {
+  const nm = slug(name);
+  if (!nm)
+    return { status: "error", skill: nm, reason: "name required" };
+  const srcRoot = agentSkillsDir(ctx);
+  const srcDir = existsSync(join(srcRoot, nm, "SKILL.md")) ? join(srcRoot, nm) : scanDirs(ctx).filter((d) => d !== GLOBAL_SKILLS).map((d) => join(d, nm)).find((d) => existsSync(join(d, "SKILL.md")));
+  if (!srcDir)
+    return { status: "missing", skill: nm, reason: "no agent skill to sync" };
+  const target = join(GLOBAL_SKILLS, nm);
+  const srcSkill = join(srcDir, "SKILL.md");
+  const dstSkill = join(target, "SKILL.md");
+  const sourceAgent = sourceAgentId(ctx);
+  const targetMeta = readCatalogSyncMeta(nm);
+  const targetAgent = targetMeta?.sourceAgent ?? null;
+  if (srcDir === target)
+    return { status: "noop", skill: nm, source: srcDir, target, sourceAgent, targetAgent, reason: "source already is desktop catalog" };
+  if (existsSync(dstSkill) && sameSkillFile(srcSkill, dstSkill) && (!targetAgent || targetAgent === sourceAgent)) {
+    return { status: "noop", skill: nm, source: srcDir, target, sourceAgent, targetAgent, reason: "already in sync" };
+  }
+  if (existsSync(dstSkill) && !isManaged(GLOBAL_SKILLS, nm) && !opts.force) {
+    return { status: "blocked_unmanaged", skill: nm, source: srcDir, target, sourceAgent, targetAgent, reason: "target catalog skill is not muscle-memory-managed; pass force to replace" };
+  }
+  if (existsSync(dstSkill) && targetAgent && sourceAgent && targetAgent !== sourceAgent && !opts.force) {
+    return { status: "blocked_different_agent", skill: nm, source: srcDir, target, sourceAgent, targetAgent, reason: `target catalog skill was synced by ${targetAgent}; pass force to replace` };
+  }
+  if (existsSync(dstSkill) && isManaged(GLOBAL_SKILLS, nm) && !targetAgent && !opts.force && !sameSkillFile(srcSkill, dstSkill)) {
+    return { status: "blocked_different_agent", skill: nm, source: srcDir, target, sourceAgent, targetAgent, reason: "target catalog skill has no source-agent metadata; pass force to replace" };
+  }
+  if (opts.dryRun)
+    return { status: "dry_run", skill: nm, source: srcDir, target, sourceAgent, targetAgent, backup: existsSync(target) ? "would-back-up-target" : null };
+  let backup = null;
+  try {
+    mkdirSync(GLOBAL_SKILLS, { recursive: true });
+    if (existsSync(target)) {
+      mkdirSync(CATALOG_SYNC_BACKUP_DIR, { recursive: true });
+      backup = join(CATALOG_SYNC_BACKUP_DIR, `${nm}-${new Date().toISOString().replace(/[:.]/g, "-")}`);
+      renameSync(target, backup);
+    }
+    mkdirSync(target, { recursive: true });
+    const meta = { skill: nm, source: srcDir, sourceAgent, syncedAt: new Date().toISOString() };
+    const { copied, skipped } = copySkillFolderFiltered(srcDir, target, meta);
+    if (!copied.includes("SKILL.md"))
+      throw new Error("SKILL.md was not copied");
+    pruneCatalogBackups(nm);
+    const result = { status: skipped.length ? "partial" : "synced", skill: nm, source: srcDir, target, backup, copied, skipped, sourceAgent, targetAgent };
+    writeCatalogSyncReceipt(result);
+    appendUiEvent({ phase: "skill_catalog_synced", summary: `synced '${nm}' to local Desktop catalog`, skill: nm, action: "catalog_sync", route: "desktop-catalog" });
+    return result;
+  } catch (e) {
+    try {
+      rmSync(target, { recursive: true, force: true });
+      if (backup && existsSync(backup))
+        renameSync(backup, target);
+    } catch {}
+    const result = { status: "error", skill: nm, source: srcDir, target, backup, sourceAgent, targetAgent, reason: String(e?.message ?? e) };
+    writeCatalogSyncReceipt(result);
+    return result;
+  }
 }
 var OUTCOME_PATH = join(STATE_DIR, "outcomes.jsonl");
 var TELEMETRY_PATH = join(STATE_DIR, "telemetry.json");
@@ -2215,6 +2403,7 @@ ${draft.body}${provenanceBlock(d.candidate)}
         }
         if (d.gate === "graduate") {
           writeSkill(opts.skillsDir, d.name, content);
+          syncSkillToDesktopCatalog(d.name, opts.ctx);
           graduated.push(d.name);
         } else {
           writeSkill(STAGED_DIR, d.name, content);
@@ -2808,6 +2997,7 @@ function graduateStagedSkill(name, ctx) {
   const dst = writeSkill(dstRoot, nm, content.includes(MM_TAG) ? content : content + `
 <!-- ${MM_TAG}: graduated ${new Date().toISOString().slice(0, 10)} -->
 `);
+  syncSkillToDesktopCatalog(nm, ctx);
   mkdirSync4(STAGED_RETIRED_DIR, { recursive: true });
   try {
     renameSync3(srcDir, join5(STAGED_RETIRED_DIR, `${nm}-graduated-${Date.now()}`));
@@ -2912,6 +3102,8 @@ ${prefs.map((p) => `- ${p}`).join(`
         return d ? readSkill(d, res.updateTarget) : undefined;
       })() : undefined;
       writeSkill(dir, res.name, tagged);
+      if (graduate)
+        syncSkillToDesktopCatalog(res.name, ctx);
       const manifest = buildEvidenceManifest({ action: res.action, skill: res.name, updateTarget: res.updateTarget, convs: ev.convs, signals: ev.items, memfsHits: res.matches || [], preferences: prefs, rejected: ev.rejected, newContent: tagged, oldContent });
       const evDir = join5(dir, res.name, "references", "evidence");
       mkdirSync4(evDir, { recursive: true });
@@ -3542,6 +3734,7 @@ var __mm = {
   retireManagedSkill,
   agentSkillsDir,
   scanDirs,
+  syncSkillToDesktopCatalog,
   MM_TAG,
   ENGRAM,
   expectationFor,
@@ -4089,7 +4282,7 @@ ${plan.digest}` };
     const writeParams = {
       type: "object",
       properties: {
-        action: { type: "string", enum: ["create_from_candidate", "create", "patch", "edit_full", "write_file", "remove_file", "retire", "restore", "pin", "unpin", "autopilot_run", "reflect", "graduate"], description: "mutating operation to perform" },
+        action: { type: "string", enum: ["create_from_candidate", "create", "patch", "edit_full", "write_file", "remove_file", "retire", "restore", "pin", "unpin", "autopilot_run", "reflect", "graduate", "catalog_sync"], description: "mutating operation to perform" },
         mode: { type: "string", enum: ["staged", "auto"], description: "autopilot mode — for autopilot_run (staged=draft+1-tap, auto=graduate-on-gate)" },
         name: { type: "string", description: "skill name (gerund, lowercase-hyphen) — for create/patch/retire" },
         description: { type: "string", description: "skill description incl. trigger phrases — for create" },
@@ -4100,7 +4293,9 @@ ${plan.digest}` };
         reason: { type: "string", description: "reason for retirement/quarantine — for retire" },
         absorbed_into: { type: "string", description: "umbrella skill name this was merged into — for retire (consolidation vs prune)" },
         file_path: { type: "string", description: "support file path under references/templates/scripts/assets — for write_file/remove_file" },
-        file_content: { type: "string", description: "support file content — for write_file" }
+        file_content: { type: "string", description: "support file content — for write_file" },
+        dry_run: { type: "boolean", description: "for catalog_sync: preview without copying" },
+        force: { type: "boolean", description: "for catalog_sync: manually replace an existing catalog copy after approval" }
       },
       required: ["action"],
       additionalProperties: false
@@ -4246,6 +4441,12 @@ ${d.body}` };
           const p = graduateStagedSkill(String(a.name), ctx);
           return `graduated '${slug(a.name)}' -> ${p}`;
         }
+        if (a.action === "catalog_sync") {
+          if (!a.name)
+            return { status: "error", content: "name required" };
+          const r = syncSkillToDesktopCatalog(String(a.name), ctx, { dryRun: !!a.dry_run, force: !!a.force });
+          return r;
+        }
         if (a.action === "pin") {
           if (!a.name)
             return { status: "error", content: "name required" };
@@ -4295,6 +4496,7 @@ description: ${desc}
 ${d.body}${prov}
 `;
           const p = writeSkill(dir, nm, content);
+          syncSkillToDesktopCatalog(nm, ctx);
           return `created '${nm}' from candidate '${c.key}'${repair ? ` (w/ observed Pitfall: ${repair.errClass})` : ""} -> ${p}
 Load with muscle_memory_skill_read action:load, then invoke the normal Skill tool with skill="${nm}". Dedup max overlap ${Math.round(dc.overlap * 100)}% (${dc.name || "none"}); lint OK.`;
         }
@@ -4326,6 +4528,7 @@ description: ${a.description}
 ${body}
 `;
           const p = writeSkill(dir, nm, content);
+          syncSkillToDesktopCatalog(nm, ctx);
           return `created '${nm}' -> ${p}
 Load with muscle_memory_skill_read action:load, then invoke the normal Skill tool with skill="${nm}" when you want to use it. Dedup max overlap ${Math.round(dc.overlap * 100)}% (${dc.name || "none"}).`;
         }
@@ -4343,6 +4546,7 @@ Load with muscle_memory_skill_read action:load, then invoke the normal Skill too
           if (!secP.ok)
             return { status: "error", content: `security blocked: ${secP.issues.join("; ")}` };
           writeSkill(d, a.name, nt);
+          syncSkillToDesktopCatalog(String(a.name), ctx);
           return `patched '${a.name}' in ${d}`;
         }
         if (a.action === "edit_full") {
@@ -4361,6 +4565,7 @@ Load with muscle_memory_skill_read action:load, then invoke the normal Skill too
           writeSkill(d, a.name, a.body.includes(MM_TAG) ? a.body : a.body + `
 <!-- ${MM_TAG}: edited ${new Date().toISOString().slice(0, 10)} -->
 `);
+          syncSkillToDesktopCatalog(String(a.name), ctx);
           return `full-rewrote '${a.name}'`;
         }
         if (a.action === "write_file") {
