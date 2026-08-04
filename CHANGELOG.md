@@ -4,11 +4,14 @@ All notable changes to `@adrianchan94/muscle-memory`. Format loosely follows [Ke
 
 ## [Unreleased]
 
+### Research surface alias remap
+- Canonical live research URL is now `https://muscle-memory-v1-research.vercel.app/` (report title: *Knowing Is Not Doing…*; product name unchanged). `muscle-memory-story.vercel.app` remains a temporary alias to the same production deploy. July (H) history stays on the superseded deployment URL.
+
 ### Owner-route masterpiece prep
 - Migrates package identity from `@letta-ai/muscle-memory` to author-owned `@adrianchan94/muscle-memory` (npm publish still separately gated / not authorized by this branch).
 - Points repository / homepage / bugs metadata at `adrianchan94/muscle-memory`.
 - Fixes the canonical `muscle_memory_prescribe` onboarding example to the dedicated two-field contract (`task` + `gap_observed` only).
-- Points public research surfaces at the live V1 research site (`muscle-memory-story.vercel.app`) while preserving the July historical site as precursor evidence.
+- Points public research surfaces at the live V1 research site (`muscle-memory-v1-research.vercel.app`; temporary legacy alias `muscle-memory-story.vercel.app`) while preserving the July historical deploy as precursor evidence.
 - Adds SECURITY / CONTRIBUTING / CODE_OF_CONDUCT trust docs for the author-owned landing experience.
 - Keeps frozen candidate `e2b9c4a1…` / cold archive v6 as historical custody; this branch does not overwrite those baselines.
 

@@ -24,7 +24,7 @@ If you change product bytes that affect a sealed candidate, mint a **new** candi
 
 - Dedicated prescribe onboarding is two-field only: `task` + `gap_observed`.
 - Resting KPI copy stays compact: `N skills · H helped` (proven only when >0).
-- Research links should prefer the live site (`https://muscle-memory-story.vercel.app`) and mark July history as `(H)` precursor.
+- Research links should prefer the live site (`https://muscle-memory-v1-research.vercel.app`; temporary alias `https://muscle-memory-story.vercel.app`) and mark July history as `(H)` precursor on the superseded July deployment URL.
 
 ## Review
 

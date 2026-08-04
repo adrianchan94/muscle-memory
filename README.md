@@ -93,17 +93,18 @@ V1 is accompanied by a dual-audience research experience generated from the same
 
 **Human-readable surfaces**
 
-- [The Clinical Hardwood research experience](https://muscle-memory-story.vercel.app/) — live V1 research ledger (claims + receipts; `sendAuthorized: false`)
-- [July historical research site](https://muscle-memory-v1-research.vercel.app/) — Phase-0 / (H) precursor substrate; not the live claim ceiling
-- [Public research paper](https://muscle-memory-story.vercel.app/muscle-memory-public-research-edition.pdf) — a dedicated report generated from the canonical research account, not a printout of the website
+- [Knowing Is Not Doing — live V1 research ledger](https://muscle-memory-v1-research.vercel.app/) — claims + receipts; product name remains Muscle Memory (`sendAuthorized: false`)
+- [Legacy alias (temporary)](https://muscle-memory-story.vercel.app/) — same current production deploy; keep bookmarks working while the research alias is canonical
+- [July historical research site](https://muscle-memory-story-5bueq8t1n-adrianchan94s-projects.vercel.app/) — Phase-0 / (H) precursor substrate; not the live claim ceiling
+- [Public research paper](https://muscle-memory-v1-research.vercel.app/muscle-memory-public-research-edition.pdf) — a dedicated report generated from the canonical research account, not a printout of the website
 
 **Agent-readable surfaces**
 
-- [Agent Reading Room](https://muscle-memory-story.vercel.app/agent-reading-room.md) — reflective orientation with the earned and refused claims kept together
-- [`llms.txt`](https://muscle-memory-story.vercel.app/llms.txt) — complete narrative account
-- [`mm-research.json`](https://muscle-memory-story.vercel.app/mm-research.json) — structured experiments, findings, limits, references, and receipt anchors
-- [`mm-research.schema.json`](https://muscle-memory-story.vercel.app/mm-research.schema.json) — machine-checkable contract
-- [`research-manifest.json`](https://muscle-memory-story.vercel.app/research-manifest.json) — integrity hashes for the public presentation artifacts
+- [Agent Reading Room](https://muscle-memory-v1-research.vercel.app/agent-reading-room.md) — reflective orientation with the earned and refused claims kept together
+- [`llms.txt`](https://muscle-memory-v1-research.vercel.app/llms.txt) — complete narrative account
+- [`mm-research.json`](https://muscle-memory-v1-research.vercel.app/mm-research.json) — structured experiments, findings, limits, references, and receipt anchors
+- [`mm-research.schema.json`](https://muscle-memory-v1-research.vercel.app/mm-research.schema.json) — machine-checkable contract
+- [`research-manifest.json`](https://muscle-memory-v1-research.vercel.app/research-manifest.json) — integrity hashes for the public presentation artifacts
 
 The public manifest proves that the human narrative, agent digest, structured dataset, schema, and paper reconcile to one presentation account. It does **not** claim that public presentation integrity independently reproduces the underlying experiments; complete frozen inputs, raw outcomes, invocation records, and custody chains remain controlled reviewer artifacts.
 
