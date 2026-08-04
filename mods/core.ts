@@ -12,6 +12,10 @@ if (process.env.NODE_ENV === "test" && !process.env.MM_STATE_DIR) {
   throw new Error("Refusing to run muscle-memory tests against the real state dir — set MM_STATE_DIR to a sandbox (package script does this automatically).");
 }
 
+if (process.env.NODE_ENV === "test" && !process.env.MM_AGENT_SKILLS_DIR && !process.env.MEMORY_DIR) {
+  throw new Error("Refusing to run muscle-memory mutating tests without an agent-shelf sandbox — set MM_AGENT_SKILLS_DIR (preferred) or MEMORY_DIR (package script does this automatically).");
+}
+
 export const STATE_DIR = process.env.MM_STATE_DIR || join(homedir(), ".letta", "muscle-memory");
 
 export const LOG_PATH = join(STATE_DIR, "experience.jsonl");
@@ -134,9 +138,17 @@ export const GLOBAL_SKILLS = GLOBAL_SKILLS_DIR; // unified: respects MM_GLOBAL_S
 
 export const MM_TAG = "muscle-memory provenance"; // marker that tags a muscle-memory-managed skill
 
+// Synthetic-tape doctrine: ref-skill-* are test/reference fixtures. They may be RECORDED in the
+// ledger (referee tests rate them) but must never LEAK into any user-facing board. Single source
+// of truth here in core so every display renderer (boxscore + plus-minus) filters identically
+// without a lifecycle↔referee import cycle.
+export const FIXTURE_SKILL_RE = /^ref-skill-/;
+
 
 /** Resolve the agent-scoped skills dir (compounds via MemFS); fall back to global. Portable. */
 export function agentSkillsDir(ctx?: any): string {
+  // Priority 1: explicit agent-shelf override (decoupled from MEMORY_DIR; sandbox-safe).
+  if (process.env.MM_AGENT_SKILLS_DIR) return process.env.MM_AGENT_SKILLS_DIR;
   if (process.env.MEMORY_DIR) return join(process.env.MEMORY_DIR, "skills");
   const id = ctx?.agent?.id || ctx?.agentId;
   if (id) {
@@ -528,7 +540,10 @@ export function setLivePanel(p: any) { livePanel = p; } // setter so the entry m
 
 let panelUpdatePending = false;
 export function writeUiState(s: Record<string, unknown>) {
-  try { ensureDir(); writeFileSync(UI_STATE, JSON.stringify({ ...readUiState(), ...s, ts: Date.now() })); } catch { /* */ }
+  try {
+    ensureDir();
+    writeFileSync(UI_STATE, JSON.stringify({ phase: "", last: "", skill: "", route: "", subject: "", detail: "", ...s, ts: Date.now() }));
+  } catch { /* */ }
   if (livePanel && !panelUpdatePending) {
     panelUpdatePending = true;
     setTimeout(() => { panelUpdatePending = false; try { livePanel?.update(); } catch { /* */ } }, 100);
@@ -542,7 +557,8 @@ export function loadUiEvents(n = 8): UiEvent[] { if (!existsSync(UI_EVENTS)) ret
 
 // CROSS-AGENT MESH FEED — shared so the panel shows BOTH Mack (local) + Kev (cloud) distilling.
 // Best-effort; never breaks reflect. Redacted (skill name + route + counts only).
-export const MESH_FEED = join(homedir(), ".local", "state", "mesh-skill-feed.jsonl");
+export const MESH_FEED = process.env.MM_MESH_FEED
+  || (process.env.MM_STATE_DIR ? join(STATE_DIR, "mesh-skill-feed.jsonl") : join(homedir(), ".local", "state", "mesh-skill-feed.jsonl"));
 
 export function meshAgentLabel(): string { return process.env.MM_AGENT || (String(process.env.MEMORY_DIR || "").includes("be7d4413") ? "mack" : "agent"); }
 

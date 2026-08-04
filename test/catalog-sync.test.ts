@@ -61,8 +61,12 @@ test("catalog sync dry-run does not copy; second real sync noops when byte-ident
   expect(existsSync(join(GLOBAL, name, "SKILL.md"))).toBe(false);
   const first = __mm.syncSkillToDesktopCatalog(name, { agent: { id: "agent-a" } });
   expect(first.status === "synced" || first.status === "partial").toBe(true);
+  const target = join(GLOBAL, name, "SKILL.md");
+  const bytesBefore = readFileSync(target);
   const second = __mm.syncSkillToDesktopCatalog(name, { agent: { id: "agent-a" } });
+  const bytesAfter = readFileSync(target);
   expect(second.status).toBe("noop");
+  expect(bytesAfter.equals(bytesBefore)).toBe(true);
 }));
 
 test("catalog sync blocks unmanaged or different-agent catalog collisions unless forced", () => withMemory((memoryDir) => {

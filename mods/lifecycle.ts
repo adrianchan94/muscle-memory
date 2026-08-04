@@ -2,7 +2,7 @@
 import { mkdirSync, readFileSync, existsSync, writeFileSync, readdirSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { Row, USAGE_PATH, appendMeshFeed, appendUiEvent, autonomousShelves, ensureDir, isManaged, listSkillNames, loadRows, readSkill, scanDirs, skillDesc, slug, writeUiState } from "./core";
-import { buildCrossConversationEvidence, detectRepairChains, isDurableLesson, stepSig } from "./detect";
+import { buildCrossConversationEvidence, detectRepairChains, isMatureRepairChain, stepSig } from "./detect";
 import { pickUpdateTarget, searchSkills } from "./autopilot";
 
 
@@ -11,13 +11,15 @@ export function managedSkillUsage(name: string, rows: Row[] = loadRows()): numbe
   return rows.filter((r) => (r.tmpl || r.fp || "").toLowerCase().includes(`skill ${n}`)).length;
 }
 
-export function curateManagedSkills(ctx?: any) {
+export function curateManagedSkills(ctx?: any, dirsOverride?: string[]) {
   const rows = loadRows();
-  const dirs = scanDirs(ctx);
+  const dirs = dirsOverride ?? scanDirs(ctx);
   const out: Array<{ name: string; dir: string; uses: number; verdict: "keep" | "review" | "retire_candidate"; reason: string }> = [];
+  const seen = new Set<string>();
   for (const d of dirs) {
     for (const n of listSkillNames(d)) {
-      if (!isManaged(d, n)) continue;
+      if (!isManaged(d, n) || seen.has(n)) continue;
+      seen.add(n); // scanDirs is precedence-ordered: agent-local copy wins over its global mirror
       const uses = managedSkillUsage(n, rows);
       let verdict: "keep" | "review" | "retire_candidate" = "keep";
       let reason = "managed skill has observed use or is newly created";
@@ -103,7 +105,7 @@ export function runAutonomousPrune(ctx?: any, opts: { maxRetire?: number } = {})
       }
     }
   }
-  if (retired.length) writeUiState({ phase: "done", last: `retired '${retired[0]}' — reversible`, route: "AUTO-PRUNE · live" });
+  if (retired.length) writeUiState({ phase: "benched", skill: retired[0], last: `retired '${retired[0]}' — reversible`, route: "AUTO-PRUNE · live" });
   return { retired, retiredPaths, flagged, kept };
 }
 
@@ -120,13 +122,15 @@ export function aggregateTelemetry(spans: LlmSpan[]): { calls: number; tokensIn:
 // — E. REGISTRY CATALOG (Hermes-like mini package registry) —
 export function buildRegistry(dirs: string[]): { generated: string; count: number; skills: Array<{ name: string; description: string; dir: string; provenance: string; state: string; pinned: boolean; uses: number; absorbedInto?: string }> } {
   const usage = loadUsage();
-  const skills: Array<{ name: string; description: string; dir: string; provenance: string; state: string; pinned: boolean; uses: number; absorbedInto?: string }> = [];
+  const byName = new Map<string, { name: string; description: string; dir: string; provenance: string; state: string; pinned: boolean; uses: number; absorbedInto?: string }>();
   for (const d of dirs) for (const n of listSkillNames(d)) {
     if (!isManaged(d, n)) continue;
+    if (byName.has(n)) continue; // scanDirs is precedence-ordered: agent shelf wins over mirrored global copy
     const prov = (readSkill(d, n).match(/<!--\s*muscle-memory provenance:([^>]*)-->/)?.[1] || "").trim();
     const u = usage[n] || {};
-    skills.push({ name: n, description: skillDesc(d, n), dir: d, provenance: prov, state: u.state || "active", pinned: !!u.pinned, uses: u.uses || 0, absorbedInto: u.absorbedInto });
+    byName.set(n, { name: n, description: skillDesc(d, n), dir: d, provenance: prov, state: u.state || "active", pinned: !!u.pinned, uses: u.uses || 0, absorbedInto: u.absorbedInto });
   }
+  const skills = [...byName.values()];
   return { generated: new Date().toISOString(), count: skills.length, skills: skills.sort((a, b) => a.name.localeCompare(b.name)) };
 }
 
@@ -209,11 +213,15 @@ export type CoverageRow = { domain: string; status: "covered" | "uncovered" | "o
 export function coverageMap(rows: Row[], dirs: string[]): CoverageRow[] {
   const ev = buildCrossConversationEvidence(rows);
   const out: CoverageRow[] = [];
-  for (const r of detectRepairChains(rows).filter((x) => isDurableLesson(x.errClass))) {
+  for (const r of detectRepairChains(rows).filter(isMatureRepairChain)) {
     const hits = searchSkills(dirs, `${r.trigger} ${r.fixStep} ${r.errClass}`, 4);
-    const tgt = pickUpdateTarget(hits, 18);
-    const overCovered = hits.filter((h) => h.matched >= 2).length >= 2;
-    out.push({ domain: r.trigger, status: tgt ? (overCovered ? "over-covered" : "covered") : "uncovered", skill: tgt?.name, signals: r.count });
+    const domain = slug(r.trigger);
+    const names = [...new Set(dirs.flatMap((dir) => listSkillNames(dir)))];
+    const exact = names.filter((name) => slug(name).endsWith(domain));
+    const lexical = pickUpdateTarget(hits, 18);
+    const target = exact[0] ?? lexical?.name;
+    const overCovered = exact.length >= 2 || (!exact.length && hits.filter((hit) => hit.matched >= 2).length >= 2);
+    out.push({ domain: r.trigger, status: target ? (overCovered ? "over-covered" : "covered") : "uncovered", skill: target, signals: r.count });
   }
   for (const rej of ev.rejected) out.push({ domain: rej.item, status: "noise", signals: 0 });
   return out;

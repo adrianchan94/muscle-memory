@@ -11,10 +11,12 @@
 // The event surface is a harness simulation (same contract index.ts consumes); the AGENT and all
 // its memory effects are real. Creates one throwaway agent and deletes it, even on failure.
 //
-// Run: LETTA_API_KEY=... bun scripts/smoke-live-agent.ts
+// Run source bundle: LETTA_API_KEY=... bun scripts/smoke-live-agent.ts
+// Run exact packed/installed bundle: MM_BUNDLE_PATH=/absolute/path/to/index.bundled.mjs LETTA_API_KEY=... bun scripts/smoke-live-agent.ts
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 // Sandbox BEFORE the bundle is imported — its state paths are module-load constants.
 const stateDir = mkdtempSync(join(tmpdir(), "mm-smoke-state-"));
@@ -30,7 +32,10 @@ if (!process.env.LETTA_API_KEY) { console.error("LETTA_API_KEY not set — abort
 // Dynamic imports by necessity: the bundle path must resolve AFTER the env sandbox above (its
 // state-dir constants freeze at module load), and letta-client resolves from the host's
 // letta-code install — both specifiers are runtime-conditioned, not author-time constants.
-const bundle: unknown = await import("../mods/index.bundled.mjs");
+const bundleUrl = process.env.MM_BUNDLE_PATH
+  ? pathToFileURL(resolve(process.env.MM_BUNDLE_PATH)).href
+  : new URL("../mods/index.bundled.mjs", import.meta.url).href;
+const bundle: unknown = await import(`${bundleUrl}?canary=${Date.now()}`);
 const lettaClientMod: unknown = await import(
   process.env.LETTA_CLIENT_PATH ?? `${process.env.HOME}/.local/lib/node_modules/@letta-ai/letta-code/node_modules/@letta-ai/letta-client/index.js`
 );

@@ -2,18 +2,33 @@
 
 **Every session becomes practice film.**
 
-Built by **Adrian with Kev (Constellation agent) and Mack (local Letta agent).**
+## Skills That Earn Their Minutes
 
-A Hermes-inspired, Letta-native **Skill Ops** mod — the only Letta mod that treats skill-library maintenance as a whole **autonomous lifecycle**. It watches a Letta agent's real tool-use, distills reusable lessons, and runs a deterministic, opt-in lifecycle around them — **distill · dedup · quality-gate · sanitize · prune** — with no manual `/skill` handoff.
+**Resting surface (Adrian-approved):** `💾 muscle-memory · N skills · H helped` — proven minutes appear only when verified+bound evidence exists (`· P proven` only when P>0). Helped counts closed prescribe outcomes with `result=helped` only; ratings and uses do not inflate the board.
+
+**Verifier-gated memory for agents that can improve with use.** Muscle Memory treats context as an intervention, not a default payload: diagnose a demonstrated gap, distill and verify the smallest reusable lesson, route it only into a matching possession, then measure whether it deserves another one.
+
+> **Context is treatment, not nutrition.** A skill earns its minutes through observed outcomes—not downloads, stars, or semantic relevance alone.
+
+## For agents & researchers
+
+**Knowing isn’t applying — and the gap is model-dependent. We built the muscle in between.**
+
+The full receipt-bound research behind V1 — three model families, causal positive and negative poles, act-time governance — ships as readable surfaces: the research site, `/llms.txt` (plain-text digest), and `/mm-research.json` (structured ledger, schema v2). Claim discipline: no number travels without a receipt; nulls publish at the weight of wins.
+
+`1.0.0-rc.2` is the qualified sealed reference candidate for the prior V1 runtime. The current **Unreleased** working tree adds the first exact-file verification adapter and must earn a new exact-byte seal before it becomes another release candidate. It is not a universal-learning claim, and `publicationAuthorized = false` remains binding until the final release gate closes.
+
+Built by **Adrian · [@adrianchan94](https://github.com/adrianchan94)** with **Kev (Letta Constellation agent)** and **Mack (Letta local agent; audit role-separated inside the same project, not an external third-party review).**
+
+A Hermes-inspired, Letta-native **Skill Ops** mod. It watches a Letta agent's real tool-use, distills reusable lessons, and runs a deterministic, opt-in lifecycle around them — **distill · dedup · quality-gate · sanitize · prune** — without requiring humans to hand-author every `SKILL.md`.
 
 Letta already creates, lists, installs, and deletes skills. `muscle-memory` adds the autonomous maintenance layer around those primitives.
 
 > 🛡️ Deterministic safety gates run inside the lifecycle — secrets are blocked before a skill is written or shared, identifiers are sanitized, and pinned skills are protected. The public package keeps the runtime surface lean; validation lives in the test suite.
 
-Try it in 30 seconds — opt-in, staged-first, default off:
+RC review is opt-in, staged-first, and default off. Install from the exact packed candidate or a reviewed local checkout; the author-owned source of truth is `adrianchan94/muscle-memory`. Optional upstream catalog review remains a separate path. No npm publication is implied by this branch.
 
 ```bash
-letta install git:github.com/adrianchan94/muscle-memory   # then /reload
 MM_REFLECT=staged letta    # watches your real work and stages skills — no manual /skill
 ```
 
@@ -27,7 +42,7 @@ The first agent earns the lesson. The next agent inherits it.
 
 ![muscle-memory live demo](./demo.gif)
 
-The demo GIF is kept in the repo for PR review and intentionally excluded from the published npm tarball.
+The demo GIF is kept in the repo for PR review and intentionally excluded from the packed npm tarball.
 
 ---
 
@@ -40,6 +55,87 @@ Letta already provides the important primitives: create/install/list/delete skil
 We also liked a core idea from Hermes Agent — skill distillation from agent experience — and wanted it inside Letta, native to the primitives Letta already has.
 
 Letta provides the court. `muscle-memory` watches the game film.
+
+## The research built V1
+
+Muscle Memory was not feature-complete first and benchmarked afterward. The research program selected the architecture.
+
+We tested whether agents could turn experience into useful procedural memory, preserved the failed and blocked runs, isolated why apparently faithful memories could still underperform, repeated the result on a fresh corpus, and then made every substantial finding answer one product question:
+
+> **What did the evidence force V1 to become?**
+
+### Four findings that became product decisions
+
+| Finding | Measured interruption | What V1 implements | Receipt boundary |
+|---|---|---|---|
+| **1 · Skills are prescription drugs for agents.** Skill value emerges from model × task × knowledge gap; relevance alone is not an indication. | The same intervention class moved from **−0.14** where the model already knew the procedure to **+1.00** where it was genuinely underivable. | Update-first MemFS routing and coverage diagnosis govern learning; task-time `prescribe` requires the caller to attest an observed/known procedure gap, then returns exactly one installed skill or **ABSTAIN**—never the full shelf. Same-model negative field evidence forces abstention. | `Skill League Q1 · f8ba5f5f…4005` / `Combine V5 · 32cd2091…7051` |
+| **2 · A learned skill can be faithful and still unusable.** Render form is part of learning. | The same verified procedure scored **0.6 as prose → 5.4 with one deterministic worked example**—same tasks, graders, route, and underlying lesson. | `MM_CAPTURE` preserves redacted symptom→fix worked examples; deterministic generation carries concrete execution-shaped examples into class-level skills; graduation rejects procedural drafts with no fenced example. Fidelity and formulation are separate gates. | `PRISM-RENDER-AB · e7caa4fd…0bb` |
+| **3 · Grade learning against a ceiling, not a vibe.** | Autonomous learning captured **87.86%** of exact teaching in Q2.1 and **88.04% [74.18%, 98.96%]** on a fresh non-overlapping corpus in the same requested Sol family. Fresh REP1 admitted **37/40** skills, improved **19/20** worlds, cleared **16/16** gates, and recorded **zero measured harms**. | Exact deterministic memory remains the production spine; autonomous distillation is a qualified assist. Every write path runs admission gates and emits inspectable evidence rather than treating generation as proof. | `Q2.1 · 6593224f…f09` / `FRESH REP1 · 7bbf4bbf…eb9a` / `Mack custody · a96ad914…e3cf` |
+| **4 · The bars must be allowed to refuse a win.** | Q1 posted **+3.20** with every world positive and was still refused: capture was **66.32% < 75%**, and the frozen concentration requirement also missed. | Staged-by-default writes, graduation truth, reversible retire/restore, pin protection, stale-skill pruning, and a field referee whose reasoned outcomes become visible roster recommendations—without automatic promotion or retirement. | `COMPOUND-M2-Q1 · 18571dcb…605f` |
+
+The conclusion is not “store more.” It is:
+
+```txt
+observe a real miss
+→ distill the smallest underivable lesson
+→ verify it
+→ render it so the model can execute it
+→ route it only to the matching gap
+→ measure the next possession
+→ update, bench, or retire it
+```
+
+**Context is treatment, not nutrition. Skills must earn their minutes.** The prescription language is a model for intervention discipline—not a biological or clinical claim.
+
+### One research account, legible to humans and agents
+
+V1 is accompanied by a dual-audience research experience generated from the same canonical content. Humans and agents do not receive different truths; they receive different renderings of the same claims, limitations, experiments, and receipt boundaries.
+
+**Human-readable surfaces**
+
+- [The Clinical Hardwood research experience](https://muscle-memory-story.vercel.app/) — live V1 research ledger (claims + receipts; `sendAuthorized: false`)
+- [July historical research site](https://muscle-memory-v1-research.vercel.app/) — Phase-0 / (H) precursor substrate; not the live claim ceiling
+- [Public research paper](https://muscle-memory-story.vercel.app/muscle-memory-public-research-edition.pdf) — a dedicated report generated from the canonical research account, not a printout of the website
+
+**Agent-readable surfaces**
+
+- [Agent Reading Room](https://muscle-memory-story.vercel.app/agent-reading-room.md) — reflective orientation with the earned and refused claims kept together
+- [`llms.txt`](https://muscle-memory-story.vercel.app/llms.txt) — complete narrative account
+- [`mm-research.json`](https://muscle-memory-story.vercel.app/mm-research.json) — structured experiments, findings, limits, references, and receipt anchors
+- [`mm-research.schema.json`](https://muscle-memory-story.vercel.app/mm-research.schema.json) — machine-checkable contract
+- [`research-manifest.json`](https://muscle-memory-story.vercel.app/research-manifest.json) — integrity hashes for the public presentation artifacts
+
+The public manifest proves that the human narrative, agent digest, structured dataset, schema, and paper reconcile to one presentation account. It does **not** claim that public presentation integrity independently reproduces the underlying experiments; complete frozen inputs, raw outcomes, invocation records, and custody chains remain controlled reviewer artifacts.
+
+### Lineage, not mythology
+
+Muscle Memory integrates inherited ideas rather than pretending each component appeared from nowhere:
+
+- **Letta** supplies persistent agents, MemFS, Skills, Custom Skills, Mods, and the runtime court this lifecycle operates on.
+- **Anthropic's [Agent Skills](https://www.anthropic.com/news/skills) open standard** supplies the portable `SKILL.md` artifact shape used across the ecosystem.
+- **Hermes Agent** helped inspire experience-to-skill distillation.
+- **Soar chunking** established the procedural-learning shape decades earlier: resolved impasses can compile into reusable production rules ([Laird, Rosenbloom & Newell, 1986](https://doi.org/10.1007/BF00116249)).
+- **Adaptive retrieval** showed at fact level that external context is most useful where parametric knowledge is missing ([Mallen et al., 2023](https://doi.org/10.18653/v1/2023.acl-long.546)); Muscle Memory tests the analogous matchup law for procedures.
+- **CONSORT-AI** contributes the trial-reporting discipline behind frozen protocols, controls, amendments, and refused claims ([Liu et al., 2020](https://www.nature.com/articles/s41591-020-1034-x)).
+
+The earned contribution is the integration: an exam-qualified gatekeeper, ceiling-relative learning metric, single-variable render repair, task-conditioned routing, refusal custody, outcome-governed lifecycle, and separate product-byte certification in one closed loop.
+
+### How this differs from adjacent approaches
+
+Muscle Memory does **not** claim a new memory store, reflection primitive, retriever, verifier, or skill-library concept. Prior work established each of those pieces. This package focuses on the control loop around them:
+
+| Control | Muscle Memory | Common baseline |
+|---|---|---|
+| Admission | Candidate evidence + fail-closed verifier | Write or import directly |
+| Maintenance | Update an existing skill before creating a sibling | Append another artifact |
+| Deployment | Task-conditioned route **or abstain** | Broad or top-k injection |
+| Follow-up | Reasoned post-use attribution | Task success alone |
+| Governance | Reversible retain / revise / retire states | Unbounded accumulation |
+| Custody | Frozen gates and receipt-bound outcomes | Demo or aggregate benchmark |
+
+The accompanying research account positions the loop against Generative Agents, MemGPT, Reflexion, Voyager, ExpeL, Agent Workflow Memory, MemP, SkillsVote, Library Drift/Ratchet, and the concurrent 2026 verified-skills wave. Its strongest claim is compositional and experimental: qualify the gatekeeper, measure autonomous learning against an exact-memory ceiling, preserve blocked and negative results, repair one mechanism at a time, and make product bytes earn a separate pass.
+
+> **Release boundary:** this repository currently contains a release candidate, not a production-readiness claim. Research results and prior-bundle product gates do not automatically certify the exact packed release candidate.
 
 ---
 
@@ -144,11 +240,64 @@ Honest caveat: routing is lexical-precision-first, with an opt-in semantic recal
 improve the library, don't grow a landfill
 ```
 
+### Prescribe one—or abstain
+
+A relevant skill is not automatically useful. For the current task, call the dedicated `muscle_memory_prescribe` tool with a concrete `task` and `gap_observed:true` only as a caller attestation after an observed miss or a known missing procedure. V1 does not pretend it can inspect a model's hidden parametric knowledge; it exposes the current runtime model, conditions on same-model field evidence when available, and labels an untested model/skill pairing as unproven. The legacy `muscle_memory_skill_read(action: "prescribe", ...)` route remains compatible. The same contract is available to humans as:
+
+```txt
+/muscle-memory prescribe --gap <task description>
+```
+
+The result is deliberately narrow:
+
+- **PRESCRIBE one installed skill** when one candidate clears the strict distinctive-match and dominance bars;
+- **ABSTAIN** when no observed/known gap was attested, no skill safely matches, or the match is ambiguous;
+- never inject the full shelf, never prescribe several siblings, and never manufacture a new skill during task-time selection.
+
+That is the bounded V1 product form of the research result: caller-owned diagnosis first, smallest dose, no context tax when no gap is known. Task-time matching is deliberately conservative lexical evidence (distinctive-term floor + dominance), not a claim that V1 can measure hidden model knowledge or use an uncalibrated embedding score as a relevance oracle.
+
+### Bound exact-file verification
+
+Ordinary closeouts remain explicitly `human_judged` or `agent_judged`. With `MM_ADVANCED=on`, one narrow machine-checkable task class also gets an instrument-owned exact-file SHA-256 adapter:
+
+1. Configure an absolute trusted workspace root with `MM_EXACT_FILE_ROOT`.
+2. Before work begins, call `register_exact_file_verification` with a unique task ID, matching task class, root-relative target path, and expected final SHA-256. It writes a create-once read-only manifest.
+3. Use the advanced `muscle_memory_skill_read(action: "prescribe", ..., verification_task_id: "<id>")` path; the immutable manifest hash is bound into the possession decision. The lightweight `muscle_memory_prescribe` tool intentionally omits advanced verification metadata.
+4. After the work, call `verify_agent_possession` with **only** `possession_id`. The adapter resolves the trusted root, re-hashes the manifest, rejects traversal/symlinks/replay, hashes the opened file descriptor, derives `helped` or `harmed`, and appends the instrument-owned receipt.
+
+The generic `record_agent_possession` tool still cannot accept `verified`. Callers define the expected artifact before the possession; they cannot self-award the result, tier, path, hash, or receipt after seeing the work. The adapter fails closed on platforms without `O_NOFOLLOW`. It verifies exact file bytes only—it does not prove semantic correctness, causal skill impact, or unaided abstention quality.
+
+---
+
+## The box score: skills earn their minutes
+
+The **Decision Report** is the agent-facing box score. Muscle Memory does not infer that a skill helped merely because it was retrieved; task-time use is tracked as a bounded possession:
+
+1. `muscle_memory_prescribe` records one prescription or abstention after a caller-attested gap.
+2. A prescription becomes real use only when the normal `Skill` tool invokes the exact skill.
+3. `muscle_memory_close` closes the same possession with a lightweight agent-judged outcome; the advanced `record_agent_possession` surface remains for human judgment, evidence references, and append-only corrections; a bound instrument closes the narrow task classes it can verify itself.
+4. `muscle_memory_skill_read(action: "report")` keeps interventions, smart restraint, pending work, verified evidence, and judged evidence explicit.
+
+The optional `rate_skill` referee records a separate associative field rating (`up`, `down`, or reasoned `no_rate`) from observed experience:
+
+- `up` / `down` maintain the backward-compatible **plus-minus** aggregate;
+- every accepted rating first lands in an append-only reason sidecar with rater, runtime model, task, and optional evidence reference;
+- `no_rate` records neutral tape without manufacturing a score;
+- a failed sidecar write is reported as **not recorded**; a failed aggregate write is **partial**;
+- plus-minus is film-room evidence, not causal proof, and never auto-promotes or auto-retires a skill.
+
+`/muscle-memory roster` is the rotation-and-bench review. It includes both Muscle Memory-managed skills and installed-shelf skills that actually entered a possession, so a useful intervention never disappears at the next screen. Possession outcomes and judged/verified evidence are shown separately from field plus-minus ratings. The lean agent read hides zero-signal rows behind one explicit count; the human slash command and advanced agent surface keep the complete rotation. Its agent-facing output stays precise—`EARLY POSITIVE · NEEDS REPLICATION`, `PROMOTION REVIEW`, `RETIREMENT REVIEW`, `HOLD · INSUFFICIENT EVIDENCE`, and `UNPROVEN · NEEDS OUTCOMES`—and still requires at least three rated tasks before recommending a roster move.
+
+```txt
+/muscle-memory rate systematic-debugging up fixed the next failure without another patch loop
+/muscle-memory roster
+```
+
 ---
 
 ## Quality gate before graduation
 
-A skill has to earn its context. Before graduation, drafts are checked for concrete symptoms, mechanism (not vibes), safe-first procedure, pitfalls, verification, reusable scope, no destructive shortcuts, and no hollow checklist prose.
+A skill has to earn its context. Before graduation, drafts are checked for concrete symptoms, mechanism (not vibes), safe-first procedure, pitfalls, verification, reusable scope, no destructive shortcuts, and no hollow checklist prose. A procedural skill needs a fenced example containing a real command, file, code fragment, or diff; generic `write → read → verify` arrows do not clear the bar. This is a formulation gate—not a claim that arbitrary snippets were executed by the verifier.
 
 Thin skills do not get a jersey.
 
@@ -200,19 +349,23 @@ No fake readiness claims.
 
 ---
 
-## Install
+## Install (author-owned review lane)
+
+Primary path is the author-owned repo. npm publication of `@adrianchan94/muscle-memory` remains separately gated and is **not** authorized by this branch.
 
 ```bash
 letta install git:github.com/adrianchan94/muscle-memory
 /reload
 ```
 
-If accepted into the official Letta mods catalog, the intended path is:
+When/if an npm release is explicitly approved later:
 
 ```bash
-letta install npm:@letta-ai/muscle-memory
+letta install npm:@adrianchan94/muscle-memory
 /reload
 ```
+
+Historical Letta-scope package names are custody lineage only — do not treat them as the current owner identity.
 
 ---
 
@@ -227,16 +380,21 @@ Recommended defaults:
 
 ```txt
 MM_REFLECT=staged
-MM_CAPTURE=off
+MM_CAPTURE=off      # max privacy; structural worked examples still render
 MM_PUBLISH=off
 ```
+
+Even with `MM_CAPTURE=off`, repair skills render a bounded structural worked example from the observed command/fix class. `context` adds redacted real error symptoms; `worked` adds redacted fix diffs. This keeps the Prism result—concrete worked-example formulation matters—without pretending arbitrary snippets were runtime-executed or forcing raw work content into storage.
 
 ---
 
 ## Commands
 
 ```txt
-/muscle-memory                         dashboard
+/muscle-memory                         private Decision Report
+/muscle-memory prescribe --gap <task> one installed skill or ABSTAIN
+/muscle-memory ratings                 next-possession plus-minus tape
+/muscle-memory roster                  rotation-and-bench Skill Review from observed outcomes
 /muscle-memory lifecycle               staged → active → idle/prune → retired
 /muscle-memory engram                  read-only consolidation plan
 /muscle-memory audit                   quality gaps, stale skills, duplicate coverage, cross-shelf drift
@@ -245,29 +403,49 @@ MM_PUBLISH=off
 /muscle-memory publish stage <skill>   sanitized staged copy
 /muscle-memory publish approve <skill> approved shared Custom Skill
 /muscle-memory mine [agent-id]         retroactive mining: distill from history the mod never saw (read-only, watermarked)
-/muscle-memory rate <skill> up|down [step-id]  skill plus-minus → local ledger + native steps.feedback
+/muscle-memory rate <skill> up|down|no_rate [reason...]  field rating → reason ledger + plus-minus tape
 /muscle-memory shelf publish <skill>   publish the SANITIZED staged copy to the shared squad shelf archive
 /muscle-memory shelf attach            attach the squad shelf to this agent
 /muscle-memory shelf pull <skill>      pull a squad skill → STAGED for review (never the active shelf)
 ```
 
-Agent-callable tools:
+Default agent-callable surface — one possession, no research-console tax:
 
 ```txt
-muscle_memory_skill_read       read-only inspection
-muscle_memory_skill_write      approval-gated writes
-muscle_memory_lifecycle_run    safe lifecycle ops
+muscle_memory_prescribe   two-field task route: one installed skill or ABSTAIN
+muscle_memory_close       three-field agent-judged same-possession closeout
+muscle_memory_skill_read  Decision Report, pending work, Skill Review, or one known skill
 ```
+
+Set `MM_ADVANCED=on` to expose the full agent research/maintenance surface:
+
+```txt
+record_agent_possession           human judgment, evidence references, and corrections
+register_exact_file_verification  immutable pre-work exact-file task manifest
+verify_agent_possession           instrument-owned exact-file closeout; possession_id only
+muscle_memory_skill_write         approval-gated writes
+muscle_memory_lifecycle_run       safe lifecycle ops
+rate_skill                        next-possession up/down/no_rate field rating + plus-minus tape
+muscle_memory_skill_read          adds reflection planning, Coverage, share cards, registry, and diagnostics
+```
+
+Human `/muscle-memory ...` commands remain available in both modes. Advanced machinery is hidden from the default agent tool schema, not deleted.
 
 Environment:
 
 ```txt
+MM_ADVANCED=off|on  # default off: expose only prescribe, close, and lean read
 MM_REFLECT=off|staged|auto
 MM_CAPTURE=off|context|worked
 MM_AGENT=<name>
+MM_PRIVATE_IDENTIFIERS=<comma-separated private agent labels>
+MM_GUARD=off|ask|deny
+MM_REFLEX=off|on
 MM_AUTOPILOT=staged|auto
 MM_PUBLISH=off|auto
 MM_STATE_DIR=<path>
+MM_EXACT_FILE_ROOT=<absolute trusted workspace root>
+MM_MESH_FEED=<shared path>  # optional override when agents use isolated state roots
 ```
 
 `MM_PUBLISH=auto` is explicit opt-in. Default is off, and auto-publish still runs privacy/lint gates.
@@ -294,6 +472,7 @@ It does:
 - hard-block secret-shaped values during publishing
 - sanitize private identifiers before sharing
 - emit lifecycle receipts
+- keep caller-judged outcomes separate from instrument-owned, manifest-bound exact-file verification
 - keep artifacts inspectable and git-backed
 - tell you when `/reload` is needed instead of pretending live visibility
 
@@ -301,32 +480,28 @@ It does:
 
 ## Validation
 
-The public claim is intentionally small: a working, opt-in Skill Ops loop with explicit limits.
+Research efficacy never certifies package bytes by association. The executable release candidate had to earn a separate pass.
 
 ```bash
 npm run verify
+npm run final:gate
 npm pack --dry-run
 ```
 
-Current gate:
+The previously frozen `1.0.0-rc.2` runtime bundle (`5a13028a…d5562`) completed:
 
-```txt
-source bundle passes
-core test suite passes
-pack dry-run includes only the lean runtime surface plus the core demo GIF
-```
+- **package/final gate — PASS:** 169 tests, routing evaluation, packed-tarball install smoke, secret/private-path scan, and checked-in/fresh bundle parity
+- **disposable Letta canary — PASS:** packed activation, tool registration, block sync, archival passage sync, and cleanup with zero model calls (`7f6a07e0…902c0d`)
+- **ROUTE-50 — 50/50:** zero harmful updates
+- **UPDATE-10 — 10/10:** zero severe regressions, stale leakage, or coexistence
+- **LIFECYCLE-20 — 20/20:** ten negative contracts, two restart cases, zero out-of-map/privacy/duplicate/stale leaks, and unchanged live shelves
+- **independent custody — PASS:** scoped ROUTE/UPDATE mechanics GO (`5f9a2b46…273d3`) and ledger-certified lifecycle GO (`50ae86ef…579b`)
 
-Verify covers:
+The current Unreleased verifier lane separately passes **229 tests / 794 assertions**, the 16/16 routing evaluation, seven-tool live activation smoke, and an isolated packed-consumer registration → bind → exact-file verification closeout. Those are development receipts, not a replacement release seal; exact bundle/tarball hashes belong in the immutable final-gate receipt after review bytes stop moving.
 
-- bundle/transpile
-- core test suite
-- reliability fallback: no silent empty/sub-threshold skill writes
-- adversarial secret-format tests across code/JSON/markdown/shell
-- MemFS-first and agent-local shelf boundary
-- lifecycle maintenance regression tests
-- publish/sanitize/visibility receipts
+One boundary must travel with those results: the A4 ROUTE/UPDATE `FINAL.json` field `oneFrozenRun` is explicitly excluded and citation-forbidden because that lane lacked a pre-run attempt ledger. Its measured 50/50 and 10/10 mechanics remain independently verified. The separate lifecycle lane has an immutable O_EXCL attempt receipt and completion binding, so its single run is certifiable.
 
-Deeper demo, benchmark, and evaluation artifacts exist as internal development receipts. The public surface stays focused on the shipped mod.
+This literature expansion changes packed documentation bytes. The stable `1.0.0` release therefore requires a fresh final seal, unchanged executable-bundle proof, packed-tarball canary, and final-byte audit before publication. The measurements above are proof—not permission to skip that release gate.
 
 ```txt
 Letta gives agents durable memory and skills.
@@ -348,6 +523,8 @@ mods/publish.ts     publishability, sanitization, staged approve flow
 mods/lifecycle.ts   registry, graduation, retirement, visibility helpers
 mods/autopilot.ts   reflection routing, update-first policy, evidence manifests
 mods/ui.ts          panel rendering
+mods/possessions.ts append-only decision/outcome ledger and evidence-tier scoring
+mods/verification.ts instrument-owned exact-file task registry, binding, hashing, and receipts
 mods/history.ts     E6 retroactive mining: message history → the same experience pipeline
 mods/referee.ts     E7 plus-minus ledger + native steps.feedback posting
 mods/shelf.ts       E8 squad shelf: cross-agent inheritance over a shared archive
@@ -365,10 +542,11 @@ Known boundaries — these are Bounded, not Verified:
 - **Distillation quality is shared ground.** We do not claim a stronger skill primitive than Letta. The wedge is autonomy + maintenance, not skill-writing quality.
 - **Routing/dedup is lexical-precision-first.** The opt-in semantic lane catches paraphrase duplicates via canary-calibrated embedding recall (live 15/16 decision quality vs 7/16 lexical-only on the labeled set), but it only parks or corroborates — it never auto-merges — and one known paraphrase class (zero-overlap tool-name evidence, e.g. alembic ↔ "schema changes") still ranks below the calibration floor on the current Letta Cloud embedder.
 - **Secret scanning is regex-based on known formats.** It does not catch split/concatenated tokens or base64-ish / unlabeled high-entropy secrets. For standalone write-time secret scanning, dedicated mods (for example, `secrets-scanning`) go deeper; `muscle-memory`'s secret-block is a publish/write-path gate **within the lifecycle**, not a full DLP scanner.
+- **Bound verification is intentionally narrow.** The shipped adapter checks one regular file's exact SHA-256 under a configured trusted root. It does not verify directories, semantic behavior, user-visible correctness, causal skill impact, or abstentions; those remain judged unless a future instrument defines and qualifies a separate contract.
 - **Maintenance-at-scale is unproven.** The maintenance loop has regression coverage and internal dogfood receipts, but is not validated at scale on a real recurring workload.
 - **Extraction-at-scale is untested.** Whether repair-chain extraction helps more than raw-log authoring on large noisy substrate is open.
 - **The raw-noise proxy is a health/regression signal, not a win claim.**
-- Full improvement router is roadmap, not shipped.
+- Full improvement router is roadmap, not part of RC2.
 - Global Custom Skills may require `/reload` before the current session sees them.
 - Quality gates reduce bad skills but do not replace human judgment for high-stakes workflows.
 
@@ -378,7 +556,7 @@ Known boundaries — these are Bounded, not Verified:
 
 Manual and model-guided skill management are useful, but they should not be the whole loop. Agents should not need humans to notice every repeated workflow, write every skill, merge every duplicate, sanitize every shared lesson, and prune every stale playbook.
 
-The shipped wedge is narrow and concrete: deterministic, autonomous maintenance for the agent-local skill shelf, with global sharing kept explicit.
+The RC2 wedge is narrow and concrete: deterministic, autonomous maintenance for the agent-local skill shelf, with global sharing kept explicit.
 
 ```txt
 work → lesson → skill → Custom Skill → better future agent

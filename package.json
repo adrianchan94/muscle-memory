@@ -1,24 +1,28 @@
 {
-  "name": "@letta-ai/muscle-memory",
-  "version": "0.6.0",
-  "description": "A Letta Code mod that watches an agent's real tool-use, distills recurring fixes into quality-gated SKILL.md playbooks, updates existing skills instead of duplicating them, and prunes the ones that don't earn their context \u2014 a skill library that maintains itself.",
-  "author": "Adrian with Kev and Mack",
+  "name": "@adrianchan94/muscle-memory",
+  "version": "1.0.0-rc.2",
+  "description": "Verifier-gated memory for agents that improve with use: distill experience into skills, route them selectively, measure whether they help, and keep only the ones that earn their context.",
+  "author": "Adrian Chan <@adrianchan94>",
   "license": "MIT",
   "type": "module",
   "keywords": [
-    "letta-package",
-    "letta-mod",
-    "letta-code",
+    "muscle-memory",
     "agent-skills",
+    "skill-ops",
+    "procedural-memory",
+    "verifier-gated",
     "skill-distillation",
     "self-improving-agents",
-    "procedural-memory",
-    "complementary-learning-systems"
+    "letta-code",
+    "letta-mod",
+    "complementary-learning-systems",
+    "decision-report",
+    "helped-scoreboard",
+    "act-time-governance"
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/letta-ai/mods.git",
-    "directory": "packages/muscle-memory"
+    "url": "git+https://github.com/adrianchan94/muscle-memory.git"
   },
   "files": [
     "MOD.md",
@@ -28,12 +32,16 @@
     "mods"
   ],
   "scripts": {
-    "test": "MM_STATE_DIR=$(mktemp -d) MM_GLOBAL_SKILLS_DIR=$(mktemp -d) bun test test/",
+    "test": "MM_STATE_DIR=$(mktemp -d) MEMORY_DIR=$(mktemp -d) MM_GLOBAL_SKILLS_DIR=$(mktemp -d) bun test --max-concurrency=1 test/",
     "build": "bun build mods/index.ts --target node --outfile mods/index.bundled.mjs",
     "transpile": "bun build mods/index.ts --target node --outfile /tmp/muscle-memory.build.js",
     "prepublishOnly": "npm run build",
     "eval:routing": "bun test/routing.eval.ts",
-    "verify": "npm run build && npm run test && npm run eval:routing"
+    "dogfood:claims": "bun test scripts/claim-experience.test.ts",
+    "smoke:live": "node scripts/live-smoke.mjs",
+    "package:smoke": "node scripts/package-smoke.mjs",
+    "final:gate": "node scripts/final-gate.mjs",
+    "verify": "npm run build && npm run test && npm run eval:routing && npm run smoke:live && npm run package:smoke"
   },
   "engines": {
     "node": ">=20"
@@ -68,5 +76,9 @@
       "name": "Mack (local Letta agent)",
       "url": "https://github.com/adrianchan94"
     }
-  ]
+  ],
+  "homepage": "https://github.com/adrianchan94/muscle-memory#readme",
+  "bugs": {
+    "url": "https://github.com/adrianchan94/muscle-memory/issues"
+  }
 }

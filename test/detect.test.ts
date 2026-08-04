@@ -98,10 +98,28 @@ test("isSkillWorthy: rejects shell-noise templates and trivial primitive-pair se
   const mat = { count: 5, convs: 3, fixes: 0, maturity: 9, mature: true } as const;
   expect(isSkillWorthy({ kind: "template", key: "ls <path>", ...mat })).toBe(false);   // shell noise
   expect(isSkillWorthy({ kind: "template", key: "cat <path>", ...mat })).toBe(false);   // shell noise
+  expect(isSkillWorthy({ kind: "template", key: "letta models list <n>>&<n> | head -<n>", count: 741, convs: 494, fixes: 0, maturity: 749.03, mature: true })).toBe(false); // high-frequency inspection is still command junk
+  expect(isSkillWorthy({ kind: "template", key: "letta model list <n>>&<n> | head -<n>", ...mat })).toBe(false); // legacy singular CLI spelling is the same receipt
+  expect(isSkillWorthy({ kind: "template", key: "timeout <n> letta models list --provider <str>", ...mat })).toBe(false); // wrapper does not make inspection procedural
+  expect(isSkillWorthy({ kind: "template", key: "git status --short --branch", ...mat })).toBe(false); // status receipt, not a reusable workflow
+  expect(isSkillWorthy({ kind: "template", key: "gh pr view <n>", ...mat })).toBe(false); // read-only lookup, not a skill
+  expect(isSkillWorthy({ kind: "template", key: "gh api repos<path><str>", ...mat })).toBe(false); // API read receipt, not a skill
+  expect(isSkillWorthy({ kind: "template", key: "shasum -a <n> <str> <str>", ...mat })).toBe(false); // checksum receipt, not a skill
+  expect(isSkillWorthy({ kind: "template", key: "Skill kev-recall", ...mat })).toBe(false); // invoking an existing skill is usage, never a new skill
+  expect(isSkillWorthy({ kind: "template", key: "<path>", ...mat })).toBe(false); // placeholder-only command carries no procedure
+  expect(isSkillWorthy({ kind: "template", key: "<path><str>", ...mat })).toBe(false); // concatenated placeholders are still empty procedure
+  expect(isSkillWorthy({ kind: "template", key: "git -C <str> status --short --branch", ...mat })).toBe(false); // cwd wrapper does not change status into a skill
+  expect(isSkillWorthy({ kind: "template", key: "cd <str> && git diff --stat", ...mat })).toBe(false); // cd wrapper does not hide a diff receipt
+  expect(isSkillWorthy({ kind: "template", key: "gh search code <str> --limit <n>", ...mat })).toBe(false); // search is inspection
+  expect(isSkillWorthy({ kind: "template", key: "python3 -c <str> | head -<n>", ...mat })).toBe(false); // redacted inline script has no reusable procedure
+  expect(isSkillWorthy({ kind: "template", key: "pgrep -fl <str> || true", ...mat })).toBe(false); // process inspection receipt
+  expect(isSkillWorthy({ kind: "template", key: "printf <str> <str>", ...mat })).toBe(false); // shell formatting primitive
   expect(isSkillWorthy({ kind: "sequence", key: "Edit.py → python3", ...mat })).toBe(false); // universal edit→run loop, no fix
+  expect(isSkillWorthy({ kind: "sequence", key: "letta models → letta", ...mat })).toBe(false); // compressed lookup chain remains noise
+  expect(isSkillWorthy({ kind: "sequence", key: "grep → python3", count: 89, convs: 29, fixes: 6, maturity: 50, mature: true })).toBe(false); // repair-shaped primitive chain is handled by repairCandidates, never duplicated as a sequence
   expect(isSkillWorthy({ kind: "sequence", key: "git add → git commit", ...mat })).toBe(true);  // a real ritual
   expect(isSkillWorthy({ kind: "template", key: "docker build <str>", ...mat })).toBe(true);    // distinctive command
-  expect(isSkillWorthy({ kind: "sequence", key: "Edit.py → python3", count: 3, convs: 2, fixes: 2, maturity: 9, mature: true })).toBe(true); // a repair embedded → keep
+  expect(isSkillWorthy({ kind: "sequence", key: "Edit.py → python3", count: 3, convs: 2, fixes: 2, maturity: 9, mature: true })).toBe(false); // primitive sequence stays noise; repair lane owns durable recovery
 });
 
 test("detectRepairChains: GENERALIZES same-shape recoveries across different commands into one lesson", () => {

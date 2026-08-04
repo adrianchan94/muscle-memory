@@ -22,6 +22,7 @@ const FULL = { events: { tools: true, turns: true, compact: true, llm: true, lif
 
 async function main() {
   process.env.MM_STATE_DIR = mkdtempSync(join(tmpdir(), "mm-smoke-"));
+  delete process.env.MM_ADVANCED;
   const mod = await import("/tmp/mm-smoke.mjs?t=" + Date.now());
   const activate = mod.default || mod.activate;
   console.log("\n━━ muscle-memory live smoke ━━");
@@ -30,7 +31,13 @@ async function main() {
   const L = mockLetta(FULL); let dispose; let threw = null;
   try { dispose = activate(L); } catch (e) { threw = e; }
   ok("activate() loads without throwing", !threw);
-  ok("registers tools (3)", L._reg.tools.filter(Boolean).length >= 3);
+  ok("default agent surface registers exactly the 3 possession tools", JSON.stringify(L._reg.tools.filter(Boolean).sort()) === JSON.stringify(["muscle_memory_close", "muscle_memory_prescribe", "muscle_memory_skill_read"]));
+  process.env.MM_ADVANCED = "on";
+  const LA = mockLetta(FULL); let disposeAdvanced; let advancedThrew = null;
+  try { disposeAdvanced = activate(LA); } catch (e) { advancedThrew = e; }
+  ok("advanced surface restores verifier + maintenance tools", !advancedThrew && LA._reg.tools.filter(Boolean).length >= 9 && LA._reg.tools.includes("register_exact_file_verification") && LA._reg.tools.includes("verify_agent_possession") && LA._reg.tools.includes("rate_skill"));
+  if (disposeAdvanced) try { disposeAdvanced(); } catch {}
+  delete process.env.MM_ADVANCED;
   ok("registers events incl turn_end + tool_start/end", ["turn_end", "tool_start", "tool_end"].every((e) => L._reg.events.includes(e)));
   ok("registers the /muscle-memory command", !!L._reg.commands["muscle-memory"]);
   ok("opens the panel", L._reg.panel === true);

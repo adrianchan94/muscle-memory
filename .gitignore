@@ -1,2 +1,6 @@
 .letta/
 node_modules/
+
+# Packed candidates are custody artifacts — keep externally with hash; do not commit root tarballs.
+*.tgz
+!docs/**/*.tgz

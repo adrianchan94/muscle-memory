@@ -1,12 +1,14 @@
 // mods/index.ts
-import { mkdirSync as mkdirSync6, readFileSync as readFileSync8, existsSync as existsSync8, writeFileSync as writeFileSync8, readdirSync as readdirSync4 } from "node:fs";
-import { join as join10 } from "node:path";
+import { mkdirSync as mkdirSync8, readFileSync as readFileSync10, existsSync as existsSync10, writeFileSync as writeFileSync9, readdirSync as readdirSync4 } from "node:fs";
+import { join as join12 } from "node:path";
+import { randomBytes } from "node:crypto";
 
 // mods/core.ts
 import { appendFileSync, copyFileSync, lstatSync, mkdirSync, readFileSync, existsSync, writeFileSync, readdirSync, renameSync, rmSync } from "node:fs";
 import { join, dirname, relative } from "node:path";
 import { homedir } from "node:os";
 import { createHash } from "node:crypto";
+if (false) {}
 if (false) {}
 var STATE_DIR = process.env.MM_STATE_DIR || join(homedir(), ".letta", "muscle-memory");
 var LOG_PATH = join(STATE_DIR, "experience.jsonl");
@@ -90,7 +92,10 @@ function loadRows(path = LOG_PATH) {
 }
 var GLOBAL_SKILLS = GLOBAL_SKILLS_DIR;
 var MM_TAG = "muscle-memory provenance";
+var FIXTURE_SKILL_RE = /^ref-skill-/;
 function agentSkillsDir(ctx) {
+  if (process.env.MM_AGENT_SKILLS_DIR)
+    return process.env.MM_AGENT_SKILLS_DIR;
   if (process.env.MEMORY_DIR)
     return join(process.env.MEMORY_DIR, "skills");
   const id = ctx?.agent?.id || ctx?.agentId;
@@ -470,7 +475,7 @@ var panelUpdatePending = false;
 function writeUiState(s) {
   try {
     ensureDir();
-    writeFileSync(UI_STATE, JSON.stringify({ ...readUiState(), ...s, ts: Date.now() }));
+    writeFileSync(UI_STATE, JSON.stringify({ phase: "", last: "", skill: "", route: "", subject: "", detail: "", ...s, ts: Date.now() }));
   } catch {}
   if (livePanel && !panelUpdatePending) {
     panelUpdatePending = true;
@@ -503,7 +508,7 @@ function loadUiEvents(n = 8) {
   }
   return out.slice(-n);
 }
-var MESH_FEED = join(homedir(), ".local", "state", "mesh-skill-feed.jsonl");
+var MESH_FEED = process.env.MM_MESH_FEED || (process.env.MM_STATE_DIR ? join(STATE_DIR, "mesh-skill-feed.jsonl") : join(homedir(), ".local", "state", "mesh-skill-feed.jsonl"));
 function meshAgentLabel() {
   return process.env.MM_AGENT || (String(process.env.MEMORY_DIR || "").includes("be7d4413") ? "mack" : "agent");
 }
@@ -590,7 +595,7 @@ function isMature(count, convs, m) {
   const enoughSpread = convs >= MM.MIN_CONVS || count >= MM.STRONG_SINGLE;
   return count >= MM.MIN_COUNT && enoughSpread && m >= MM.MATURE_AT;
 }
-var TRIVIAL = new Set(["echo", "cd", "ls", "cat", "true", "pwd", "sleep", ":"]);
+var TRIVIAL = new Set(["echo", "printf", "cd", "ls", "cat", "grep", "rg", "sed", "pgrep", "true", "pwd", "sleep", "timeout", "gtimeout", "letta", ":"]);
 var SUBCMD = new Set(["git", "letta", "npm", "npx", "gh", "docker", "cargo", "bun", "pnpm", "yarn", "kubectl", "jq"]);
 function stepSig(row) {
   if (row.tool !== "Bash") {
@@ -678,8 +683,8 @@ function finalize(kind, byKey) {
   }
   return out.sort((a, b) => b.maturity - a.maturity);
 }
-var PRIMITIVE = /^(Read|Write|Edit|Glob|Grep|fast_apply|structural_search)\b/;
-var TRIVIAL_CMD = new Set(["echo", "cd", "ls", "cat", "true", "false", "pwd", "sleep", ":", "mkdir", "rmdir", "touch", "which", "whoami", "find", "head", "tail", "wc", "chmod", "chown", "cp", "mv", "rm", "export", "unset", "source", "clear", "env", "printenv", "date", "tree", "cut", "tr", "sort", "uniq", "basename", "dirname", "realpath", "test"]);
+var PRIMITIVE = /^(Read|Write|Edit|Glob|Grep|Skill|fast_apply|structural_search)\b/;
+var TRIVIAL_CMD = new Set(["echo", "printf", "cd", "ls", "cat", "grep", "rg", "sed", "pgrep", "shasum", "sha256sum", "md5", "true", "false", "pwd", "sleep", "timeout", "gtimeout", "letta", ":", "mkdir", "rmdir", "touch", "which", "whoami", "find", "head", "tail", "wc", "chmod", "chown", "cp", "mv", "rm", "export", "unset", "source", "clear", "env", "printenv", "date", "tree", "cut", "tr", "sort", "uniq", "basename", "dirname", "realpath", "test"]);
 var BARE_RUN = /^(python3?|node|deno|bun|ruby|go|php|perl|java|dotnet|sh|bash|zsh)$|^\.\//i;
 function templateVerb(key) {
   for (const seg of key.split(/&&|\|\||\||;/)) {
@@ -700,32 +705,66 @@ function isDistinctiveStep(sig) {
     return false;
   if (BARE_RUN.test(sig))
     return false;
+  if (isInspectionTemplate(sig))
+    return false;
+  if (/^letta (?:models|agents|skills|conversations|environments)\b/i.test(sig))
+    return false;
   const v = sig.split(/\s+/)[0].replace(/^.*\//, "");
   if (TRIVIAL_CMD.has(v))
     return false;
   return /[a-z]/i.test(sig);
 }
+function isInspectionTemplate(key) {
+  let normalized = String(key || "").toLowerCase().replace(/\s+/g, " ").trim();
+  normalized = normalized.replace(/^cd\s+<(?:str|path)>\s*&&\s*/, "");
+  normalized = normalized.replace(/^(?:g?timeout)\s+(?:<n>|\d+(?:\.\d+)?[smhd]?)\s+/, "");
+  normalized = normalized.replace(/^git\s+-c\s+<(?:str|path)>\s+/, "git ");
+  const first = normalized.split(/&&|\|\||\||;/, 1)[0].trim();
+  return /(?:^|\s)--(?:help|version)\b/.test(first) || /^letta (?:models?|agents?|skills?|conversations?|environments?) (?:list|show|current|<n>)\b/.test(first) || /^git (?:status|log|diff|show|shortlog|rev-parse)\b/.test(first) || /^gh (?:pr|issue|run|repo|release) (?:view|list|status|checks)\b/.test(first) || /^gh api\b/.test(first) && !/(?:--method|-x)\s*(?:post|put|patch|delete)\b/.test(first) || /^gh search\b/.test(first) || /^(?:npm|pnpm|yarn|bun) (?:list|ls|view|info|why|outdated)\b/.test(first) || /^docker (?:ps|images|inspect|info|version)\b/.test(first) || /^kubectl (?:get|describe|logs|api-resources|version)\b/.test(first);
+}
 function isSkillWorthy(c) {
   if (!c.mature)
     return false;
   if (c.kind === "template") {
+    if (/^(?:<[^>]+>)+$/.test(c.key.trim()))
+      return false;
+    if (/^(?:python3?|node|deno|bun|ruby|perl)\s+(?:-c|-e)\s+<str>(?:\s|$)/i.test(c.key))
+      return false;
     if (PRIMITIVE.test(c.key))
       return false;
     if (TRIVIAL_CMD.has(templateVerb(c.key)))
       return false;
+    if (isInspectionTemplate(c.key))
+      return false;
     return true;
   }
-  if (c.kind === "sequence" && c.fixes === 0 && !c.key.split(/→/).some((s) => isDistinctiveStep(s.trim())))
+  if (c.kind === "sequence" && !c.key.split(/→/).some((s) => isDistinctiveStep(s.trim())))
     return false;
   return true;
 }
+function isDurableRepairChain(r) {
+  if (!isDurableLesson(r.errClass))
+    return false;
+  const trigger = String(r.trigger || "").trim();
+  if (!trigger || PRIMITIVE.test(trigger))
+    return false;
+  if (/^(?:Read|Write|Edit|Glob|Grep)(?:\.|\b)/i.test(trigger))
+    return false;
+  if (/^(?:[A-Z_][A-Z0-9_]*=|#)/.test(trigger))
+    return false;
+  if (!r.generalized && BARE_RUN.test(trigger))
+    return false;
+  if (TRIVIAL_CMD.has(templateVerb(trigger)) || isInspectionTemplate(trigger))
+    return false;
+  return true;
+}
+function isMatureRepairChain(r) {
+  return isDurableRepairChain(r) && (r.convs >= MM.MIN_CONVS && r.count >= 2 || !!r.generalized && r.count >= 2 || r.count >= MM.MIN_COUNT);
+}
 function repairCandidates(rows) {
   const out = [];
-  for (const r of detectRepairChains(rows)) {
-    const mature = r.convs >= MM.MIN_CONVS && r.count >= 2 || !!r.generalized && r.count >= 2 || r.count >= MM.MIN_COUNT;
-    if (!mature)
-      continue;
-    out.push({ kind: "sequence", key: r.verifyStep, count: r.count, convs: r.convs, fixes: r.count, maturity: +maturityScore(r.count, r.convs, r.count).toFixed(2), mature: true });
+  for (const r of detectRepairChains(rows).filter(isMatureRepairChain)) {
+    out.push({ kind: "sequence", key: r.generalized ? r.trigger : r.verifyStep, count: r.count, convs: r.convs, fixes: r.count, maturity: +maturityScore(r.count, r.convs, r.count).toFixed(2), mature: true });
   }
   return out;
 }
@@ -1018,7 +1057,7 @@ function isValidSkillName(name) {
   const n = String(name ?? "").trim();
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(n) || n.length > 64)
     return false;
-  const ANTI = [/^fix-/, /^debug-/, /^audit-/, /^patch-/, /-to-/, /\d{3,}/, /v?\d+[._]\d+/, /\berror\b|\bexception\b/, /-today$|-now$|-temp$|-wip$/];
+  const ANTI = [/^fix-/, /^debug-/, /^audit-/, /^patch-/, /(?:^|-)to(?:-|$)/, /\d{3,}/, /v?\d+[._]\d+/, /\berror\b|\bexception\b/, /-today$|-now$|-temp$|-wip$/];
   return !ANTI.some((p) => p.test(n));
 }
 function multiInstanceSupport(topic, signals, minInstances = 2) {
@@ -1047,12 +1086,12 @@ function multiInstanceSupport(topic, signals, minInstances = 2) {
 function buildCrossConversationEvidence(rows) {
   const convs = new Set(rows.map((r) => String(r.conv ?? "?"))).size;
   const allRepairs = detectRepairChains(rows), allAps = detectAntiPatterns(rows);
-  const repairs = allRepairs.filter((r) => isDurableLesson(r.errClass));
+  const repairs = allRepairs.filter(isDurableRepairChain);
   const aps = allAps.filter((p) => isDurableLesson(p.errClass));
   const rejected = [];
   for (const r of allRepairs)
-    if (!isDurableLesson(r.errClass))
-      rejected.push({ item: `${r.trigger} (${r.errClass})`, reason: "environment/transient — negative filter" });
+    if (!isDurableRepairChain(r))
+      rejected.push({ item: `${r.trigger} (${r.errClass})`, reason: isDurableLesson(r.errClass) ? "primitive/inspection repair — not a standalone skill" : "environment/transient — negative filter" });
   for (const p of allAps)
     if (!isDurableLesson(p.errClass))
       rejected.push({ item: `${p.step} (${p.errClass})`, reason: "environment/transient — negative filter" });
@@ -1232,11 +1271,15 @@ function sotaQualityGaps(d) {
   const b = d.body;
   const lc = b.toLowerCase();
   const procedural = /##\s+(procedure|steps|workflow|method|pitfalls|failure recovery|recipe|how to)/i.test(b);
-  if (procedural && (b.match(/```/g) || []).length < 2)
-    gaps.push("CONCRETENESS: add real fenced code/command examples (show the exact correct fix, never hand-wave)");
+  const fencedBodies = [...b.matchAll(/```[^\n]*\n([\s\S]*?)```/g)].map((m) => m[1]);
+  const concreteFence = fencedBodies.some((sample) => /(?:^|\s)(?:npm|npx|pnpm|yarn|bun|node|deno|python3?|pytest|jest|vitest|cargo|go|make|git|curl|letta|shopify|docker|kubectl)\b|(?:^|[\s"'`])[\w./-]+\.(?:ts|tsx|js|jsx|py|sh|rb|go|json|ya?ml|toml|liquid|md)\b|(?:^|\n)[+-]\s|[A-Za-z_$][\w$]*\s*(?:\(|=)|\b(?:return|if|for|while|class|function|const|let|def|import)\b/m.test(sample));
+  if (procedural && !concreteFence)
+    gaps.push("CONCRETENESS: add a fenced example with a real command, file, code fragment, or diff (show the exact correct fix, never hand-wave)");
   if (/##\s+pitfalls/i.test(b)) {
-    const tells = (lc.match(/\btell\b|\bsymptom\b|at-a-glance|the signal|you'll see|gives it away/g) || []).length;
-    const pitfalls = (b.split(/##\s+pitfalls/i)[1] || "").match(/^\s*(?:[-*]|\d+\.|###)\s/gm)?.length || 0;
+    const section = (b.split(/##\s+pitfalls[^\n]*\n/i)[1] || "").split(/\n##\s+/)[0] || "";
+    const sectionLc = section.toLowerCase();
+    const tells = (sectionLc.match(/\btell\b|\bsymptom\b|at-a-glance|the signal|you'll see|gives it away/g) || []).length;
+    const pitfalls = section.match(/^\s*(?:[-*]|\d+\.|###)\s/gm)?.length || 0;
     if (pitfalls >= 2 && tells < Math.min(2, pitfalls))
       gaps.push("DIAGNOSTIC TELLS: give each Pitfall a one-line TELL — the at-a-glance symptom/error-string that identifies that failure class");
   }
@@ -1358,12 +1401,14 @@ A recovery discipline distilled from ${repair.count} real fix-then-recheck loops
 4. Run it once more to rule out a flaky / state-dependent pass.
 
 ## Worked examples (observed)
+\`\`\`text
 ${worked}
+\`\`\`
 
 ## Pitfalls (symptom → fix)
-- Re-running a failed command unchanged → it stays red; nothing passes until the source changes.
-- Exit code 0 but wrong output (e.g. \`go run\` prints the wrong value) → the failure is in stdout, not the exit code; assert on the value, not just the exit.
-- Editing the test to force a green → fix the code the test exercises, not the assertion.
+- TELL: re-running a failed command unchanged → it stays red; nothing passes until the source changes.
+- TELL: exit code 0 but wrong output (e.g. \`go run\` prints the wrong value) → the failure is in stdout, not the exit code; assert on the value, not just the exit.
+- TELL: editing the test to force a green → fix the code the test exercises, not the assertion.
 
 ## Verification
 - [ ] The failure reproduced before the fix (you saw the real error).
@@ -1389,11 +1434,13 @@ A recovery discipline distilled from ${repair.count} real \`${repair.verifyStep}
 4. Run once more to rule out a flaky pass.
 
 ## Worked example (observed)
-- \`${repair.verifyStep}\` failed${errTag ? ` (\`${errTag}\`)` : ""} → \`${repair.fixStep}\` → re-ran \`${repair.verifyStep}\` → PASS  (${repair.count}× / ${repair.convs} session${s})
+\`\`\`text
+${repair.verifyStep} failed${errTag ? ` (${errTag})` : ""} → ${repair.fixStep} → re-ran ${repair.verifyStep} → PASS  (${repair.count}× / ${repair.convs} session${s})
+\`\`\`
 
 ## Pitfalls (symptom → fix)
-- Re-running \`${repair.verifyStep}\` unchanged → stays red; it won't pass until \`${repair.fixStep}\` is applied.
-- Treating the first failure as noise → it's signal; the fix is known from ${repair.count} prior recoveries.
+- TELL: re-running \`${repair.verifyStep}\` unchanged → stays red; it won't pass until \`${repair.fixStep}\` is applied.
+- TELL: treating the first failure as noise → it's signal; the fix is known from ${repair.count} prior recoveries.
 
 ## Verification
 - [ ] \`${repair.verifyStep}\` failed before the fix (real error seen).
@@ -1460,6 +1507,15 @@ function runtimeUserIdentifiers() {
     add(gitEmail.split("@")[0]);
   return [...vals].sort((a, b) => b.length - a.length);
 }
+function runtimePrivateAgentIdentifiers() {
+  const vals = new Set;
+  for (const raw of [process.env.MM_AGENT || "", ...(process.env.MM_PRIVATE_IDENTIFIERS || "").split(/[,;\n]/)]) {
+    const value = raw.trim();
+    if (value.length >= 3 && !/^(agent|assistant|worker|reviewer|user)$/i.test(value))
+      vals.add(value);
+  }
+  return [...vals].sort((a, b) => b.length - a.length);
+}
 function sanitizeForPublish(body) {
   const replacements = [];
   let s = body;
@@ -1476,6 +1532,8 @@ function sanitizeForPublish(body) {
   sub("user", /\b(?:localuser|private-user|chan2saucy|adrianchan|adrian chan)\b/gi, "<user>");
   for (const id of runtimeUserIdentifiers())
     sub("user", new RegExp(`\\b${escapeRegExp(id)}\\b`, "gi"), "<user>");
+  for (const id of runtimePrivateAgentIdentifiers())
+    sub("agent", new RegExp(`\\b${escapeRegExp(id)}\\b`, "gi"), "<agent>");
   sub("project", /\b(?:ProjectX|ExampleCorp)\b/g, "<project>");
   sub("provider-env", /\b(?:ZAI|Z_AI|OPENAI|ANTHROPIC|GLM|MORPH|KIMI|MINIMAX|GEMINI|XAI)_API_KEY\b/g, "PROVIDER_API_KEY");
   return { sanitized: s, replacements };
@@ -1660,7 +1718,7 @@ function publishSkillToCatalog(name, ctx) {
   writeFileSync2(join3(dstDir, "SKILL.md"), published);
   appendUiEvent({ phase: "skill_published", summary: `published '${nm}' to custom skill catalog`, skill: nm, action: "publish", route: "global-catalog" });
   appendMeshFeed({ type: "skill_published", skill: nm, route: "PUBLISH", signals: 0 });
-  writeUiState({ phase: "done", last: `published '${nm}' to catalog`, route: "PUBLISH · catalog" });
+  writeUiState({ phase: "rotation", skill: nm, last: `published '${nm}' to catalog`, route: "PUBLISH · catalog" });
   return join3(dstDir, "SKILL.md");
 }
 
@@ -1671,14 +1729,16 @@ function managedSkillUsage(name, rows = loadRows()) {
   const n = slug(name);
   return rows.filter((r) => (r.tmpl || r.fp || "").toLowerCase().includes(`skill ${n}`)).length;
 }
-function curateManagedSkills(ctx) {
+function curateManagedSkills(ctx, dirsOverride) {
   const rows = loadRows();
-  const dirs = scanDirs(ctx);
+  const dirs = dirsOverride ?? scanDirs(ctx);
   const out = [];
+  const seen = new Set;
   for (const d of dirs) {
     for (const n of listSkillNames(d)) {
-      if (!isManaged(d, n))
+      if (!isManaged(d, n) || seen.has(n))
         continue;
+      seen.add(n);
       const uses = managedSkillUsage(n, rows);
       let verdict = "keep";
       let reason = "managed skill has observed use or is newly created";
@@ -1777,7 +1837,7 @@ function runAutonomousPrune(ctx, opts = {}) {
     }
   }
   if (retired.length)
-    writeUiState({ phase: "done", last: `retired '${retired[0]}' — reversible`, route: "AUTO-PRUNE · live" });
+    writeUiState({ phase: "benched", skill: retired[0], last: `retired '${retired[0]}' — reversible`, route: "AUTO-PRUNE · live" });
   return { retired, retiredPaths, flagged, kept };
 }
 function aggregateTelemetry(spans) {
@@ -1785,15 +1845,18 @@ function aggregateTelemetry(spans) {
 }
 function buildRegistry(dirs) {
   const usage = loadUsage();
-  const skills = [];
+  const byName = new Map;
   for (const d of dirs)
     for (const n of listSkillNames(d)) {
       if (!isManaged(d, n))
         continue;
+      if (byName.has(n))
+        continue;
       const prov = (readSkill(d, n).match(/<!--\s*muscle-memory provenance:([^>]*)-->/)?.[1] || "").trim();
       const u = usage[n] || {};
-      skills.push({ name: n, description: skillDesc(d, n), dir: d, provenance: prov, state: u.state || "active", pinned: !!u.pinned, uses: u.uses || 0, absorbedInto: u.absorbedInto });
+      byName.set(n, { name: n, description: skillDesc(d, n), dir: d, provenance: prov, state: u.state || "active", pinned: !!u.pinned, uses: u.uses || 0, absorbedInto: u.absorbedInto });
     }
+  const skills = [...byName.values()];
   return { generated: new Date().toISOString(), count: skills.length, skills: skills.sort((a, b) => a.name.localeCompare(b.name)) };
 }
 function curatorPass(managed) {
@@ -1892,11 +1955,15 @@ function restoreManagedSkill(name, ctx) {
 function coverageMap(rows, dirs) {
   const ev = buildCrossConversationEvidence(rows);
   const out = [];
-  for (const r of detectRepairChains(rows).filter((x) => isDurableLesson(x.errClass))) {
+  for (const r of detectRepairChains(rows).filter(isMatureRepairChain)) {
     const hits = searchSkills(dirs, `${r.trigger} ${r.fixStep} ${r.errClass}`, 4);
-    const tgt = pickUpdateTarget(hits, 18);
-    const overCovered = hits.filter((h) => h.matched >= 2).length >= 2;
-    out.push({ domain: r.trigger, status: tgt ? overCovered ? "over-covered" : "covered" : "uncovered", skill: tgt?.name, signals: r.count });
+    const domain = slug(r.trigger);
+    const names = [...new Set(dirs.flatMap((dir) => listSkillNames(dir)))];
+    const exact = names.filter((name) => slug(name).endsWith(domain));
+    const lexical = pickUpdateTarget(hits, 18);
+    const target = exact[0] ?? lexical?.name;
+    const overCovered = exact.length >= 2 || !exact.length && hits.filter((hit) => hit.matched >= 2).length >= 2;
+    out.push({ domain: r.trigger, status: target ? overCovered ? "over-covered" : "covered" : "uncovered", skill: target, signals: r.count });
   }
   for (const rej of ev.rejected)
     out.push({ domain: rej.item, status: "noise", signals: 0 });
@@ -2301,6 +2368,7 @@ function autopilotPlan(input) {
   if (cfg.mode === "off")
     return { decisions, skipped: [{ what: "all", why: "autopilot off" }], budget: { used, limit: cfg.dailyBudget }, mode: cfg.mode };
   const existing = new Set(input.managed.map((m) => m.name));
+  const existingByIdentity = new Map(input.managed.map((m) => [canonicalSkillIdentity(m.name), m.name]));
   const refineTargets = new Set;
   const apSteps = detectAntiPatterns(input.rows).map((p) => p.step.toLowerCase());
   for (const m of input.managed) {
@@ -2317,6 +2385,10 @@ function autopilotPlan(input) {
       skipped.push({ what: c.key, why: "daily budget reached" });
       continue;
     }
+    if (c.kind === "template") {
+      skipped.push({ what: c.key, why: "single-command repetition — observe, don't auto-distill" });
+      continue;
+    }
     if (DESTRUCTIVE.test(c.key)) {
       skipped.push({ what: c.key, why: "destructive workflow — never auto-distilled" });
       continue;
@@ -2328,6 +2400,16 @@ function autopilotPlan(input) {
     }
     const draft = draftWithRepair(c, repairForRows(c, input.rows));
     const nm = slug(draft.name);
+    if (!isValidSkillName(nm)) {
+      skipped.push({ what: nm || c.key, why: "invalid or command-transition-shaped skill name" });
+      continue;
+    }
+    const identity = canonicalSkillIdentity(nm);
+    const identityMatch = identity && existingByIdentity.get(identity);
+    if (identityMatch) {
+      skipped.push({ what: nm, why: `canonical duplicate of ${identityMatch} — refine, don't re-distill` });
+      continue;
+    }
     if (existing.has(nm)) {
       skipped.push({ what: nm, why: "already managed — refine, don't re-distill" });
       continue;
@@ -2342,10 +2424,17 @@ function autopilotPlan(input) {
       skipped.push({ what: nm, why: `lint: ${lint.issues[0]}` });
       continue;
     }
+    const quality = sotaQualityGaps({ name: nm, description: draft.description, body: draft.body });
+    if (quality.length) {
+      skipped.push({ what: nm, why: `quality: ${quality[0]}` });
+      continue;
+    }
     const verified = c.fixes > 0 || c.count >= MM.STRONG_SINGLE;
     const gate = cfg.mode === "auto" && verified ? "graduate" : "stage";
     decisions.push({ op: "distill", candidate: c, name: nm, reason: `impact ${imp}, ${c.count} reps${verified ? ", verified" : ""}`, gate });
     existing.add(nm);
+    if (identity)
+      existingByIdentity.set(identity, nm);
     used++;
   }
   for (const m of input.managed) {
@@ -2445,10 +2534,12 @@ function saveAutopilotState(s) {
 function managedView(dirs) {
   const usage = loadUsage();
   const out = [];
+  const seen = new Set;
   for (const d of dirs)
     for (const n of listSkillNames(d)) {
-      if (!isManaged(d, n))
+      if (!isManaged(d, n) || seen.has(n))
         continue;
+      seen.add(n);
       const u = usage[n] || {};
       const created = u.created || Date.now();
       out.push({ name: n, description: skillDesc(d, n), body: readSkill(d, n), uses: u.uses || 0, ageDays: Math.floor((Date.now() - created) / 86400000), pinned: !!u.pinned });
@@ -2493,13 +2584,37 @@ async function consumeStreamBounded(stream) {
   const timer = new Promise((resolve) => setTimeout(() => resolve(out), ms));
   return Promise.race([reader, timer]);
 }
+var HIDDEN_FORKS = new WeakMap;
+async function hiddenForkFor(ctx, purpose) {
+  if (typeof ctx?.conversation?.fork !== "function")
+    return null;
+  const key = typeof ctx === "object" && ctx ? ctx : ctx.conversation;
+  let byPurpose = HIDDEN_FORKS.get(key);
+  if (!byPurpose) {
+    byPurpose = new Map;
+    HIDDEN_FORKS.set(key, byPurpose);
+  }
+  let forked = byPurpose.get(purpose);
+  if (!forked) {
+    forked = Promise.resolve(ctx.conversation.fork({ hidden: true }));
+    byPurpose.set(purpose, forked);
+  }
+  try {
+    return await forked;
+  } catch (e) {
+    byPurpose.delete(purpose);
+    throw e;
+  }
+}
 async function forkAuthor(ctx, c, repair) {
   try {
     if (typeof ctx?.conversation?.fork !== "function")
       return null;
     const det = draftWithRepair(c, repair);
     const prompt = `You are muscle-memory's skill author. Write ONLY the markdown BODY (no YAML frontmatter) of a SKILL.md capturing this recurring real workflow. Keep it under 120 lines. Required sections in order: "## Trigger", "## Observed pattern" (include the exact pattern in a code block), "## Procedure" (numbered, concrete, adaptable), ${repair ? `"## Pitfalls" (the observed error "${repair.errClass}" and its fix "${repair.fixStep}"), ` : ""}"## Verification". Pattern: ${c.key}. Reps: ${c.count} across ${c.convs} conversation(s). Output ONLY the markdown body, nothing else.`;
-    const forked = await ctx.conversation.fork({ hidden: true });
+    const forked = await hiddenForkFor(ctx, "fork-author");
+    if (!forked)
+      return null;
     const stream = await forked.sendMessageStream([{ role: "user", content: prompt }]);
     let body = await consumeStreamBounded(stream);
     body = body.trim().replace(/^```(?:markdown|md)?\n?|\n?```$/g, "");
@@ -2527,13 +2642,22 @@ async function runAutopilot(ctx, config) {
   const result = executeAutopilotPlan(plan, { skillsDir: agentSkillsDir(ctx), rows, ctx });
   saveAutopilotState({ date: st.date, used: st.used + result.graduated.length + result.staged.length });
   if (result.graduated.length || result.staged.length) {
-    const g = result.graduated[0], s = result.staged[0];
-    const summary = g ? `graduated '${g}'${result.graduated.length > 1 ? ` +${result.graduated.length - 1}` : ""}` : `staged '${s}'${result.staged.length > 1 ? ` +${result.staged.length - 1}` : ""} for review`;
-    appendUiEvent({ phase: g ? "skill_graduated" : "skill_staged", summary, skill: g || s, action: g ? "graduate" : "stage", route: "autopilot" });
-    writeUiState({ phase: "done", last: summary, route: `AUTOPILOT · ${g ? "graduate" : "stage"}` });
-    for (const n of result.graduated)
+    const activeDir = agentSkillsDir(ctx);
+    const verifiedGraduated = result.graduated.filter((n) => {
+      const proof = graduationProof(activeDir, n);
+      if (!proof.ok)
+        appendUiEvent({ phase: "graduation_unverified", summary: `not claiming graduation for '${n}': ${proof.reason.slice(0, 100)}`, skill: n, action: "graduate", route: "autopilot truth-guard" });
+      return proof.ok;
+    });
+    const g = verifiedGraduated[0], s = result.staged[0];
+    const summary = g ? `graduated '${g}'${verifiedGraduated.length > 1 ? ` +${verifiedGraduated.length - 1}` : ""}` : `staged '${s}'${result.staged.length > 1 ? ` +${result.staged.length - 1}` : ""} for review`;
+    if (g || s) {
+      appendUiEvent({ phase: g ? "skill_graduated" : "skill_staged", summary, skill: g || s, action: g ? "graduate" : "stage", route: "autopilot" });
+      writeUiState(g ? { phase: "rotation", skill: g, last: summary, route: "AUTOPILOT · graduate" } : { phase: "idle", last: "", route: "AUTOPILOT · stage" });
+    }
+    for (const n of verifiedGraduated)
       appendMeshFeed({ type: "skill_graduated", skill: n, route: "AUTOPILOT", signals: 0 });
-    for (const n of result.graduated) {
+    for (const n of verifiedGraduated) {
       try {
         const _d = agentSkillsDir(ctx);
         const _b = readSkill(_d, n);
@@ -2554,7 +2678,7 @@ async function runAutopilot(ctx, config) {
     }
     if (published.length) {
       appendUiEvent({ phase: "skill_published", summary: `published ${published.length} to catalog (Custom Skills)`, skill: published[0], action: "publish", route: "autopilot" });
-      writeUiState({ phase: "done", last: `published '${published[0]}' to catalog`, route: "AUTOPILOT · publish" });
+      writeUiState({ phase: "rotation", skill: published[0], last: `published '${published[0]}' to catalog`, route: "AUTOPILOT · publish" });
       for (const n of published)
         appendMeshFeed({ type: "skill_published", skill: n, route: "CATALOG", signals: 0 });
     }
@@ -2582,11 +2706,22 @@ Output ONLY the complete SKILL.md (no preamble, not truncated), or exactly "NOTH
 var REVIEW_PROMPT_COMPACT = `From the cross-session evidence below, author ONE class-level reusable skill as a COMPLETE SKILL.md, IF a durable lesson emerged. Format: YAML frontmatter (name: a class-level lowercase-hyphen slug; description: STARTS WITH "Use when"), then "## Procedure" (numbered, safe-first), "## Pitfalls" (each: symptom → exact fix → one-line TELL), "## Verification". Concrete correct fenced code; no preamble. Output ONLY the SKILL.md markdown, or exactly "NOTHING-TO-SAVE".`;
 var SEARCH_STOP = new Set("the and for with via use using used run running runs tool tools command commands file files validate validating validation build builds building test testing tests check checking code into from that this your you any new real step steps workflow workflows work works working session sessions across before after fix fixed fixing error errors fail failed failing not add get set make made need want call calls called when then them they here there what which how its has have will can may also same each only over under out off across recurring observed".split(" "));
 var SEARCH_DISTINCT_MIN = 3;
+function normalizePrescriptionQuery(query) {
+  return String(query).replace(/\bmuscle[\s-]+memory\b/gi, " ").replace(/\s+/g, " ").trim();
+}
+var IDENTITY_STOP = new Set(["recovering", "repairing", "recovery", "repair", "repairs", "from", "failing", "failed", "failure", "failures", "runs", "run", "at"]);
+function canonicalSkillIdentity(name) {
+  return [...new Set(slug(name).split("-").filter((token) => token && !IDENTITY_STOP.has(token)))].join("-");
+}
 function searchSkills(dirs, query, k = 5) {
   const terms = [...new Set(String(query).toLowerCase().split(/[^a-z0-9.]+/).filter((t) => t.length > 2 && !SEARCH_STOP.has(t)))];
   const out = [];
+  const seen = new Set;
   for (const d of dirs)
     for (const n of listSkillNames(d)) {
+      if (seen.has(n))
+        continue;
+      seen.add(n);
       const body = readSkill(d, n).toLowerCase();
       const desc = skillDesc(d, n);
       const nl = n.toLowerCase(), dl = desc.toLowerCase();
@@ -2974,6 +3109,23 @@ function isHighConfidenceCreate(res, ev) {
   const richDraft = !!res.description && res.description.length >= 80 && /##\s+Pitfalls/i.test(res.body || "") && /##\s+Verification/i.test(res.body || "");
   return ev.convs >= 3 && ev.items >= 1 && cleanRoute && richDraft;
 }
+function graduationProof(skillsDir, name) {
+  const nm = slug(name);
+  const path = join5(skillsDir, nm, "SKILL.md");
+  if (!nm)
+    return { ok: false, path, reason: "name required" };
+  if (!existsSync4(path))
+    return { ok: false, path, reason: "SKILL.md missing after write" };
+  try {
+    const content = readFileSync4(path, "utf8");
+    const fmName = slug((content.match(/^name:\s*(.+)$/im)?.[1] || "").trim());
+    if (fmName !== nm)
+      return { ok: false, path, reason: `frontmatter name mismatch: expected ${nm}, got ${fmName || "(none)"}` };
+    return { ok: true, path, reason: "write visible on active shelf" };
+  } catch (e) {
+    return { ok: false, path, reason: String(e?.message ?? e) };
+  }
+}
 function graduateStagedSkill(name, ctx) {
   const nm = slug(name);
   if (!nm)
@@ -2991,6 +3143,9 @@ function graduateStagedSkill(name, ctx) {
   const lint = lintSkillDraft({ name: nm, description: desc, body });
   if (!lint.ok)
     throw new Error(`linter blocked: ${lint.issues.join("; ")}`);
+  const quality = sotaQualityGaps({ name: nm, description: desc, body });
+  if (quality.length)
+    throw new Error(`quality blocked: ${quality.join("; ")}`);
   const sec = scanSkillContent(body);
   if (!sec.ok)
     throw new Error(`security blocked: ${sec.issues.join("; ")}`);
@@ -2998,6 +3153,9 @@ function graduateStagedSkill(name, ctx) {
   const dst = writeSkill(dstRoot, nm, content.includes(MM_TAG) ? content : content + `
 <!-- ${MM_TAG}: graduated ${new Date().toISOString().slice(0, 10)} -->
 `);
+  const proof = graduationProof(dstRoot, nm);
+  if (!proof.ok)
+    throw new Error(`graduation proof failed: ${proof.reason}`);
   syncSkillToDesktopCatalog(nm, ctx);
   mkdirSync4(STAGED_RETIRED_DIR, { recursive: true });
   try {
@@ -3005,7 +3163,7 @@ function graduateStagedSkill(name, ctx) {
   } catch {}
   appendUiEvent({ phase: "skill_graduated", summary: `graduated '${nm}'`, skill: nm, action: "graduate", route: "manual" });
   appendMeshFeed({ type: "skill_graduated", skill: nm, route: "GRADUATE", signals: 0 });
-  writeUiState({ phase: "done", last: `graduated '${nm}'`, route: "GRADUATE · live" });
+  writeUiState({ phase: "rotation", skill: nm, last: `graduated '${nm}'`, route: "GRADUATE · live" });
   try {
     const _b = readSkill(dstRoot, nm);
     if (_b) {
@@ -3020,8 +3178,12 @@ function reviewForkAuthor(ctx) {
     try {
       if (typeof ctx?.conversation?.fork !== "function")
         return "";
-      const forked = await ctx.conversation.fork({ hidden: true });
+      const forked = await hiddenForkFor(ctx, "review-author");
+      if (!forked)
+        return "";
       const stream = await forked.sendMessageStream([{ role: "user", content: `${sys}
+
+Treat this request independently from prior messages in this hidden bench thread.
 
 ${user}` }]);
       const out = await consumeStreamBounded(stream);
@@ -3062,9 +3224,9 @@ ${prefs.map((p) => `- ${p}`).join(`
     writeUiState({ phase: "idle", last: summary, route: "SKIP · handled" });
     return { action: "none", reason: summary };
   }
-  writeUiState({ phase: "routing", route: preTgt ? `UPDATE → ${preTgt.name}` : "CREATE (new skill)" });
+  writeUiState({ phase: "checking", subject: preTgt?.name || "", route: preTgt ? `UPDATE → ${preTgt.name}` : "CREATE (new skill)" });
   appendUiEvent({ phase: "review_planned", summary: preTgt ? `route UPDATE → ${preTgt.name}` : "route CREATE — no existing skill safely covers this" });
-  writeUiState({ phase: "writing", skill: preTgt?.name, route: preTgt ? `UPDATE → ${preTgt.name}` : "CREATE" });
+  writeUiState({ phase: "shaping", skill: preTgt?.name || "", route: preTgt ? `UPDATE → ${preTgt.name}` : "CREATE" });
   const author = config.authorFn || reviewForkAuthor(ctx);
   let res;
   try {
@@ -3102,7 +3264,15 @@ ${prefs.map((p) => `- ${p}`).join(`
         const d = reviewDirs.find((x) => existsSync4(join5(x, res.updateTarget, "SKILL.md")));
         return d ? readSkill(d, res.updateTarget) : undefined;
       })() : undefined;
+      writeUiState({ phase: "saving", skill: res.name, route: res.action.toUpperCase() });
       writeSkill(dir, res.name, tagged);
+      writeUiState({ phase: "testing", skill: res.name, route: res.action.toUpperCase() });
+      const proof = graduate ? graduationProof(dir, res.name) : { ok: true, path: join5(dir, res.name, "SKILL.md"), reason: "staged write" };
+      if (!proof.ok) {
+        appendUiEvent({ phase: "graduation_unverified", summary: `not claiming graduation for '${res.name}': ${proof.reason.slice(0, 100)}`, skill: res.name, action: res.action, route: "truth-guard" });
+        writeUiState({ phase: "idle", last: `graduation unverified for '${res.name}'`, route: "SKIP · truth-guard" });
+        return { ...res, wrote: join5(dir, res.name), reason: `graduation proof failed: ${proof.reason}` };
+      }
       if (graduate)
         syncSkillToDesktopCatalog(res.name, ctx);
       const manifest = buildEvidenceManifest({ action: res.action, skill: res.name, updateTarget: res.updateTarget, convs: ev.convs, signals: ev.items, memfsHits: res.matches || [], preferences: prefs, rejected: ev.rejected, newContent: tagged, oldContent });
@@ -3125,7 +3295,7 @@ ${prefs.map((p) => `- ${p}`).join(`
         appendUiEvent({ phase: "noise_rejected", summary: `rejected ${ev.rejected.length} env-noise items` });
       if (prefs.length)
         appendUiEvent({ phase: "memory_pref_injected", summary: `injected ${prefs.length} user preferences` });
-      writeUiState({ phase: "done", last: summary, route: `${graduate ? "GRADUATE" : res.action.toUpperCase()}${res.updateTarget ? " " + res.updateTarget : ""} · ${graduate ? "live" : "staged"}` });
+      writeUiState(graduate ? { phase: res.action === "update" ? "updated" : "learned", skill: res.name, last: summary, route: `${graduate ? "GRADUATE" : res.action.toUpperCase()}${res.updateTarget ? " " + res.updateTarget : ""} · live` } : { phase: "idle", last: "", route: `${res.action.toUpperCase()} · staged` });
       return { ...res, wrote: join5(dir, res.name) };
     } catch (e) {
       appendUiEvent({ phase: "reflect_error", summary: `write failed: ${String(e?.message ?? e).slice(0, 80)}` });
@@ -3161,39 +3331,1232 @@ function summarizeReflectActions(events, mode = "compact") {
   const extras = mode === "verbose" ? writes.filter((w) => !primaryPhases.includes(w.phase)).map((w) => w.summary) : [];
   return `\uD83D\uDCBE muscle-memory review: ${[...main, ...extras].join(" · ") || writes[0].summary}`;
 }
+var safeLabel = (value, fallback, max = 32) => value.replace(/[^A-Za-z0-9 ._-]/g, "").replace(/\s+/g, " ").trim().slice(0, max) || fallback;
+var ROUTE_LABELS = {
+  matched: "clear match",
+  "no-gap": "no gap declared",
+  "weak-match": "weak match",
+  ambiguous: "tied strongest match",
+  "negative-field": "negative field evidence",
+  "no-safe-match": "no safe match"
+};
+var friendlyRouteLabel = (route) => ROUTE_LABELS[route];
+function renderAgentBoxScore(summary, options) {
+  const stage = summary.scoreStatus === "blocked" ? "LEDGER BLOCKED" : summary.scoreStatus === "incomplete" ? "INCOMPLETE EVIDENCE" : summary.scoreStatus === "claim_eligible" ? "CLAIM-ELIGIBLE EVIDENCE" : "EARLY EVIDENCE";
+  const activeSkills = Number.isFinite(Number(options.skills?.active)) ? Math.max(0, Math.floor(Number(options.skills?.active))) : 0;
+  const provenSkills = Number.isFinite(Number(options.skills?.proven)) ? Math.min(activeSkills, Math.max(0, Math.floor(Number(options.skills?.proven)))) : 0;
+  const neutral = summary.observedNeutralInterventions > 0 ? ` · ${summary.observedNeutralInterventions} neutral` : "";
+  const lines = [
+    `MUSCLE MEMORY · DECISION REPORT · ${stage}`,
+    `INTERVENTIONS · ${summary.observedInterventions} served · ${summary.observedHelpfulInterventions} helped · ${summary.observedHarmfulInterventions} harmed${neutral}`,
+    `ABSTENTIONS · ${summary.observedAbstentions} · ${summary.observedSuccessfulAbstentions} succeeded unaided · ${summary.observedFailedAbstentions} failed`,
+    `SKILLS · ${activeSkills} active · ${provenSkills} proven`
+  ];
+  if (summary.lastPlay) {
+    const play = summary.lastPlay;
+    const decision = play.action === "abstain" ? "abstained" : "intervened";
+    const result = play.result ? play.result.replace(/_/g, " ") : "outcome pending";
+    lines.push(`LAST · ${decision} · ${friendlyRouteLabel(play.route)} · ${result}`);
+  }
+  const pending = summary.latestPendingPossession;
+  const pendingDetail = pending ? ` · ${pending.taskClass}${pending.skill ? ` → ${pending.skill}` : ""}` : "";
+  lines.push(`PENDING · ${summary.pendingDecisions}${pendingDetail}`);
+  if (summary.openedDecisions === 0 && summary.scoreStatus !== "blocked")
+    lines.push("START · declare a real procedural gap before a meaningful task");
+  const invalidRows = Object.values(summary.exclusionReasons).reduce((sum, count) => sum + Number(count || 0), 0);
+  if (summary.scoreStatus === "blocked") {
+    lines.push(`STATUS · ledger integrity blocked · ${invalidRows} invalid row${invalidRows === 1 ? "" : "s"} · scoring withheld`);
+  } else if (summary.scoreStatus === "incomplete") {
+    lines.push(`STATUS · incomplete evidence · ${summary.verifiedDecisions} verified · scoring withheld`);
+  } else if (summary.scoreStatus === "claim_eligible") {
+    lines.push(`STATUS · verified evidence threshold met · ${summary.verifiedDecisions} verified · claim-eligible under ${summary.metricContract}`);
+  } else {
+    const evidence = summary.verifiedDecisions > 0 && summary.judgedDecisions > 0 ? "early mixed evidence" : summary.verifiedDecisions > 0 ? "early verified evidence" : summary.judgedDecisions > 0 ? "early judged evidence" : "no evaluated evidence";
+    const capped = summary.repeatCappedDecisions > 0 ? ` · ${summary.repeatCappedDecisions} repeat-capped` : "";
+    lines.push(`STATUS · ${evidence} · ${summary.verifiedDecisions} verified${capped} · not claim-bearing`);
+  }
+  return lines.join(`
+`);
+}
 function renderMuscleMemoryPanel(state) {
   const mode = process.env.MM_REFLECT === "auto" ? "auto" : process.env.MM_REFLECT === "staged" ? "staged" : "off";
+  const roster = state?.roster && typeof state.roster === "object" ? state.roster : {};
+  const totalSkills = Number.isFinite(Number(roster.total)) ? Math.max(0, Math.floor(Number(roster.total))) : 0;
+  const provenSkills = Number.isFinite(Number(roster.proven)) ? Math.min(totalSkills, Math.max(0, Math.floor(Number(roster.proven)))) : 0;
+  const helpedCount = Number.isFinite(Number(roster.helped)) ? Math.max(0, Math.floor(Number(roster.helped))) : 0;
+  const provenNames = new Set(Array.isArray(roster.provenNames) ? roster.provenNames.map((name) => safeLabel(String(name || ""), "", 80)).filter(Boolean) : []);
+  const resting = () => {
+    if (mode === "off")
+      return [];
+    const parts = [
+      `\uD83D\uDCBE muscle-memory · ${totalSkills} skill${totalSkills === 1 ? "" : "s"}`,
+      `${helpedCount} helped`
+    ];
+    if (provenSkills > 0)
+      parts.push(`${provenSkills} proven`);
+    return [parts.join(" · ")];
+  };
   if (!state || !state.last && !state.phase)
-    return mode === "off" ? [] : [`\uD83D\uDCBE muscle-memory · ${mode} · watching`];
-  const ageMs = typeof state.ts === "number" ? Date.now() - state.ts : 0;
-  const TRANSIENT = state.phase === "reviewing" || state.phase === "routing" || state.phase === "writing";
-  const ttlMs = state.phase === "idle" ? 60000 : state.phase === "done" ? 5 * 60000 : state.phase === "protected" ? 5 * 60000 : state.phase === "blocked" ? 5 * 60000 : TRANSIENT ? 120000 : 90000;
-  if (ageMs > ttlMs)
-    return mode === "off" ? [] : [`\uD83D\uDCBE muscle-memory · ${mode} · watching`];
-  switch (state.phase) {
-    case "reviewing":
-      return [`\uD83D\uDCBE muscle-memory · \uD83D\uDD0D reviewing ${state.detail || "evidence…"}`];
-    case "routing":
-      return [`\uD83D\uDCBE muscle-memory · \uD83E\uDDED ${state.route || "routing…"}`];
-    case "writing":
-      return [`\uD83D\uDCBE muscle-memory · ✍️  writing ${state.skill ? `'${state.skill}'` : "skill"}…`];
-    case "protected":
-      return [`\uD83D\uDCBE muscle-memory · \uD83D\uDEE1️  ${state.last || "blocked unsafe content (safe)"}`];
-    case "blocked":
-      return [`\uD83D\uDCBE muscle-memory · ⚠️  ${state.last || "blocked"}`];
-    default:
-      return [`\uD83D\uDCBE muscle-memory · ${state.last || "ready"}`];
+    return resting();
+  const phase = String(state.phase || "idle");
+  const route = String(state.route || "").toUpperCase();
+  const ageMs = typeof state.ts === "number" ? Math.max(0, Date.now() - state.ts) : 0;
+  const skill = safeLabel(String(state.skill || ""), "", 80);
+  const alarmSubject = safeLabel(String(state.subject || state.last || "").replace(/^blocked\s*/i, "").replace(/\s*\(safe\)\s*$/i, ""), "unsafe content");
+  if (phase === "protected")
+    return [`\uD83D\uDCBE muscle-memory · \uD83D\uDEE1️ blocked ${alarmSubject}`];
+  const beatTtlMs = 12000;
+  const beatPhases = new Set(["earned", "learned", "updated", "rotation", "benched"]);
+  if (beatPhases.has(phase)) {
+    if (ageMs > beatTtlMs)
+      return resting();
+    const fallback = phase === "earned" ? safeLabel(String(state.last || ""), "smart restraint") : "skill";
+    const label = skill || fallback;
+    const rating = state?.field && typeof state.field === "object" && skill ? state.field[skill] : null;
+    const helped = rating && Number.isFinite(Number(rating.plus)) ? Math.max(0, Math.floor(Number(rating.plus))) : null;
+    const missed = rating && Number.isFinite(Number(rating.minus)) ? Math.max(0, Math.floor(Number(rating.minus))) : null;
+    const fieldLine = helped !== null && missed !== null ? ` (helped ${helped} · missed ${missed})` : "";
+    switch (phase) {
+      case "earned":
+        if (!skill || /smart restraint/i.test(label))
+          return ["\uD83D\uDCBE muscle-memory · ✓ no skill needed · task completed"];
+        if (provenNames.has(skill))
+          return [`\uD83D\uDCBE muscle-memory · ★ skill proven · ${skill}${fieldLine}`];
+        return [`\uD83D\uDCBE muscle-memory · ✓ skill helped · ${skill}${fieldLine}`];
+      case "learned":
+        return [`\uD83D\uDCBE muscle-memory · ✓ skill learned · ${label}${fieldLine}`];
+      case "updated":
+        return [`\uD83D\uDCBE muscle-memory · ✓ skill improved · ${label}${fieldLine}`];
+      case "rotation":
+        return [`\uD83D\uDCBE muscle-memory · ★ skill promoted · ${label}${fieldLine}`];
+      case "benched":
+        return [`\uD83D\uDCBE muscle-memory · ↓ skill retired · ${label}${fieldLine}`];
+    }
   }
+  const progressTtlMs = 120000;
+  if (["reviewing", "shaping", "checking", "saving", "testing"].includes(phase)) {
+    if (ageMs > progressTtlMs)
+      return resting();
+    const detail = String(state.detail || "").replace(/[^A-Za-z0-9 /._-]/g, "").replace(/\s+/g, " ").trim().slice(0, 64);
+    if (phase === "reviewing")
+      return [`\uD83D\uDCBE muscle-memory · learning from recent work${detail ? ` · ${detail}` : "…"}`];
+    if (phase === "checking") {
+      return [skill ? `\uD83D\uDCBE muscle-memory · checking skill: ${skill}…` : `\uD83D\uDCBE muscle-memory · checking the roster${route.includes("CREATE") ? " for a new skill" : ""}…`];
+    }
+    if (phase === "testing")
+      return [`\uD83D\uDCBE muscle-memory · testing skill: ${skill || "new skill"}…`];
+    if (phase === "saving")
+      return [`\uD83D\uDCBE muscle-memory · saving ${route.includes("UPDATE") ? "skill update" : "skill"}: ${skill || "new skill"}…`];
+    if (skill && route.includes("UPDATE"))
+      return [`\uD83D\uDCBE muscle-memory · rewriting skill: ${skill}…`];
+    return ["\uD83D\uDCBE muscle-memory · writing a new skill…"];
+  }
+  return resting();
+}
+
+// mods/possessions.ts
+import { createHash as createHash3 } from "node:crypto";
+import { appendFileSync as appendFileSync2, existsSync as existsSync6, mkdirSync as mkdirSync6, readFileSync as readFileSync6 } from "node:fs";
+import { dirname as dirname2, join as join7 } from "node:path";
+
+// mods/verification.ts
+import {
+  chmodSync,
+  closeSync,
+  constants,
+  existsSync as existsSync5,
+  fstatSync,
+  lstatSync as lstatSync2,
+  mkdirSync as mkdirSync5,
+  openSync,
+  readFileSync as readFileSync5,
+  realpathSync,
+  statSync,
+  writeFileSync as writeFileSync5
+} from "node:fs";
+import { createHash as createHash2, timingSafeEqual } from "node:crypto";
+import { isAbsolute, join as join6, relative as relative2, resolve, sep } from "node:path";
+var EXACT_FILE_ADAPTER_ID = "mm.exact-file-sha256.v1";
+var VERIFICATION_TASK_SCHEMA = "mm.verification-task.exact-file.v1";
+var VERIFICATION_BINDING_SCHEMA = "mm.verification-binding.v1";
+var VERIFICATION_RECEIPT_SCHEMA = "mm.verification-receipt.v1";
+var VERIFICATION_TASK_DIR = join6(STATE_DIR, "verification-tasks");
+var ADAPTER_VERSION = "1";
+var ROOT_ID = "configured";
+var SAFE_SLUG = /^[a-z0-9][a-z0-9-]{0,79}$/;
+var SAFE_ID = /^[a-z0-9][a-z0-9._:-]{0,127}$/i;
+var SHA256 = /^[a-f0-9]{64}$/;
+var TASK_KEYS = new Set(["schema", "adapter_id", "adapter_version", "task_id", "task_class", "registered_at", "root_id", "root_identity_sha256", "target_rel", "expected_sha256"]);
+var receiptCustody = new WeakSet;
+var BINDING_KEYS = new Set(["schema", "adapter_id", "adapter_version", "task_id", "task_class", "manifest_sha256"]);
+var RECEIPT_KEYS = new Set(["schema", "adapter_id", "adapter_version", "task_id", "task_class", "possession_id", "decision_event_id", "manifest_sha256", "artifact_sha256", "matched", "verified_at"]);
+function exactObject(input, keys, label) {
+  if (!input || typeof input !== "object" || Array.isArray(input))
+    throw new Error(`${label} must be an object`);
+  const raw = input;
+  for (const key of Object.keys(raw))
+    if (!keys.has(key))
+      throw new Error(`${label} has unexpected field '${key}'`);
+  for (const key of keys)
+    if (!(key in raw))
+      throw new Error(`${label} missing field '${key}'`);
+  return raw;
+}
+function normalizeVerificationBinding(input) {
+  const raw = exactObject(input, BINDING_KEYS, "verification binding");
+  if (raw.schema !== VERIFICATION_BINDING_SCHEMA || raw.adapter_id !== EXACT_FILE_ADAPTER_ID || raw.adapter_version !== ADAPTER_VERSION) {
+    throw new Error("verification binding identity mismatch");
+  }
+  assertSlug("verification task_id", raw.task_id);
+  assertSlug("verification task_class", raw.task_class);
+  assertSha("verification manifest_sha256", raw.manifest_sha256);
+  return { ...raw };
+}
+function normalizeInstrumentVerificationReceipt(input) {
+  const raw = exactObject(input, RECEIPT_KEYS, "verification receipt");
+  if (raw.schema !== VERIFICATION_RECEIPT_SCHEMA || raw.adapter_id !== EXACT_FILE_ADAPTER_ID || raw.adapter_version !== ADAPTER_VERSION) {
+    throw new Error("verification receipt identity mismatch");
+  }
+  assertSlug("verification task_id", raw.task_id);
+  assertSlug("verification task_class", raw.task_class);
+  assertId("verification possession_id", raw.possession_id);
+  assertId("verification decision_event_id", raw.decision_event_id);
+  assertSha("verification manifest_sha256", raw.manifest_sha256);
+  assertSha("verification artifact_sha256", raw.artifact_sha256);
+  if (typeof raw.matched !== "boolean")
+    throw new Error("verification matched must be boolean");
+  if (!Number.isSafeInteger(raw.verified_at) || Number(raw.verified_at) < 0)
+    throw new Error("verification verified_at must be a non-negative safe integer");
+  return { ...raw };
+}
+var hashBytes = (bytes) => createHash2("sha256").update(bytes).digest("hex");
+var rootIdentitySha256 = (root) => {
+  const st = statSync(root);
+  return hashBytes(`${root}\x00${st.dev}\x00${st.ino}`);
+};
+var taskPath = (taskId) => join6(VERIFICATION_TASK_DIR, `${taskId}.json`);
+function assertSlug(label, value) {
+  if (typeof value !== "string" || !SAFE_SLUG.test(value))
+    throw new Error(`${label} must be a lowercase safe slug`);
+}
+function assertId(label, value) {
+  if (typeof value !== "string" || !SAFE_ID.test(value))
+    throw new Error(`${label} must be a bounded safe identifier`);
+}
+function assertSha(label, value) {
+  if (typeof value !== "string" || !SHA256.test(value))
+    throw new Error(`${label} must be a canonical lowercase SHA-256`);
+}
+function assertTargetRel(value) {
+  if (typeof value !== "string" || !value || value.length > 240)
+    throw new Error("target_rel must be a bounded relative path");
+  if (value.includes("\x00") || value.includes("\\") || isAbsolute(value) || value.startsWith("./") || value.includes("//")) {
+    throw new Error("target_rel must be a canonical POSIX-style relative path");
+  }
+  const parts = value.split("/");
+  if (parts.some((part) => !part || part === "." || part === ".."))
+    throw new Error("target_rel cannot traverse or contain empty/dot segments");
+}
+function configuredRoot() {
+  const raw = String(process.env.MM_EXACT_FILE_ROOT || "").trim();
+  if (!raw || !isAbsolute(raw))
+    throw new Error("MM_EXACT_FILE_ROOT must be configured as an absolute trusted root");
+  const root = realpathSync(raw);
+  if (!statSync(root).isDirectory())
+    throw new Error("MM_EXACT_FILE_ROOT must resolve to a directory");
+  return root;
+}
+function resolveTarget(root, targetRel, requireFile) {
+  assertTargetRel(targetRel);
+  const lexical = resolve(root, targetRel);
+  const lexicalRel = relative2(root, lexical);
+  if (!lexicalRel || lexicalRel.startsWith("..") || isAbsolute(lexicalRel))
+    throw new Error("target_rel escapes the trusted root");
+  if (!existsSync5(lexical)) {
+    if (requireFile)
+      throw new Error("verification target does not exist");
+    return lexical;
+  }
+  const lst = lstatSync2(lexical);
+  if (lst.isSymbolicLink())
+    throw new Error("verification target cannot be a symlink");
+  const target = realpathSync(lexical);
+  if (target !== root && !target.startsWith(`${root}${sep}`))
+    throw new Error("verification target resolves outside the trusted root");
+  if (!statSync(target).isFile())
+    throw new Error("verification target must be a regular file");
+  return target;
+}
+function parseTaskBytes(bytes, path) {
+  let raw;
+  try {
+    raw = JSON.parse(bytes);
+  } catch {
+    throw new Error(`verification manifest is malformed: ${path}`);
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw))
+    throw new Error("verification manifest must be an object");
+  for (const key of Object.keys(raw))
+    if (!TASK_KEYS.has(key))
+      throw new Error(`verification manifest has unexpected field '${key}'`);
+  for (const key of TASK_KEYS)
+    if (!(key in raw))
+      throw new Error(`verification manifest missing field '${key}'`);
+  if (raw.schema !== VERIFICATION_TASK_SCHEMA)
+    throw new Error("verification manifest schema mismatch");
+  if (raw.adapter_id !== EXACT_FILE_ADAPTER_ID || raw.adapter_version !== ADAPTER_VERSION)
+    throw new Error("verification adapter identity mismatch");
+  if (raw.root_id !== ROOT_ID)
+    throw new Error("verification root identity mismatch");
+  assertSha("root_identity_sha256", raw.root_identity_sha256);
+  assertSlug("task_id", raw.task_id);
+  assertSlug("task_class", raw.task_class);
+  if (!Number.isSafeInteger(raw.registered_at) || Number(raw.registered_at) < 0)
+    throw new Error("registered_at must be a non-negative safe integer");
+  assertTargetRel(raw.target_rel);
+  assertSha("expected_sha256", raw.expected_sha256);
+  return raw;
+}
+function loadTask(taskId) {
+  assertSlug("task_id", taskId);
+  const path = taskPath(taskId);
+  if (!existsSync5(path))
+    throw new Error(`unknown verification task '${taskId}'`);
+  const mode = statSync(path).mode & 511;
+  if ((mode & 146) !== 0)
+    throw new Error("verification manifest must remain read-only");
+  const bytes = readFileSync5(path, "utf8");
+  const task = parseTaskBytes(bytes, path);
+  if (task.task_id !== taskId)
+    throw new Error("verification manifest task_id mismatch");
+  return { task, path, bytes, manifestSha256: hashBytes(bytes) };
+}
+function createExactFileVerificationTask(input) {
+  assertSlug("task_id", input.taskId);
+  assertSlug("task_class", input.taskClass);
+  assertTargetRel(input.targetRel);
+  assertSha("expected_sha256", input.expectedSha256);
+  const registeredAt = input.registeredAt ?? Date.now();
+  if (!Number.isSafeInteger(registeredAt) || registeredAt < 0)
+    throw new Error("registeredAt must be a non-negative safe integer");
+  const root = configuredRoot();
+  resolveTarget(root, input.targetRel, true);
+  const task = {
+    schema: VERIFICATION_TASK_SCHEMA,
+    adapter_id: EXACT_FILE_ADAPTER_ID,
+    adapter_version: ADAPTER_VERSION,
+    task_id: input.taskId,
+    task_class: input.taskClass,
+    registered_at: registeredAt,
+    root_id: ROOT_ID,
+    root_identity_sha256: rootIdentitySha256(root),
+    target_rel: input.targetRel,
+    expected_sha256: input.expectedSha256
+  };
+  const bytes = `${JSON.stringify(task)}
+`;
+  mkdirSync5(VERIFICATION_TASK_DIR, { recursive: true });
+  const path = taskPath(input.taskId);
+  writeFileSync5(path, bytes, { encoding: "utf8", flag: "wx", mode: 292 });
+  chmodSync(path, 292);
+  const reread = readFileSync5(path, "utf8");
+  if (reread !== bytes)
+    throw new Error("verification manifest write custody mismatch");
+  return { path, manifestSha256: hashBytes(reread), task };
+}
+function bindExactFileVerificationTask(taskId) {
+  const { task, manifestSha256 } = loadTask(taskId);
+  return {
+    schema: VERIFICATION_BINDING_SCHEMA,
+    adapter_id: EXACT_FILE_ADAPTER_ID,
+    adapter_version: ADAPTER_VERSION,
+    task_id: task.task_id,
+    task_class: task.task_class,
+    manifest_sha256: manifestSha256
+  };
+}
+function isInstrumentVerificationReceipt(value) {
+  return !!value && typeof value === "object" && receiptCustody.has(value);
+}
+function isStoredVerificationReceiptBound(bindingInput, receiptInput, possessionId, decisionEventId) {
+  try {
+    const binding = normalizeVerificationBinding(bindingInput);
+    const receipt = normalizeInstrumentVerificationReceipt(receiptInput);
+    if (receipt.possession_id !== possessionId || receipt.decision_event_id !== decisionEventId)
+      return false;
+    if (binding.adapter_id !== receipt.adapter_id || binding.adapter_version !== receipt.adapter_version)
+      return false;
+    if (binding.task_id !== receipt.task_id || binding.task_class !== receipt.task_class)
+      return false;
+    if (binding.manifest_sha256 !== receipt.manifest_sha256)
+      return false;
+    const loaded = loadTask(binding.task_id);
+    const digestRelation = receipt.artifact_sha256 === loaded.task.expected_sha256;
+    return loaded.manifestSha256 === binding.manifest_sha256 && loaded.task.task_id === binding.task_id && loaded.task.task_class === binding.task_class && receipt.matched === digestRelation;
+  } catch {
+    return false;
+  }
+}
+function verifyExactFilePossession(decision) {
+  if (decision.action !== "prescribe")
+    throw new Error("exact-file verification supports prescribed-skill possessions only");
+  const binding = decision.verification;
+  if (!binding)
+    throw new Error("possession has no pre-work verification binding");
+  if (binding.schema !== VERIFICATION_BINDING_SCHEMA || binding.adapter_id !== EXACT_FILE_ADAPTER_ID || binding.adapter_version !== ADAPTER_VERSION) {
+    throw new Error("possession verification binding is not the exact-file adapter");
+  }
+  const { task, manifestSha256 } = loadTask(binding.task_id);
+  if (manifestSha256 !== binding.manifest_sha256)
+    throw new Error("verification manifest hash mismatch after decision binding");
+  if (task.task_class !== binding.task_class || decision.task_class !== task.task_class)
+    throw new Error("verification task_class mismatch");
+  if (task.task_id !== binding.task_id)
+    throw new Error("verification task_id mismatch");
+  if (task.registered_at > decision.ts)
+    throw new Error("verification task must be registered before the decision");
+  const root = configuredRoot();
+  if (rootIdentitySha256(root) !== task.root_identity_sha256)
+    throw new Error("configured verification root changed after task registration");
+  const target = resolveTarget(root, task.target_rel, true);
+  if (typeof constants.O_NOFOLLOW !== "number" || constants.O_NOFOLLOW === 0) {
+    throw new Error("exact-file verification is unsupported on this platform: O_NOFOLLOW unavailable");
+  }
+  const fd = openSync(target, constants.O_RDONLY | constants.O_NOFOLLOW);
+  let bytes;
+  try {
+    const before = fstatSync(fd);
+    if (!before.isFile())
+      throw new Error("verification target must remain a regular file");
+    const openedReal = realpathSync(target);
+    if (openedReal !== root && !openedReal.startsWith(`${root}${sep}`))
+      throw new Error("verification target escaped the trusted root while opening");
+    const openedPathStat = statSync(openedReal);
+    if (openedPathStat.dev !== before.dev || openedPathStat.ino !== before.ino)
+      throw new Error("verification target changed before hashing");
+    bytes = readFileSync5(fd);
+    const after = fstatSync(fd);
+    const afterReal = realpathSync(target);
+    const afterPathStat = statSync(afterReal);
+    if (afterReal !== openedReal || afterPathStat.dev !== after.dev || afterPathStat.ino !== after.ino || before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size || before.mtimeMs !== after.mtimeMs) {
+      throw new Error("verification target changed while hashing");
+    }
+  } finally {
+    closeSync(fd);
+  }
+  const artifactSha256 = hashBytes(bytes);
+  const matched = timingSafeEqual(Buffer.from(artifactSha256, "hex"), Buffer.from(task.expected_sha256, "hex"));
+  const verification = {
+    schema: VERIFICATION_RECEIPT_SCHEMA,
+    adapter_id: EXACT_FILE_ADAPTER_ID,
+    adapter_version: ADAPTER_VERSION,
+    task_id: task.task_id,
+    task_class: task.task_class,
+    possession_id: decision.possession_id,
+    decision_event_id: decision.event_id,
+    manifest_sha256: manifestSha256,
+    artifact_sha256: artifactSha256,
+    matched,
+    verified_at: Date.now()
+  };
+  receiptCustody.add(verification);
+  return {
+    result: matched ? "helped" : "harmed",
+    evidence_tier: "verified",
+    reason: matched ? "exact-file SHA-256 matched the bound manifest" : "exact-file SHA-256 did not match the bound manifest",
+    evidence_ref: `adapter:${EXACT_FILE_ADAPTER_ID}:${manifestSha256}`,
+    verification
+  };
+}
+
+// mods/possessions.ts
+var POSSESSION_LEDGER_PATH = join7(STATE_DIR, "possessions.jsonl");
+var POSSESSION_SCHEMA = "mm.possession.v1";
+var EFFICIENCY_CONTRACT = Object.freeze({
+  id: "mm.efficiency.v2",
+  numerator: "same_tier_helped_prescriptions + same_tier_successful_abstentions",
+  denominator: "same_tier_scored_evaluated_decisions",
+  neutralPolicy: "neutral_prescriptions_remain_in_denominator",
+  harmPolicy: "harmful_prescriptions_remain_in_denominator_and_report_separately",
+  verifiedPolicy: "agent_callers_cannot_self_award_verified; exact-file adapter binds pre-work manifest + instrument receipt",
+  earnedMinute: "same_tier_helped_prescription | same_tier_successful_abstention; useful routing decision, not literal skill invocation",
+  repeatCapPerTaskClass: 3,
+  minimumUniqueTaskClasses: 3,
+  minimumClosureRatePct: 80,
+  percentageDisplayThreshold: 10
+});
+var DECISION_ACTIONS = new Set(["prescribe", "abstain"]);
+var DECISION_ROUTES = new Set(["matched", "no-gap", "weak-match", "ambiguous", "negative-field", "no-safe-match"]);
+var DIFFICULTIES = new Set(["routine", "standard", "hard", "unknown"]);
+var OUTCOMES = new Set(["helped", "harmed", "neutral", "succeeded_unaided", "failed_unaided"]);
+var EVIDENCE_TIERS = new Set(["verified", "human_judged", "agent_judged"]);
+var LIFECYCLE_ACTIONS = new Set(["learn", "update", "graduate", "retire", "restore"]);
+var SAFE_ID2 = /^[a-z0-9][a-z0-9._:-]{0,127}$/i;
+var SAFE_SLUG2 = /^[a-z0-9][a-z0-9-]{0,79}$/;
+var emptyExclusions = () => ({
+  malformed_json: 0,
+  invalid_schema: 0,
+  unknown_enum: 0,
+  duplicate_event_id: 0,
+  duplicate_decision: 0,
+  orphan_outcome: 0,
+  duplicate_outcome: 0,
+  invalid_supersession: 0,
+  incompatible_outcome: 0
+});
+function assertSafeId(label, value) {
+  if (typeof value !== "string" || !SAFE_ID2.test(value))
+    throw new Error(`${label} must be a bounded safe identifier`);
+}
+function assertSafeSlug(label, value) {
+  if (typeof value !== "string" || !SAFE_SLUG2.test(value))
+    throw new Error(`${label} must be a lowercase slug, not raw task text`);
+}
+function compatible(action, result) {
+  return action === "prescribe" ? result === "helped" || result === "harmed" || result === "neutral" : result === "succeeded_unaided" || result === "failed_unaided";
+}
+function normalizeEvent(input, mode) {
+  if (!input || typeof input !== "object")
+    throw new Error("event must be an object");
+  const event = input;
+  if (event.schema !== POSSESSION_SCHEMA)
+    throw new Error(`schema must be ${POSSESSION_SCHEMA}`);
+  assertSafeId("event_id", event.event_id);
+  assertSafeId("possession_id", event.possession_id);
+  if (!Number.isFinite(event.ts) || event.ts < 0)
+    throw new Error("ts must be a non-negative number");
+  if (event.type === "decision") {
+    if (!DECISION_ACTIONS.has(event.action))
+      throw new Error("action must be prescribe|abstain");
+    if (!DECISION_ROUTES.has(event.route))
+      throw new Error("route is not a known decision route");
+    const difficulty = event.difficulty ?? "unknown";
+    if (!DIFFICULTIES.has(difficulty))
+      throw new Error("difficulty must be routine|standard|hard|unknown");
+    assertSafeSlug("task_class", event.task_class);
+    if (event.skill !== undefined)
+      assertSafeSlug("skill", event.skill);
+    if (event.action === "prescribe" && !event.skill)
+      throw new Error("prescribe decisions require a skill");
+    if (event.action === "abstain" && event.skill)
+      throw new Error("abstain decisions cannot inject a skill");
+    const verification = event.verification === undefined ? undefined : normalizeVerificationBinding(event.verification);
+    if (verification && event.action !== "prescribe")
+      throw new Error("verification binding supports prescribed-skill possessions only");
+    if (verification && verification.task_class !== event.task_class)
+      throw new Error("verification binding task_class must match the decision");
+    return {
+      schema: POSSESSION_SCHEMA,
+      event_id: event.event_id,
+      possession_id: event.possession_id,
+      ts: event.ts,
+      type: "decision",
+      agent: redactFragment(String(event.agent || "agent"), 1, 80),
+      model: redactFragment(String(event.model || "unknown"), 1, 120),
+      action: event.action,
+      task_class: event.task_class,
+      difficulty,
+      eligible: true,
+      gap_observed: event.gap_observed === true,
+      route: event.route,
+      ...event.skill ? { skill: event.skill } : {},
+      ...verification ? { verification } : {}
+    };
+  }
+  if (event.type === "outcome") {
+    if (!OUTCOMES.has(event.result))
+      throw new Error("result is not a known outcome");
+    if (!EVIDENCE_TIERS.has(event.evidence_tier))
+      throw new Error("evidence_tier is not known");
+    if (mode === "caller" && event.evidence_tier === "verified") {
+      throw new Error("instrument-derived verification is required; callers must use human_judged or agent_judged");
+    }
+    if (event.evidence_tier !== "verified" && event.verification !== undefined) {
+      throw new Error("judged outcomes cannot carry a verification receipt");
+    }
+    let verification;
+    if (event.evidence_tier === "verified" && event.verification !== undefined) {
+      verification = normalizeInstrumentVerificationReceipt(event.verification);
+    }
+    if (mode === "instrument") {
+      if (event.evidence_tier !== "verified" || !verification || !isInstrumentVerificationReceipt(event.verification)) {
+        throw new Error("instrument-owned receipt is required for verified append");
+      }
+    }
+    if (!String(event.reason || "").trim())
+      throw new Error("outcomes require a reason");
+    if (event.supersedes_event_id)
+      assertSafeId("supersedes_event_id", event.supersedes_event_id);
+    return {
+      schema: POSSESSION_SCHEMA,
+      event_id: event.event_id,
+      possession_id: event.possession_id,
+      ts: event.ts,
+      type: "outcome",
+      result: event.result,
+      evidence_tier: event.evidence_tier,
+      reason: redactFragment(String(event.reason), 4, 320),
+      ...event.evidence_ref ? { evidence_ref: redactFragment(String(event.evidence_ref), 2, 180) } : {},
+      ...event.supersedes_event_id ? { supersedes_event_id: event.supersedes_event_id } : {},
+      ...verification ? { verification } : {}
+    };
+  }
+  if (event.type === "lifecycle") {
+    if (!LIFECYCLE_ACTIONS.has(event.action))
+      throw new Error("lifecycle action is not known");
+    assertSafeSlug("skill", event.skill);
+    if (!String(event.reason || "").trim())
+      throw new Error("lifecycle events require a reason");
+    return {
+      schema: POSSESSION_SCHEMA,
+      event_id: event.event_id,
+      possession_id: event.possession_id,
+      ts: event.ts,
+      type: "lifecycle",
+      action: event.action,
+      skill: event.skill,
+      reason: redactFragment(String(event.reason), 4, 320)
+    };
+  }
+  throw new Error("type is not a known possession event");
+}
+function classifyNormalizationError(error, raw) {
+  const message = String(error?.message || error);
+  if (message.includes("schema"))
+    return "invalid_schema";
+  if (message.includes("action") || message.includes("route") || message.includes("difficulty") || message.includes("result") || message.includes("evidence_tier") || message.includes("type"))
+    return "unknown_enum";
+  return raw?.type === "decision" ? "unknown_enum" : "invalid_schema";
+}
+function inspectPossessionLedger() {
+  const rawText = existsSync6(POSSESSION_LEDGER_PATH) ? readFileSync6(POSSESSION_LEDGER_PATH, "utf8") : "";
+  const lines = rawText.split(`
+`).filter((line) => line.trim());
+  const exclusions = emptyExclusions();
+  const excludedPossessions = new Set;
+  const excludedDecisionPossessions = new Set;
+  const seenEventIds = new Set;
+  const events = [];
+  const decisions = new Map;
+  const activeOutcomes = new Map;
+  let malformedRows = 0;
+  let unknownEnumRows = 0;
+  for (const line of lines) {
+    let raw;
+    try {
+      raw = JSON.parse(line);
+    } catch {
+      malformedRows++;
+      exclusions.malformed_json++;
+      continue;
+    }
+    let event;
+    try {
+      event = normalizeEvent(raw, "read");
+    } catch (error) {
+      const reason = classifyNormalizationError(error, raw);
+      exclusions[reason]++;
+      if (reason === "unknown_enum")
+        unknownEnumRows++;
+      if (typeof raw?.possession_id === "string") {
+        excludedPossessions.add(raw.possession_id);
+        if (raw?.type === "decision")
+          excludedDecisionPossessions.add(raw.possession_id);
+      }
+      continue;
+    }
+    if (seenEventIds.has(event.event_id)) {
+      exclusions.duplicate_event_id++;
+      excludedPossessions.add(event.possession_id);
+      if (event.type === "decision" || decisions.has(event.possession_id))
+        excludedDecisionPossessions.add(event.possession_id);
+      continue;
+    }
+    seenEventIds.add(event.event_id);
+    if (event.type === "decision") {
+      if (decisions.has(event.possession_id)) {
+        exclusions.duplicate_decision++;
+        excludedPossessions.add(event.possession_id);
+        excludedDecisionPossessions.add(event.possession_id);
+        continue;
+      }
+      decisions.set(event.possession_id, event);
+      events.push(event);
+      continue;
+    }
+    if (event.type === "outcome") {
+      const decision = decisions.get(event.possession_id);
+      if (!decision) {
+        exclusions.orphan_outcome++;
+        excludedPossessions.add(event.possession_id);
+        continue;
+      }
+      if (!compatible(decision.action, event.result)) {
+        exclusions.incompatible_outcome++;
+        excludedPossessions.add(event.possession_id);
+        excludedDecisionPossessions.add(event.possession_id);
+        continue;
+      }
+      const active = activeOutcomes.get(event.possession_id);
+      if (active) {
+        if (!event.supersedes_event_id) {
+          exclusions.duplicate_outcome++;
+          excludedPossessions.add(event.possession_id);
+          excludedDecisionPossessions.add(event.possession_id);
+          continue;
+        }
+        if (event.supersedes_event_id !== active.event_id) {
+          exclusions.invalid_supersession++;
+          excludedPossessions.add(event.possession_id);
+          excludedDecisionPossessions.add(event.possession_id);
+          continue;
+        }
+      } else if (event.supersedes_event_id) {
+        exclusions.invalid_supersession++;
+        excludedPossessions.add(event.possession_id);
+        excludedDecisionPossessions.add(event.possession_id);
+        continue;
+      }
+      activeOutcomes.set(event.possession_id, event);
+      events.push(event);
+      continue;
+    }
+    events.push(event);
+  }
+  const excludedRows = Object.values(exclusions).reduce((sum, count) => sum + count, 0);
+  const blocked = excludedRows > 0;
+  return {
+    events,
+    integrity: {
+      blocked,
+      ledgerSha256: createHash3("sha256").update(rawText).digest("hex"),
+      rowCount: lines.length,
+      validRows: events.length,
+      malformedRows,
+      unknownEnumRows,
+      excludedRows,
+      excludedPossessionIds: [...excludedPossessions].sort(),
+      excludedDecisionPossessionIds: [...excludedDecisionPossessions].sort(),
+      orphanOutcomes: exclusions.orphan_outcome,
+      exclusionReasons: exclusions
+    }
+  };
+}
+function appendPossessionEvent(input, mode) {
+  const clean = normalizeEvent(input, mode);
+  const inspection = inspectPossessionLedger();
+  if (inspection.integrity.blocked)
+    throw new Error("ledger integrity is BLOCKED; repair custody before appending");
+  if (inspection.events.some((row) => row.event_id === clean.event_id))
+    throw new Error(`duplicate event_id '${clean.event_id}'`);
+  const decisions = inspection.events.filter((row) => row.type === "decision");
+  const outcomes = inspection.events.filter((row) => row.type === "outcome");
+  if (clean.type === "decision" && decisions.some((row) => row.possession_id === clean.possession_id)) {
+    throw new Error(`decision already exists for possession '${clean.possession_id}'`);
+  }
+  if (clean.type === "outcome") {
+    const decision = decisions.find((row) => row.possession_id === clean.possession_id);
+    if (!decision)
+      throw new Error(`cannot record orphan outcome for '${clean.possession_id}'`);
+    if (!compatible(decision.action, clean.result))
+      throw new Error(`result '${clean.result}' is incompatible with decision '${decision.action}'`);
+    if (clean.evidence_tier === "verified") {
+      if (!decision.verification || !clean.verification || !isStoredVerificationReceiptBound(decision.verification, clean.verification, decision.possession_id, decision.event_id)) {
+        throw new Error("verified outcome is not bound to the possession decision and stored manifest");
+      }
+      const shouldHelp = clean.verification.matched;
+      if (shouldHelp && clean.result !== "helped" || !shouldHelp && clean.result !== "harmed") {
+        throw new Error("verified outcome result does not match the instrument receipt");
+      }
+    }
+    const active = outcomes.filter((row) => row.possession_id === clean.possession_id).at(-1);
+    if (active && !clean.supersedes_event_id)
+      throw new Error(`active outcome already exists for '${clean.possession_id}'`);
+    if (active && clean.supersedes_event_id !== active.event_id)
+      throw new Error("supersedes_event_id must bind the active outcome");
+    if (!active && clean.supersedes_event_id)
+      throw new Error("cannot supersede a missing outcome");
+  }
+  mkdirSync6(dirname2(POSSESSION_LEDGER_PATH), { recursive: true });
+  appendFileSync2(POSSESSION_LEDGER_PATH, `${JSON.stringify(clean)}
+`, "utf8");
+  return clean;
+}
+function recordPossessionEvent(input) {
+  return appendPossessionEvent(input, "caller");
+}
+function recordInstrumentVerifiedOutcome(input) {
+  return appendPossessionEvent(input, "instrument");
+}
+function loadPossessionEvents() {
+  return inspectPossessionLedger().events;
+}
+var pct = (good, total) => total ? Math.round(100 * good / total) : null;
+var cleanIntegrity = () => ({
+  blocked: false,
+  ledgerSha256: createHash3("sha256").update("").digest("hex"),
+  rowCount: 0,
+  validRows: 0,
+  malformedRows: 0,
+  unknownEnumRows: 0,
+  excludedRows: 0,
+  excludedPossessionIds: [],
+  excludedDecisionPossessionIds: [],
+  orphanOutcomes: 0,
+  exclusionReasons: emptyExclusions()
+});
+var safePossessionView = (decision, outcome) => ({
+  possessionId: decision.possession_id,
+  taskClass: decision.task_class,
+  difficulty: decision.difficulty ?? "unknown",
+  action: decision.action,
+  route: decision.route,
+  ...decision.skill ? { skill: decision.skill } : {},
+  openedAt: decision.ts,
+  ...outcome ? {
+    result: outcome.result,
+    evidence: outcome.evidence_tier === "verified" && decision.verification && outcome.verification && isStoredVerificationReceiptBound(decision.verification, outcome.verification, decision.possession_id, decision.event_id) ? "bound_verified" : "judged"
+  } : { evidence: "none" }
+});
+function pendingPossessionViews(events) {
+  const outcomes = new Set(events.filter((event) => event.type === "outcome").map((event) => event.possession_id));
+  return events.filter((event) => event.type === "decision" && !outcomes.has(event.possession_id)).sort((a, b) => b.ts - a.ts).map((decision) => safePossessionView(decision));
+}
+function summarizePossessions(events, integrity = cleanIntegrity()) {
+  const decisions = events.filter((event) => event.type === "decision");
+  const activeOutcomes = new Map;
+  for (const event of events)
+    if (event.type === "outcome")
+      activeOutcomes.set(event.possession_id, event);
+  const excludedIds = new Set(integrity.excludedDecisionPossessionIds);
+  const repeatCounts = new Map;
+  const difficultyStrata = { routine: 0, standard: 0, hard: 0, unknown: 0 };
+  let evaluatedDecisions = 0;
+  let scoredDecisions = 0;
+  let repeatCappedDecisions = 0;
+  let observedInterventions = 0;
+  let observedHelpfulInterventions = 0;
+  let observedHarmfulInterventions = 0;
+  let observedNeutralInterventions = 0;
+  let observedAbstentions = 0;
+  let observedSuccessfulAbstentions = 0;
+  let observedFailedAbstentions = 0;
+  let helpfulInterventions = 0;
+  let harmfulInterventions = 0;
+  let neutralInterventions = 0;
+  let successfulAbstentions = 0;
+  let failedAbstentions = 0;
+  let verifiedSuccessfulAbstentions = 0;
+  let verifiedEvaluatedAbstentions = 0;
+  let judgedSuccessfulAbstentions = 0;
+  let judgedEvaluatedAbstentions = 0;
+  let judgedOnlyAbstentions = 0;
+  let interferenceAbstentions = 0;
+  let verifiedDecisions = 0;
+  let judgedDecisions = 0;
+  let verifiedGood = 0;
+  let judgedGood = 0;
+  let unboundVerifiedDowngraded = 0;
+  let prescribedEvaluated = 0;
+  for (const decision of decisions) {
+    const difficulty = decision.difficulty ?? "unknown";
+    difficultyStrata[difficulty]++;
+    if (excludedIds.has(decision.possession_id))
+      continue;
+    const outcome = activeOutcomes.get(decision.possession_id);
+    if (!outcome || !compatible(decision.action, outcome.result))
+      continue;
+    evaluatedDecisions++;
+    if (decision.action === "prescribe") {
+      observedInterventions++;
+      if (outcome.result === "helped")
+        observedHelpfulInterventions++;
+      if (outcome.result === "harmed")
+        observedHarmfulInterventions++;
+      if (outcome.result === "neutral")
+        observedNeutralInterventions++;
+    } else {
+      observedAbstentions++;
+      if (outcome.result === "succeeded_unaided")
+        observedSuccessfulAbstentions++;
+      if (outcome.result === "failed_unaided")
+        observedFailedAbstentions++;
+    }
+    const seen = repeatCounts.get(decision.task_class) || 0;
+    const scoreEligible = seen < EFFICIENCY_CONTRACT.repeatCapPerTaskClass;
+    repeatCounts.set(decision.task_class, seen + 1);
+    if (!scoreEligible) {
+      repeatCappedDecisions++;
+      continue;
+    }
+    scoredDecisions++;
+    const boundVerified = outcome.evidence_tier === "verified" && !!decision.verification && !!outcome.verification && isStoredVerificationReceiptBound(decision.verification, outcome.verification, decision.possession_id, decision.event_id);
+    if (outcome.evidence_tier === "verified" && !boundVerified)
+      unboundVerifiedDowngraded++;
+    let good = false;
+    if (decision.action === "prescribe") {
+      prescribedEvaluated++;
+      if (outcome.result === "helped") {
+        helpfulInterventions++;
+        good = true;
+      }
+      if (outcome.result === "harmed")
+        harmfulInterventions++;
+      if (outcome.result === "neutral")
+        neutralInterventions++;
+    } else {
+      if (outcome.result === "succeeded_unaided") {
+        successfulAbstentions++;
+        good = true;
+      } else {
+        failedAbstentions++;
+      }
+      if (boundVerified) {
+        verifiedEvaluatedAbstentions++;
+        if (good)
+          verifiedSuccessfulAbstentions++;
+      } else {
+        judgedEvaluatedAbstentions++;
+        judgedOnlyAbstentions++;
+        if (good)
+          judgedSuccessfulAbstentions++;
+      }
+    }
+    if (boundVerified) {
+      verifiedDecisions++;
+      if (good)
+        verifiedGood++;
+    } else {
+      judgedDecisions++;
+      if (good)
+        judgedGood++;
+    }
+  }
+  const lifecycle = events.filter((event) => event.type === "lifecycle");
+  const excludedDecisions = excludedIds.size;
+  const validDecisionIds = new Set(decisions.map((decision) => decision.possession_id));
+  const excludedDecisionRowsWithoutValidDecision = [...excludedIds].filter((id) => !validDecisionIds.has(id)).length;
+  difficultyStrata.unknown += excludedDecisionRowsWithoutValidDecision;
+  const openedDecisions = decisions.length + excludedDecisionRowsWithoutValidDecision;
+  const closedDecisions = evaluatedDecisions + excludedDecisions;
+  const pendingDecisions = Math.max(0, openedDecisions - closedDecisions);
+  const closureRatePct = pct(closedDecisions, openedDecisions);
+  const uniqueTaskClasses = new Set(decisions.map((decision) => decision.task_class)).size;
+  const pendingRows = decisions.filter((decision) => !excludedIds.has(decision.possession_id) && !activeOutcomes.has(decision.possession_id)).sort((a, b) => b.ts - a.ts);
+  const activityTs = (decision) => Math.max(decision.ts, activeOutcomes.get(decision.possession_id)?.ts ?? decision.ts);
+  const latestActivityDecision = [...decisions].sort((a, b) => activityTs(b) - activityTs(a))[0];
+  const latestPendingPossession = pendingRows[0] ? safePossessionView(pendingRows[0]) : null;
+  const lastPlay = latestActivityDecision ? safePossessionView(latestActivityDecision, activeOutcomes.get(latestActivityDecision.possession_id)) : null;
+  const goodDecisions = verifiedGood + judgedGood;
+  const contextsAvoided = verifiedSuccessfulAbstentions;
+  const blocked = integrity.blocked;
+  const incomplete = openedDecisions >= EFFICIENCY_CONTRACT.percentageDisplayThreshold && (closureRatePct ?? 0) < EFFICIENCY_CONTRACT.minimumClosureRatePct;
+  const exploratory = repeatCappedDecisions > 0 || uniqueTaskClasses < EFFICIENCY_CONTRACT.minimumUniqueTaskClasses || difficultyStrata.unknown > 0;
+  const scoreStatus = blocked ? "blocked" : incomplete ? "incomplete" : verifiedDecisions < EFFICIENCY_CONTRACT.percentageDisplayThreshold ? exploratory ? "exploratory" : "early_tape" : exploratory ? "exploratory" : "claim_eligible";
+  return {
+    metricContract: EFFICIENCY_CONTRACT.id,
+    percentageDisplayThreshold: EFFICIENCY_CONTRACT.percentageDisplayThreshold,
+    scoreStatus,
+    ledgerIntegrity: blocked ? "blocked" : "ok",
+    ledgerSha256: integrity.ledgerSha256,
+    ledgerRows: integrity.rowCount,
+    eligibleExposures: openedDecisions,
+    openedDecisions,
+    closedDecisions,
+    pendingDecisions,
+    excludedDecisions,
+    exclusionReasons: { ...integrity.exclusionReasons },
+    closureRatePct,
+    decisions: openedDecisions,
+    evaluatedDecisions,
+    scoredDecisions,
+    repeatCappedDecisions,
+    uniqueTaskClasses,
+    difficultyStrata,
+    goodDecisions,
+    prescribed: decisions.filter((event) => event.action === "prescribe").length,
+    abstained: decisions.filter((event) => event.action === "abstain").length,
+    observedInterventions,
+    observedHelpfulInterventions,
+    observedHarmfulInterventions,
+    observedNeutralInterventions,
+    observedAbstentions,
+    observedSuccessfulAbstentions,
+    observedFailedAbstentions,
+    helpfulInterventions,
+    harmfulInterventions,
+    neutralInterventions,
+    successfulAbstentions,
+    failedAbstentions,
+    verifiedSuccessfulAbstentions,
+    verifiedEvaluatedAbstentions,
+    judgedSuccessfulAbstentions,
+    judgedEvaluatedAbstentions,
+    judgedOnlyAbstentions,
+    contextsAvoided,
+    interferenceAbstentions,
+    verifiedDecisions,
+    verifiedGoodDecisions: verifiedGood,
+    judgedDecisions,
+    judgedGoodDecisions: judgedGood,
+    unboundVerifiedDowngraded,
+    decisionEfficiencyPct: pct(goodDecisions, scoredDecisions),
+    verifiedEfficiencyPct: pct(verifiedGood, verifiedDecisions),
+    judgedEfficiencyPct: pct(judgedGood, judgedDecisions),
+    restraintEfficiencyPct: pct(verifiedSuccessfulAbstentions, verifiedEvaluatedAbstentions),
+    harmRatePct: pct(harmfulInterventions, prescribedEvaluated),
+    skillsLearned: lifecycle.filter((event) => event.action === "learn" || event.action === "graduate").length,
+    skillsUpdated: lifecycle.filter((event) => event.action === "update").length,
+    skillsRetired: lifecycle.filter((event) => event.action === "retire").length,
+    skillsRestored: lifecycle.filter((event) => event.action === "restore").length,
+    latestPendingPossession,
+    lastPlay
+  };
+}
+function summarizePossessionLedger() {
+  const inspection = inspectPossessionLedger();
+  return summarizePossessions(inspection.events, inspection.integrity);
+}
+var claimBearingShareCustody = new WeakSet;
+var SHARE_KEYS = new Set([
+  "schema",
+  "metric_contract",
+  "score_status",
+  "percentage_display_threshold",
+  "period",
+  "statement",
+  "opened_decisions",
+  "closed_decisions",
+  "pending_decisions",
+  "excluded_decisions",
+  "closure_rate_pct",
+  "eligible_exposures",
+  "scored_exposures",
+  "repeat_capped_exposures",
+  "unique_task_classes",
+  "difficulty_strata",
+  "verified_good_decisions",
+  "verified_evaluated_decisions",
+  "judged_good_decisions",
+  "judged_evaluated_decisions",
+  "verified_successful_abstentions",
+  "verified_evaluated_abstentions",
+  "judged_successful_abstentions",
+  "judged_failed_abstentions",
+  "judged_only_abstentions",
+  "helpful_interventions",
+  "harmful_interventions",
+  "neutral_interventions",
+  "ledger_integrity",
+  "exclusions",
+  "decision_efficiency_pct"
+]);
+var PERIODS = new Set(["EARLY TAPE", "LAST 7 DAYS", "LAST 30 DAYS", "SEASON", "ALL TIME"]);
+var SCORE_STATUSES = new Set(["blocked", "incomplete", "early_tape", "exploratory", "claim_eligible"]);
+var safePeriod = (value) => {
+  const normalized = String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (normalized === "last_7_days" || normalized === "this_week")
+    return "LAST 7 DAYS";
+  if (normalized === "last_30_days" || normalized === "this_month")
+    return "LAST 30 DAYS";
+  if (normalized === "season")
+    return "SEASON";
+  return "ALL TIME";
+};
+function shareStatement(card) {
+  if (card.score_status === "blocked")
+    return "ledger blocked · inspect integrity";
+  if (card.score_status === "incomplete")
+    return `${card.closed_decisions} of ${card.opened_decisions} possessions closed · incomplete tape`;
+  if (card.score_status === "claim_eligible" && card.decision_efficiency_pct !== undefined) {
+    return `${card.verified_good_decisions} of ${card.verified_evaluated_decisions} bound-verified good decisions · ${card.decision_efficiency_pct}%`;
+  }
+  if (card.verified_evaluated_decisions > 0)
+    return `${card.verified_good_decisions} of ${card.verified_evaluated_decisions} bound-verified good decisions · early tape`;
+  return `no bound-verified score · judged tape ${card.judged_good_decisions} of ${card.judged_evaluated_decisions}`;
+}
+var nonNegativeInt = (label, value) => {
+  if (!Number.isInteger(value) || Number(value) < 0)
+    throw new Error(`${label} must be a non-negative integer`);
+};
+function validateShareCardPayload(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input))
+    throw new Error("share payload must be an object");
+  const raw = input;
+  for (const key of Object.keys(raw))
+    if (!SHARE_KEYS.has(key))
+      throw new Error(`unexpected field '${key}'`);
+  for (const key of SHARE_KEYS)
+    if (key !== "decision_efficiency_pct" && !(key in raw))
+      throw new Error(`missing field '${key}'`);
+  if (raw.schema !== "mm.share-card.v1")
+    throw new Error("schema mismatch");
+  if (raw.metric_contract !== EFFICIENCY_CONTRACT.id)
+    throw new Error("metric_contract mismatch");
+  if (!SCORE_STATUSES.has(raw.score_status))
+    throw new Error("score_status mismatch");
+  if (!PERIODS.has(raw.period))
+    throw new Error("period is not allowlisted");
+  if (raw.percentage_display_threshold !== EFFICIENCY_CONTRACT.percentageDisplayThreshold)
+    throw new Error("percentage_display_threshold must match the metric contract");
+  if (raw.ledger_integrity !== "ok" && raw.ledger_integrity !== "blocked")
+    throw new Error("ledger_integrity mismatch");
+  const numeric = [
+    "percentage_display_threshold",
+    "opened_decisions",
+    "closed_decisions",
+    "pending_decisions",
+    "excluded_decisions",
+    "eligible_exposures",
+    "scored_exposures",
+    "repeat_capped_exposures",
+    "unique_task_classes",
+    "verified_good_decisions",
+    "verified_evaluated_decisions",
+    "judged_good_decisions",
+    "judged_evaluated_decisions",
+    "verified_successful_abstentions",
+    "verified_evaluated_abstentions",
+    "judged_successful_abstentions",
+    "judged_failed_abstentions",
+    "judged_only_abstentions",
+    "helpful_interventions",
+    "harmful_interventions",
+    "neutral_interventions"
+  ];
+  for (const key of numeric)
+    nonNegativeInt(key, raw[key]);
+  if (raw.closure_rate_pct !== null && (!Number.isInteger(raw.closure_rate_pct) || raw.closure_rate_pct < 0 || raw.closure_rate_pct > 100))
+    throw new Error("closure_rate_pct invalid");
+  if (raw.decision_efficiency_pct !== undefined && (!Number.isInteger(raw.decision_efficiency_pct) || raw.decision_efficiency_pct < 0 || raw.decision_efficiency_pct > 100))
+    throw new Error("decision_efficiency_pct invalid");
+  for (const key of DIFFICULTIES)
+    nonNegativeInt(`difficulty_strata.${key}`, raw.difficulty_strata?.[key]);
+  if (Object.keys(raw.difficulty_strata || {}).some((key) => !DIFFICULTIES.has(key)))
+    throw new Error("difficulty_strata unexpected field");
+  for (const key of Object.keys(emptyExclusions()))
+    nonNegativeInt(`exclusions.${key}`, raw.exclusions?.[key]);
+  if (Object.keys(raw.exclusions || {}).some((key) => !(key in emptyExclusions())))
+    throw new Error("exclusions unexpected field");
+  const claimBearing = raw.verified_evaluated_decisions > 0 || raw.verified_good_decisions > 0 || raw.decision_efficiency_pct !== undefined;
+  if (claimBearing && !claimBearingShareCustody.has(raw))
+    throw new Error("claim-bearing verified share payload must be constructed from the bound ledger summary");
+  const statusSaysBlocked = raw.score_status === "blocked";
+  const integritySaysBlocked = raw.ledger_integrity === "blocked";
+  if (statusSaysBlocked !== integritySaysBlocked)
+    throw new Error("score_status=blocked must exactly match ledger_integrity=blocked");
+  if (raw.opened_decisions !== raw.closed_decisions + raw.pending_decisions)
+    throw new Error("custody arithmetic mismatch: opened must equal closed + pending");
+  if (raw.eligible_exposures !== raw.opened_decisions)
+    throw new Error("custody arithmetic mismatch: eligible exposures must equal opened decisions");
+  if (raw.closed_decisions < raw.excluded_decisions)
+    throw new Error("custody arithmetic mismatch: excluded exceeds closed");
+  if (raw.scored_exposures + raw.repeat_capped_exposures !== raw.closed_decisions - raw.excluded_decisions)
+    throw new Error("custody arithmetic mismatch: scored + repeat-capped must equal evaluated closures");
+  if (raw.verified_evaluated_decisions + raw.judged_evaluated_decisions !== raw.scored_exposures)
+    throw new Error("custody arithmetic mismatch: evidence tiers must equal scored exposures");
+  if (raw.verified_good_decisions > raw.verified_evaluated_decisions || raw.judged_good_decisions > raw.judged_evaluated_decisions)
+    throw new Error("custody arithmetic mismatch: good decisions exceed same-tier evaluated decisions");
+  if (raw.verified_successful_abstentions > raw.verified_evaluated_abstentions)
+    throw new Error("custody arithmetic mismatch: verified abstention successes exceed evaluated abstentions");
+  if (raw.judged_successful_abstentions + raw.judged_failed_abstentions !== raw.judged_only_abstentions)
+    throw new Error("custody arithmetic mismatch: judged abstention outcomes must equal judged-only abstentions");
+  if (raw.verified_evaluated_abstentions !== 0 || raw.verified_successful_abstentions !== 0)
+    throw new Error("exact-file verification cannot claim verified abstentions");
+  const verifiedHelpful = raw.verified_good_decisions;
+  const verifiedHarmful = raw.verified_evaluated_decisions - raw.verified_good_decisions;
+  const judgedHelpful = raw.helpful_interventions - verifiedHelpful;
+  const judgedHarmful = raw.harmful_interventions - verifiedHarmful;
+  if (judgedHelpful < 0 || judgedHarmful < 0)
+    throw new Error("custody arithmetic mismatch: verified intervention counts exceed totals");
+  if (judgedHelpful + judgedHarmful + raw.neutral_interventions + raw.judged_only_abstentions !== raw.judged_evaluated_decisions)
+    throw new Error("custody arithmetic mismatch: judged intervention and abstention outcomes must equal judged evaluated decisions");
+  if (raw.judged_good_decisions !== judgedHelpful + raw.judged_successful_abstentions)
+    throw new Error("custody arithmetic mismatch: judged good decisions must equal judged helped prescriptions + successful abstentions");
+  const difficultyTotal = Object.values(raw.difficulty_strata).reduce((sum, count) => sum + Number(count), 0);
+  if (difficultyTotal !== raw.opened_decisions)
+    throw new Error("custody arithmetic mismatch: difficulty strata must equal opened decisions");
+  const expectedClosure = raw.opened_decisions ? Math.round(100 * raw.closed_decisions / raw.opened_decisions) : null;
+  if (raw.closure_rate_pct !== expectedClosure)
+    throw new Error("custody arithmetic mismatch: closure rate does not match counts");
+  const exploratory = raw.repeat_capped_exposures > 0 || raw.unique_task_classes < EFFICIENCY_CONTRACT.minimumUniqueTaskClasses || raw.difficulty_strata.unknown > 0;
+  const incomplete = raw.opened_decisions >= EFFICIENCY_CONTRACT.percentageDisplayThreshold && (raw.closure_rate_pct ?? 0) < EFFICIENCY_CONTRACT.minimumClosureRatePct;
+  const claimEligible = raw.verified_evaluated_decisions >= EFFICIENCY_CONTRACT.percentageDisplayThreshold && !exploratory && !incomplete && !integritySaysBlocked;
+  const expectedStatus = integritySaysBlocked ? "blocked" : incomplete ? "incomplete" : claimEligible ? "claim_eligible" : exploratory ? "exploratory" : "early_tape";
+  if (raw.score_status !== expectedStatus)
+    throw new Error(`score_status mismatch: expected ${expectedStatus}`);
+  if (claimEligible) {
+    const expectedPct = pct(raw.verified_good_decisions, raw.verified_evaluated_decisions);
+    if (raw.decision_efficiency_pct !== expectedPct)
+      throw new Error("decision_efficiency_pct must match same-tier bound-verified counts");
+    if (raw.period === "EARLY TAPE")
+      throw new Error("claim-eligible share card requires an allowlisted reporting period");
+  } else {
+    if (raw.decision_efficiency_pct !== undefined)
+      throw new Error("percentage is allowed only for claim-eligible bound-verified tape");
+    if (raw.period !== "EARLY TAPE")
+      throw new Error("non-claim-bearing share card must remain EARLY TAPE");
+  }
+  if (raw.statement !== shareStatement(raw))
+    throw new Error("statement must be derived from aggregate fields");
+  return raw;
+}
+function buildShareCardPayload(summary, options) {
+  if (summary.verifiedDecisions > 0) {
+    const live = summarizePossessionLedger();
+    if (summary.ledgerSha256 !== live.ledgerSha256 || summary.verifiedDecisions !== live.verifiedDecisions || summary.verifiedGoodDecisions !== live.verifiedGoodDecisions || summary.scoredDecisions !== live.scoredDecisions) {
+      throw new Error("claim-bearing share payload must match the current bound ledger summary");
+    }
+  }
+  const percentageAllowed = summary.scoreStatus === "claim_eligible" && summary.verifiedDecisions >= EFFICIENCY_CONTRACT.percentageDisplayThreshold;
+  const period = percentageAllowed ? safePeriod(options.period) : "EARLY TAPE";
+  const base = {
+    schema: "mm.share-card.v1",
+    metric_contract: EFFICIENCY_CONTRACT.id,
+    score_status: summary.scoreStatus,
+    percentage_display_threshold: EFFICIENCY_CONTRACT.percentageDisplayThreshold,
+    period,
+    statement: "",
+    opened_decisions: summary.openedDecisions,
+    closed_decisions: summary.closedDecisions,
+    pending_decisions: summary.pendingDecisions,
+    excluded_decisions: summary.excludedDecisions,
+    closure_rate_pct: summary.closureRatePct,
+    eligible_exposures: summary.eligibleExposures,
+    scored_exposures: summary.scoredDecisions,
+    repeat_capped_exposures: summary.repeatCappedDecisions,
+    unique_task_classes: summary.uniqueTaskClasses,
+    difficulty_strata: { ...summary.difficultyStrata },
+    verified_good_decisions: summary.verifiedGoodDecisions,
+    verified_evaluated_decisions: summary.verifiedDecisions,
+    judged_good_decisions: summary.judgedGoodDecisions,
+    judged_evaluated_decisions: summary.judgedDecisions,
+    verified_successful_abstentions: summary.verifiedSuccessfulAbstentions,
+    verified_evaluated_abstentions: summary.verifiedEvaluatedAbstentions,
+    judged_successful_abstentions: summary.judgedSuccessfulAbstentions,
+    judged_failed_abstentions: summary.failedAbstentions,
+    judged_only_abstentions: summary.judgedOnlyAbstentions,
+    helpful_interventions: summary.helpfulInterventions,
+    harmful_interventions: summary.harmfulInterventions,
+    neutral_interventions: summary.neutralInterventions,
+    ledger_integrity: summary.ledgerIntegrity,
+    exclusions: { ...summary.exclusionReasons },
+    ...percentageAllowed && summary.verifiedEfficiencyPct !== null ? { decision_efficiency_pct: summary.verifiedEfficiencyPct } : {}
+  };
+  base.statement = shareStatement(base);
+  if (base.verified_evaluated_decisions > 0 || base.decision_efficiency_pct !== undefined)
+    claimBearingShareCustody.add(base);
+  return validateShareCardPayload(base);
 }
 
 // mods/wins.ts
-import { existsSync as existsSync5, readFileSync as readFileSync5, readdirSync as readdirSync3 } from "node:fs";
-import { join as join6 } from "node:path";
+import { existsSync as existsSync7, readFileSync as readFileSync7, readdirSync as readdirSync3 } from "node:fs";
+import { join as join8 } from "node:path";
 function readJsonl(path) {
-  if (!existsSync5(path))
+  if (!existsSync7(path))
     return [];
   const out = [];
-  for (const line of readFileSync5(path, "utf8").split(`
+  for (const line of readFileSync7(path, "utf8").split(`
 `)) {
     if (!line.trim())
       continue;
@@ -3220,7 +4583,7 @@ function str(o, k) {
   return "";
 }
 function collectWins(stateDir = STATE_DIR) {
-  const exp = readJsonl(join6(stateDir, "experience.jsonl"));
+  const exp = readJsonl(join8(stateDir, "experience.jsonl"));
   const convs = new Set;
   let firstRepTs = null;
   for (const r of exp) {
@@ -3231,18 +4594,18 @@ function collectWins(stateDir = STATE_DIR) {
     if (ts !== null && (firstRepTs === null || ts < firstRepTs))
       firstRepTs = ts;
   }
-  const sessions = new Set(readJsonl(join6(stateDir, "sessions.jsonl")).map((s) => str(s, "conv")).filter(Boolean));
+  const sessions = new Set(readJsonl(join8(stateDir, "sessions.jsonl")).map((s) => str(s, "conv")).filter(Boolean));
   for (const c of convs)
     sessions.add(c);
   const skillsEarned = [];
   const updatesFolded = [];
-  const receiptsDir = join6(stateDir, "receipts");
-  if (existsSync5(receiptsDir)) {
+  const receiptsDir = join8(stateDir, "receipts");
+  if (existsSync7(receiptsDir)) {
     for (const f of readdirSync3(receiptsDir)) {
       if (!/^reflect-\d+\.json$/.test(f))
         continue;
       try {
-        const r = JSON.parse(readFileSync5(join6(receiptsDir, f), "utf8"));
+        const r = JSON.parse(readFileSync7(join8(receiptsDir, f), "utf8"));
         const action = str(r, "action");
         const name = str(r, "name");
         const ts = num(r, "ts") ?? 0;
@@ -3258,7 +4621,7 @@ function collectWins(stateDir = STATE_DIR) {
   }
   skillsEarned.sort((a, b) => b.ts - a.ts);
   updatesFolded.sort((a, b) => b.ts - a.ts);
-  const hits = readJsonl(join6(stateDir, "defense-hits.jsonl"));
+  const hits = readJsonl(join8(stateDir, "defense-hits.jsonl"));
   let knownFixSurfaced = 0;
   let lastFlag = null;
   for (const h of hits) {
@@ -3269,17 +4632,17 @@ function collectWins(stateDir = STATE_DIR) {
       lastFlag = { step: str(h, "step"), errClass: str(h, "errClass"), defense: str(h, "defense"), ts };
   }
   let noiseRejected = 0;
-  for (const e of readJsonl(join6(stateDir, "ui-events.jsonl"))) {
+  for (const e of readJsonl(join8(stateDir, "ui-events.jsonl"))) {
     if (str(e, "phase") !== "noise_rejected")
       continue;
     const m = str(e, "summary").match(/rejected (\d+)/);
     noiseRejected += m ? Number(m[1]) : 1;
   }
   const skillUses = [];
-  const usagePath = join6(stateDir, "skill-usage.json");
-  if (existsSync5(usagePath)) {
+  const usagePath = join8(stateDir, "skill-usage.json");
+  if (existsSync7(usagePath)) {
     try {
-      const u = JSON.parse(readFileSync5(usagePath, "utf8"));
+      const u = JSON.parse(readFileSync7(usagePath, "utf8"));
       if (u && typeof u === "object")
         for (const [name, rec] of Object.entries(u)) {
           const uses = num(rec, "uses") ?? (typeof rec === "number" ? rec : 0);
@@ -3356,14 +4719,14 @@ function renderWins(w, now = Date.now()) {
 }
 
 // mods/history.ts
-import { existsSync as existsSync6, readFileSync as readFileSync6, writeFileSync as writeFileSync5 } from "node:fs";
-import { join as join7 } from "node:path";
-var MINE_WATERMARK_PATH = join7(STATE_DIR, "mined-watermark.json");
+import { existsSync as existsSync8, readFileSync as readFileSync8, writeFileSync as writeFileSync6 } from "node:fs";
+import { join as join9 } from "node:path";
+var MINE_WATERMARK_PATH = join9(STATE_DIR, "mined-watermark.json");
 function loadWatermarks() {
   try {
-    if (!existsSync6(MINE_WATERMARK_PATH))
+    if (!existsSync8(MINE_WATERMARK_PATH))
       return {};
-    const parsed = JSON.parse(readFileSync6(MINE_WATERMARK_PATH, "utf8"));
+    const parsed = JSON.parse(readFileSync8(MINE_WATERMARK_PATH, "utf8"));
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch {
     return {};
@@ -3374,7 +4737,7 @@ function saveWatermark(agentId, id, ts) {
     ensureDir();
     const all = loadWatermarks();
     all[agentId] = { id, ts };
-    writeFileSync5(MINE_WATERMARK_PATH, JSON.stringify(all, null, 2));
+    writeFileSync6(MINE_WATERMARK_PATH, JSON.stringify(all, null, 2));
   } catch {}
 }
 function parseHistoryMessage(m) {
@@ -3487,17 +4850,48 @@ async function mineAgentHistory(client, agentId, opts) {
 }
 
 // mods/referee.ts
-import { existsSync as existsSync7, readFileSync as readFileSync7, writeFileSync as writeFileSync6 } from "node:fs";
-import { join as join8 } from "node:path";
-var PLUSMINUS_PATH = join8(STATE_DIR, "skill-plusminus.json");
+import { existsSync as existsSync9, readFileSync as readFileSync9, writeFileSync as writeFileSync7, appendFileSync as appendFileSync3 } from "node:fs";
+import { join as join10 } from "node:path";
+var PLUSMINUS_PATH = join10(STATE_DIR, "skill-plusminus.json");
+var RATING_REASONS_PATH = join10(STATE_DIR, "rating-reasons.jsonl");
+function appendRatingReason(ev) {
+  try {
+    ensureDir();
+    appendFileSync3(RATING_REASONS_PATH, JSON.stringify(ev) + `
+`);
+    return true;
+  } catch {
+    return false;
+  }
+}
 function loadPlusMinus() {
   try {
-    if (!existsSync7(PLUSMINUS_PATH))
+    if (!existsSync9(PLUSMINUS_PATH))
       return {};
-    const parsed = JSON.parse(readFileSync7(PLUSMINUS_PATH, "utf8"));
+    const parsed = JSON.parse(readFileSync9(PLUSMINUS_PATH, "utf8"));
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch {
     return {};
+  }
+}
+function loadRatingEvents() {
+  try {
+    if (!existsSync9(RATING_REASONS_PATH))
+      return [];
+    const out = [];
+    for (const line of readFileSync9(RATING_REASONS_PATH, "utf8").split(`
+`)) {
+      if (!line.trim())
+        continue;
+      try {
+        const ev = JSON.parse(line);
+        if (ev && typeof ev === "object" && typeof ev.skill === "string" && (ev.rating === "up" || ev.rating === "down" || ev.rating === "no_rate"))
+          out.push(ev);
+      } catch {}
+    }
+    return out;
+  } catch {
+    return [];
   }
 }
 function recordPlusMinus(skillName, up, stepId) {
@@ -3507,40 +4901,113 @@ function recordPlusMinus(skillName, up, stepId) {
   ledger[skillName] = next;
   try {
     ensureDir();
-    writeFileSync6(PLUSMINUS_PATH, JSON.stringify(ledger, null, 2));
-  } catch {}
-  return next;
+    writeFileSync7(PLUSMINUS_PATH, JSON.stringify(ledger, null, 2));
+    return { line: next, persisted: true };
+  } catch {
+    return { line: next, persisted: false };
+  }
 }
-async function rateSkill(client, skillName, up, stepId) {
+function modelIdentity(model) {
+  if (typeof model === "string")
+    return model.trim().slice(0, 200) || "unknown";
+  if (!model || typeof model !== "object")
+    return "unknown";
+  const m = model;
+  const handle = typeof m.handle === "string" ? m.handle.trim() : "";
+  if (handle)
+    return handle.slice(0, 200);
+  const id = typeof m.id === "string" ? m.id.trim() : "";
+  const provider = typeof m.provider === "string" ? m.provider.trim() : "";
+  if (provider && id && !id.includes("/"))
+    return `${provider}/${id}`.slice(0, 200);
+  if (id)
+    return id.slice(0, 200);
+  const name = typeof m.name === "string" ? m.name.trim() : "";
+  return name.slice(0, 200) || "unknown";
+}
+function providerIdentity(model) {
+  if (model && typeof model === "object") {
+    const provider = model.provider;
+    if (typeof provider === "string" && provider.trim())
+      return provider.trim().slice(0, 100);
+  }
+  const label = modelIdentity(model);
+  return label.includes("/") ? label.split("/", 1)[0].slice(0, 100) : "unknown";
+}
+var ZERO = { plus: 0, minus: 0, lastTs: 0, lastStepId: null };
+async function rateSkill(client, skillName, rating, stepId, opts = {}) {
+  const legacyBool = typeof rating === "boolean";
+  const kind = legacyBool ? rating ? "up" : "down" : rating;
+  const refuse = (why, zero = false) => ({
+    skill: skillName,
+    rating: zero ? ZERO : loadPlusMinus()[skillName] ?? ZERO,
+    nativePosted: false,
+    reason: why,
+    recorded: false,
+    ratingKind: kind,
+    sidecarWritten: false,
+    aggregatePersisted: null,
+    partial: false
+  });
   if (!isValidSkillName(skillName))
-    return { skill: skillName, rating: { plus: 0, minus: 0, lastTs: 0, lastStepId: null }, nativePosted: false, reason: `invalid skill name '${skillName}'` };
-  const rating = recordPlusMinus(skillName, up, stepId);
+    return refuse(`invalid skill name '${skillName}'`, true);
+  if (kind !== "up" && kind !== "down" && kind !== "no_rate")
+    return refuse(`invalid rating '${String(rating)}' (want up|down|no_rate)`, true);
+  const reason = (opts.reason ?? "").trim();
+  if (!legacyBool && (kind === "down" || kind === "no_rate") && !reason)
+    return refuse(`rating '${kind}' requires a reason — not recorded`);
+  const agent = opts.agent ?? process.env.MM_AGENT ?? "unknown";
+  const sidecarWritten = appendRatingReason({
+    ts: Date.now(),
+    agent,
+    rater: opts.rater ?? agent,
+    skill: skillName,
+    rating: kind,
+    reason,
+    evidence_ref: (opts.evidenceRef ?? "").slice(0, 300),
+    task: opts.task ?? "",
+    step_id: stepId ?? null,
+    source: opts.source ?? "rate_skill",
+    model: opts.model ?? "unknown",
+    provider: opts.provider ?? "unknown"
+  });
+  if (!sidecarWritten)
+    return refuse("NOT recorded — sidecar append failed; field evidence requires the sidecar");
+  let line = loadPlusMinus()[skillName] ?? ZERO;
+  let aggregatePersisted = null;
+  if (kind !== "no_rate") {
+    const recorded = recordPlusMinus(skillName, kind === "up", stepId);
+    line = recorded.line;
+    aggregatePersisted = recorded.persisted;
+  }
+  const partial = aggregatePersisted === false;
   let nativePosted = false;
-  if (stepId) {
+  if (stepId && kind !== "no_rate") {
     const post = reachFn(client, ["steps", "feedback", "create"]);
     if (post) {
       try {
-        await post(stepId, { feedback: up ? "positive" : "negative" });
+        await post(stepId, { feedback: kind === "up" ? "positive" : "negative" });
         nativePosted = true;
       } catch {}
     }
   }
-  return { skill: skillName, rating, nativePosted, reason: nativePosted ? "ledger + native steps.feedback" : stepId ? "ledger only (native post unavailable/failed)" : "ledger only (no step id)" };
+  const status = kind === "no_rate" ? "sidecar only (no_rate — aggregate unchanged)" : partial ? "PARTIAL: sidecar recorded; aggregate persist FAILED" : nativePosted ? "ledger + sidecar + native steps.feedback" : stepId ? "ledger + sidecar (native unavailable/failed)" : "ledger + sidecar (no step id)";
+  return { skill: skillName, rating: line, nativePosted, reason: status, recorded: true, ratingKind: kind, sidecarWritten, aggregatePersisted, partial };
 }
 function renderPlusMinus(ledger) {
-  const rows = Object.entries(ledger).sort((a, b) => b[1].plus - b[1].minus - (a[1].plus - a[1].minus));
+  const rows = Object.entries(ledger).filter(([name]) => !FIXTURE_SKILL_RE.test(name)).sort((a, b) => b[1].plus - b[1].minus - (a[1].plus - a[1].minus));
   if (!rows.length)
     return "(no skill ratings yet — rate with /muscle-memory rate <skill> up|down [step-id])";
   return rows.map(([name, r]) => {
-    const net = r.plus - r.minus;
-    return `  ${net >= 0 ? "+" : ""}${net}  ${name}  (+${r.plus}/-${r.minus})`;
+    const sample = r.plus + r.minus;
+    return `  ${name} · ${r.plus} helped · ${r.minus} missed · ${sample} rated`;
   }).join(`
 `);
 }
 
 // mods/shelf.ts
-import { mkdirSync as mkdirSync5, writeFileSync as writeFileSync7 } from "node:fs";
-import { join as join9 } from "node:path";
+import { mkdirSync as mkdirSync7, writeFileSync as writeFileSync8 } from "node:fs";
+import { join as join11 } from "node:path";
 var SQUAD_ARCHIVE_NAME = process.env.MM_SQUAD_ARCHIVE || "mm-squad-shelf";
 var SHELF_DOC_TAG = "mm:shelf-doc";
 async function ensureSquadArchive(client, opts) {
@@ -3626,12 +5093,12 @@ async function pullShelfSkill(client, agentId, skillName) {
       return { ok: false, stagedPath: null, publisher: null, reason: `no shelf doc found for '${skillName}' (is the shelf attached to this agent?)` };
     if (SECRET_TOKEN_RE.test(best.content))
       return { ok: false, stagedPath: null, publisher: best.publisher, reason: "shelf content failed the secret gate — refused" };
-    const dir = join9(PUBLISH_STAGED_DIR, skillName);
-    mkdirSync5(dir, { recursive: true });
-    const staged = join9(dir, "SKILL.md");
+    const dir = join11(PUBLISH_STAGED_DIR, skillName);
+    mkdirSync7(dir, { recursive: true });
+    const staged = join11(dir, "SKILL.md");
     const header = `<!-- muscle-memory shelf pull · publisher: ${best.publisher} · published: ${best.publishedAt} · pulled: ${new Date().toISOString()} · REVIEW BEFORE PROMOTION -->
 `;
-    writeFileSync7(staged, header + best.content);
+    writeFileSync8(staged, header + best.content);
     return { ok: true, stagedPath: staged, publisher: best.publisher, reason: "staged for review" };
   } catch (e) {
     return { ok: false, stagedPath: null, publisher: null, reason: `pull failed: ${e instanceof Error ? e.message : "unknown"}` };
@@ -3763,7 +5230,24 @@ var __mm = {
 function activate(letta) {
   const disposers = [];
   let panel = null;
-  const DEFENSE_HITS = join10(STATE_DIR, "defense-hits.jsonl");
+  let panelBeatTimer = null;
+  const flashEarnedMinute = (label, skill = "") => {
+    if (panelBeatTimer)
+      clearTimeout(panelBeatTimer);
+    writeUiState({ phase: "earned", last: label, skill, route: "" });
+    panelBeatTimer = setTimeout(() => {
+      panelBeatTimer = null;
+      const state = readUiState();
+      if (state?.phase === "earned")
+        writeUiState({ phase: "idle", last: "", skill: "", route: "" });
+    }, 12000);
+  };
+  disposers.push(() => {
+    if (panelBeatTimer)
+      clearTimeout(panelBeatTimer);
+    panelBeatTimer = null;
+  });
+  const DEFENSE_HITS = join12(STATE_DIR, "defense-hits.jsonl");
   let defensesCache = [];
   const refreshDefenses = () => {
     try {
@@ -3771,6 +5255,218 @@ function activate(letta) {
     } catch {
       defensesCache = [];
     }
+  };
+  const isInstalledSkill = (name, ctx) => scanDirs(ctx).some((dir) => existsSync10(join12(dir, name, "SKILL.md")));
+  const recordLifecycle = (action, skill, reason) => {
+    const stamp = Date.now();
+    try {
+      recordPossessionEvent({
+        schema: "mm.possession.v1",
+        event_id: `l-${action}-${stamp.toString(36)}-${hash(`${skill}:${reason}:${stamp}`)}`,
+        possession_id: `lifecycle-${action}-${stamp.toString(36)}-${hash(skill)}`,
+        ts: stamp,
+        type: "lifecycle",
+        action,
+        skill: slug(skill),
+        reason
+      });
+      return "";
+    } catch (error) {
+      return `
+⚠ lifecycle event not recorded — ${String(error?.message || error)}`;
+    }
+  };
+  const renderRosterSnapshot = (ctx) => {
+    const events = loadPossessionEvents();
+    const active = new Set(curateManagedSkills(ctx).map((row) => row.name));
+    for (const event of events) {
+      if (event.type === "decision" && event.action === "prescribe" && event.skill && isInstalledSkill(event.skill, ctx))
+        active.add(event.skill);
+    }
+    const decisions = new Map(events.filter((event) => event.type === "decision").map((event) => [event.possession_id, event]));
+    const outcomes = new Map;
+    for (const event of events)
+      if (event.type === "outcome")
+        outcomes.set(event.possession_id, event);
+    const provenNames = new Set;
+    let helped = 0;
+    for (const [possessionId, decision] of decisions) {
+      if (decision.type !== "decision" || decision.action !== "prescribe" || !decision.skill || !active.has(decision.skill))
+        continue;
+      const outcome = outcomes.get(possessionId);
+      if (!outcome || outcome.result !== "helped")
+        continue;
+      helped++;
+      if (outcome.evidence_tier !== "verified" || !decision.verification || !outcome.verification)
+        continue;
+      if (isStoredVerificationReceiptBound(decision.verification, outcome.verification, decision.possession_id, decision.event_id))
+        provenNames.add(decision.skill);
+    }
+    return { total: active.size, proven: provenNames.size, provenNames: [...provenNames].sort(), helped };
+  };
+  const renderDecisionReport = (summary, ctx) => {
+    const roster = renderRosterSnapshot(ctx);
+    return renderAgentBoxScore(summary, {
+      agent: String(process.env.MM_AGENT || ctx?.agent?.name || "Agent"),
+      period: "All time",
+      skills: { active: roster.total, proven: roster.proven }
+    });
+  };
+  let possessionCounter = 0;
+  const prescribeForTask = (task, gapDeclared, ctx, taskClassInput, difficultyInput, verificationTaskId) => {
+    const query = String(task || "").trim();
+    if (!query)
+      return "ABSTAIN — describe the observed task/procedure gap before requesting a prescription.";
+    const taskClass = /^[a-z0-9][a-z0-9-]{0,79}$/.test(String(taskClassInput || "")) ? String(taskClassInput) : `task-${hash(query)}`;
+    const track = (message, action, route2, skill) => {
+      const stamp = Date.now();
+      const possessionId = `p-${stamp.toString(36)}-${++possessionCounter}-${hash(`${taskClass}:${route2}:${stamp}`)}`;
+      try {
+        const verification = action === "prescribe" && verificationTaskId ? bindExactFileVerificationTask(String(verificationTaskId)) : undefined;
+        recordPossessionEvent({
+          schema: "mm.possession.v1",
+          event_id: `d-${possessionId}`,
+          possession_id: possessionId,
+          ts: stamp,
+          type: "decision",
+          agent: String(process.env.MM_AGENT || ctx?.agent?.name || "agent"),
+          model: modelIdentity(ctx?.model),
+          action,
+          task_class: taskClass,
+          difficulty: difficultyInput || "unknown",
+          gap_observed: gapDeclared,
+          route: route2,
+          ...skill ? { skill } : {},
+          ...verification ? { verification } : {}
+        });
+        const closeout = verification ? `run verify_agent_possession possession_id="${possessionId}"; the bound instrument derives the outcome` : "record the observed outcome with muscle_memory_close";
+        return `${message}
+possession: ${possessionId} · after the task, ${closeout}`;
+      } catch (error) {
+        return `${message}
+tracking: decision not recorded — ${String(error?.message || error)}`;
+      }
+    };
+    if (!gapDeclared)
+      return track("ABSTAIN — no observed/known procedure gap was declared. Relevance alone is not an indication; let the model work unaided.", "abstain", "no-gap");
+    const dirs = scanDirs(ctx);
+    const top = searchSkills(dirs, normalizePrescriptionQuery(query), 3);
+    const decision = routeSkill(top, [], (name) => dirs.some((dir) => existsSync10(join12(dir, name, "SKILL.md"))), 18);
+    if (decision.route === "update" && decision.target) {
+      const t = decision.target;
+      const model = modelIdentity(ctx?.model);
+      const modelEvents = loadRatingEvents().filter((ev) => ev.skill === t.name && ev.rating !== "no_rate" && model !== "unknown" && ev.model === model);
+      const modelNet = modelEvents.reduce((sum, ev) => sum + (ev.rating === "up" ? 1 : -1), 0);
+      if (modelEvents.length && modelNet < 0) {
+        return track(`ABSTAIN — "${t.name}" matches the task but has negative field evidence for runtime model ${model} (${modelNet}, n=${modelEvents.length}). Review/reformulate instead of repeating observed harm.`, "abstain", "negative-field");
+      }
+      const modelLine = model === "unknown" ? "runtime model: unknown (selection is task-conditioned only; capability is not inferred)" : modelEvents.length ? `runtime model ${model}: field ${modelNet >= 0 ? "+" : ""}${modelNet} across ${modelEvents.length} rated possession${modelEvents.length === 1 ? "" : "s"}` : `runtime model ${model}: unproven for this skill; caller owns the gap diagnosis`;
+      return track(`PRESCRIBE "${t.name}" — one smallest matching installed skill (score ${t.score}, ${t.matched} distinctive terms)
+NEXT · invoke the normal Skill tool with skill="${t.name}", perform the task, then call muscle_memory_close with the observed result
+${modelLine}
+gap diagnosis: caller-attested observed/known procedure gap; the router does not infer hidden model capability
+control: do not inject sibling skills or the full shelf`, "prescribe", "matched", t.name);
+    }
+    const strongTie = top.length > 1 && top[0].score >= 18 && top[1].score >= 18 && Math.abs(top[0].score - top[1].score) <= 3;
+    const route = decision.route === "park-ambiguous" || strongTie ? "ambiguous" : decision.route === "park-semantic" ? "weak-match" : "no-safe-match";
+    const why = route === "ambiguous" ? "two candidates tied for the strongest match, so no single skill had enough dominance to inject safely" : decision.route === "park-semantic" ? `possible duplicate/neighbor "${decision.suspect}" without enough lexical proof` : "no installed skill cleared the safe-match gate";
+    const closest = top.length ? top.map((m, index) => `${index + 1}. ${m.name} — ${index === 0 ? "strongest" : m.score === top[0].score ? "tied strongest" : "close neighbor"}; ${m.matched} distinctive term${m.matched === 1 ? "" : "s"}`).join(`
+`) : "none";
+    return track(`ABSTAIN — ${why}.
+
+Closest:
+${closest}
+
+Next: continue unaided, or inspect one candidate without loading the full shelf.`, "abstain", route);
+  };
+  const renderPendingPossessions = () => {
+    const rows = pendingPossessionViews(loadPossessionEvents());
+    if (!rows.length)
+      return "(no pending possessions)";
+    return rows.slice(0, 10).map((row) => {
+      const ageMinutes = Math.max(0, Math.floor((Date.now() - row.openedAt) / 60000));
+      const skill = row.skill ? `
+SKILL · ${row.skill}` : "";
+      const next = row.skill ? `NEXT · invoke Skill("${row.skill}"), finish the task, then close this same possession` : "NEXT · finish the task unaided, then close this same possession";
+      return `PENDING · ${row.difficulty.toUpperCase()} · ${row.action.toUpperCase()} · ${friendlyRouteLabel(row.route).toUpperCase()} · ${row.taskClass} · ${ageMinutes}m ago${skill}
+${next}
+CLOSE · muscle_memory_close possession_id="${row.possessionId}"`;
+    }).join(`
+
+`);
+  };
+  const renderRosterReport = (ctx, compact = false) => {
+    const managedRows = curateManagedSkills(ctx);
+    const managed = new Map(managedRows.map((row) => [row.name, row]));
+    const events = loadPossessionEvents();
+    const outcomes = new Map;
+    for (const event of events)
+      if (event.type === "outcome")
+        outcomes.set(event.possession_id, event);
+    const stats = new Map;
+    for (const event of events) {
+      if (event.type !== "decision" || event.action !== "prescribe" || !event.skill || !isInstalledSkill(event.skill, ctx))
+        continue;
+      const row = stats.get(event.skill) || { helped: 0, harmed: 0, neutral: 0, judged: 0, verified: 0 };
+      const outcome = outcomes.get(event.possession_id);
+      if (outcome?.result === "helped")
+        row.helped++;
+      else if (outcome?.result === "harmed")
+        row.harmed++;
+      else if (outcome?.result === "neutral")
+        row.neutral++;
+      if (outcome?.evidence_tier === "verified" && outcome.result === "helped" && event.verification && outcome.verification && isStoredVerificationReceiptBound(event.verification, outcome.verification, event.possession_id, event.event_id))
+        row.verified++;
+      else if (outcome?.evidence_tier === "agent_judged" || outcome?.evidence_tier === "human_judged")
+        row.judged++;
+      stats.set(event.skill, row);
+    }
+    const field = loadPlusMinus();
+    const allNames = [...new Set([...managed.keys(), ...stats.keys()])].sort((a, b) => {
+      const ar = stats.get(a);
+      const br = stats.get(b);
+      const at = ar ? ar.helped + ar.harmed + ar.neutral : 0;
+      const bt = br ? br.helped + br.harmed + br.neutral : 0;
+      return bt - at || a.localeCompare(b);
+    });
+    const hasSignal = (name) => {
+      const row = stats.get(name);
+      const possessionTotal = row ? row.helped + row.harmed + row.neutral : 0;
+      const fieldTotal = field[name] ? field[name].plus + field[name].minus : 0;
+      return possessionTotal > 0 || fieldTotal > 0 || (managed.get(name)?.uses || 0) > 0;
+    };
+    const names = compact ? allNames.filter(hasSignal) : allNames;
+    const hidden = allNames.length - names.length;
+    if (!names.length)
+      return compact ? `(no observed skill outcomes yet · ${hidden} skill${hidden === 1 ? "" : "s"} with no possessions or field ratings hidden)` : "(no installed or observed skills yet)";
+    const lines = names.map((name) => {
+      const managedRow = managed.get(name);
+      const possession = stats.get(name) || { helped: 0, harmed: 0, neutral: 0, judged: 0, verified: 0 };
+      const score = field[name];
+      const net = score ? score.plus - score.minus : 0;
+      const sample = score ? score.plus + score.minus : 0;
+      const fieldLine = score ? `field ${score.plus} helped / ${score.minus} missed · ${sample} rated` : "field unrated (n=0)";
+      const possessionLine = `possessions ${possession.helped} helped / ${possession.harmed} harmed / ${possession.neutral} neutral`;
+      const evidenceLine = `evidence ${possession.judged} judged / ${possession.verified} verified`;
+      const verdict = sample >= 3 && net >= 2 ? "PROMOTION REVIEW" : sample >= 3 && net <= -2 ? "RETIREMENT REVIEW" : possession.harmed > 0 ? "REVIEW · HARM OBSERVED" : possession.helped > 0 ? "EARLY POSITIVE · NEEDS REPLICATION" : sample >= 2 ? "REVIEW · MIXED OUTCOMES" : possession.neutral > 0 ? "HOLD · NEUTRAL OBSERVED" : (managedRow?.uses || 0) === 0 && sample === 0 ? "UNPROVEN · NEEDS OUTCOMES" : "HOLD · INSUFFICIENT EVIDENCE";
+      const reason = managedRow?.reason || "prescribed from the installed shelf; possession history is now traceable";
+      return `${verdict} · ${name} · ${possessionLine} · ${evidenceLine} · ${fieldLine} — ${reason}`;
+    });
+    const compactNote = compact && hidden > 0 ? `
+skills with no possessions or field ratings yet hidden: ${hidden} · full rotation remains available through /muscle-memory roster` : "";
+    return `MUSCLE MEMORY · SKILL REVIEW
+${lines.join(`
+`)}${compactNote}
+
+minimum 3 rated tasks before promotion or retirement advice · possession evidence and field ratings stay separate · no automatic lifecycle changes`;
+  };
+  const renderRatingReceipt = (res) => {
+    const observed = res.ratingKind === "up" ? "helped" : res.ratingKind === "down" ? "missed" : "neutral";
+    const sample = res.rating.plus + res.rating.minus;
+    const heading = res.partial ? "RATING PARTIAL" : "RATING RECORDED";
+    return `${heading} · ${res.skill} · ${observed}
+OUTCOMES · ${res.rating.plus} helped · ${res.rating.minus} missed · ${sample} rated
+STATUS · ${res.reason}`;
   };
   refreshDefenses();
   const semanticFnFor = (agentId) => (q, k) => semanticSkillCandidates(letta.client, agentId, q, k);
@@ -3862,8 +5558,8 @@ function activate(letta) {
         const span2 = { tokensIn: event?.usage?.promptTokens ?? event?.tokensIn, tokensOut: event?.usage?.completionTokens ?? event?.tokensOut, ms: Date.now() - started, stop: event?.stopReason };
         let t = {};
         try {
-          if (existsSync8(TELEMETRY_PATH))
-            t = JSON.parse(readFileSync8(TELEMETRY_PATH, "utf8"));
+          if (existsSync10(TELEMETRY_PATH))
+            t = JSON.parse(readFileSync10(TELEMETRY_PATH, "utf8"));
         } catch {}
         const agg = aggregateTelemetry([span2]);
         t.calls = (t.calls || 0) + agg.calls;
@@ -3872,7 +5568,7 @@ function activate(letta) {
         t.ms = (t.ms || 0) + agg.ms;
         try {
           ensureDir();
-          writeFileSync8(TELEMETRY_PATH, JSON.stringify(t));
+          writeFileSync9(TELEMETRY_PATH, JSON.stringify(t));
         } catch {}
       } catch {}
     }));
@@ -3882,14 +5578,15 @@ function activate(letta) {
     disposers.push(letta.events.on("compact_start", (event, ctx) => {
       try {
         ensureDir();
-        mkdirSync6(RECEIPTS_DIR, { recursive: true });
+        mkdirSync8(RECEIPTS_DIR, { recursive: true });
         const { candidates } = detect(loadExperience());
-        writeFileSync8(join10(RECEIPTS_DIR, `compact-${Date.now()}.json`), JSON.stringify({ phase: "start", conv: event?.conversationId ?? null, trigger: event?.trigger ?? null, candidatesPreserved: candidates.length, ts: Date.now() }));
+        writeFileSync9(join12(RECEIPTS_DIR, `compact-${Date.now()}.json`), JSON.stringify({ phase: "start", conv: event?.conversationId ?? null, trigger: event?.trigger ?? null, candidatesPreserved: candidates.length, ts: Date.now() }));
       } catch {}
       const rfMode = process.env.MM_REFLECT;
       if (rfMode !== "staged" && rfMode !== "auto" || compactReflectInFlight)
         return;
       compactReflectInFlight = true;
+      appendUiEvent({ phase: "compact_reflect_started", summary: "compaction boundary → reflective review started before context eviction" });
       runReflectiveReview(ctx ?? { agentId: event?.agentId }, { mode: rfMode, semanticFn: semanticFnFor(event?.agentId ?? ctx?.agent?.id) }).then(() => {
         try {
           panel?.update();
@@ -3901,8 +5598,8 @@ function activate(letta) {
     disposers.push(letta.events.on("compact_end", (event) => {
       try {
         ensureDir();
-        mkdirSync6(RECEIPTS_DIR, { recursive: true });
-        writeFileSync8(join10(RECEIPTS_DIR, `compact-end-${Date.now()}.json`), JSON.stringify({ phase: "end", conv: event?.conversationId ?? null, trigger: event?.trigger ?? null, messagesBefore: event?.messagesBefore ?? null, messagesAfter: event?.messagesAfter ?? null, contextTokensBefore: event?.contextTokensBefore ?? null, contextTokensAfter: event?.contextTokensAfter ?? null, ts: Date.now() }));
+        mkdirSync8(RECEIPTS_DIR, { recursive: true });
+        writeFileSync9(join12(RECEIPTS_DIR, `compact-end-${Date.now()}.json`), JSON.stringify({ phase: "end", conv: event?.conversationId ?? null, trigger: event?.trigger ?? null, messagesBefore: event?.messagesBefore ?? null, messagesAfter: event?.messagesAfter ?? null, contextTokensBefore: event?.contextTokensBefore ?? null, contextTokensAfter: event?.contextTokensAfter ?? null, ts: Date.now() }));
       } catch {}
     }));
   }
@@ -3960,24 +5657,33 @@ function activate(letta) {
   }
   if (letta.capabilities?.ui?.panels && letta.ui?.openPanel) {
     try {
-      panel = letta.ui.openPanel({ id: "muscle-memory-live", order: 20, render: () => {
-        try {
-          return renderMuscleMemoryPanel(readUiState());
-        } catch {
-          return [];
+      panel = letta.ui.openPanel({
+        id: "muscle-memory-live",
+        order: 20,
+        render: (renderCtx = {}) => {
+          try {
+            return renderMuscleMemoryPanel({
+              ...readUiState(),
+              roster: renderRosterSnapshot(renderCtx),
+              field: loadPlusMinus()
+            });
+          } catch {
+            return [];
+          }
         }
-      } });
+      });
       setLivePanel(panel);
       try {
         const s = readUiState();
-        if (s && s.phase && s.phase !== "done")
-          writeUiState({ phase: "idle", last: "ready", route: "" });
+        if (["reviewing", "routing", "writing", "shaping", "checking", "saving", "testing", "earned", "learned", "updated", "rotation", "benched", "done"].includes(String(s?.phase || ""))) {
+          writeUiState({ phase: "idle", last: "", skill: "", route: "" });
+        }
       } catch {}
       const t = setInterval(() => {
         try {
           panel?.update();
         } catch {}
-      }, 20000);
+      }, 5000);
       disposers.push(() => {
         clearInterval(t);
         try {
@@ -3989,10 +5695,21 @@ function activate(letta) {
   if (letta.capabilities?.commands) {
     disposers.push(letta.commands.register({
       id: "muscle-memory",
-      description: "Show muscle-memory observations + current mature skill candidates",
+      description: "Show the Muscle Memory Decision Report or inspect learning details",
       async run(ctx = {}) {
         const argv = Array.isArray(ctx?.argv) ? ctx.argv : String(ctx?.args || "").trim().split(/\s+/).filter(Boolean);
         const sub = String(argv?.[0] || "").toLowerCase();
+        if (!sub || sub === "report" || sub === "boxscore") {
+          const summary = summarizePossessionLedger();
+          return { type: "output", output: renderDecisionReport(summary, ctx) };
+        }
+        if (sub === "pending") {
+          return { type: "output", output: renderPendingPossessions() };
+        }
+        if (sub === "share") {
+          const summary = summarizePossessionLedger();
+          return { type: "output", output: JSON.stringify(buildShareCardPayload(summary, { period: "All time" }), null, 2) };
+        }
         if (sub === "events") {
           const n = Math.max(1, Math.min(50, Number(argv?.[1] || 8) || 8));
           const events2 = loadUiEvents(n);
@@ -4009,10 +5726,22 @@ function activate(letta) {
 ` + renderMeshFeed(feed).map((l) => `  ${l}`).join(`
 `) : "(no squad distillations yet — Mack + Kev appear here as they distill)" };
         }
+        if (sub === "prescribe") {
+          const hasGap = String(argv?.[1] || "").toLowerCase() === "--gap";
+          const task = argv.slice(hasGap ? 2 : 1).join(" ").trim();
+          return { type: "output", output: prescribeForTask(task, hasGap, ctx) };
+        }
+        if (sub === "ratings" || sub === "scoreboard") {
+          return { type: "output", output: `FIELD RATINGS · next-task outcomes
+${renderPlusMinus(loadPlusMinus())}` };
+        }
+        if (sub === "roster") {
+          return { type: "output", output: renderRosterReport(ctx) };
+        }
         if (sub === "staged") {
           let s = [];
           try {
-            s = existsSync8(STAGED_DIR) ? readdirSync4(STAGED_DIR).filter((n) => existsSync8(join10(STAGED_DIR, n, "SKILL.md"))) : [];
+            s = existsSync10(STAGED_DIR) ? readdirSync4(STAGED_DIR).filter((n) => existsSync10(join12(STAGED_DIR, n, "SKILL.md"))) : [];
           } catch {}
           return { type: "output", output: s.length ? `staged skills (1-tap to graduate):
 ` + s.map((n) => `  · ${n}`).join(`
@@ -4045,13 +5774,13 @@ function activate(letta) {
           }
           const r = auditSkills(skills);
           const dups = crossShelfDuplicates(entries).filter((x) => x.divergent);
-          const pct = r.total ? Math.round(100 * r.clean / r.total) : 0;
+          const pct2 = r.total ? Math.round(100 * r.clean / r.total) : 0;
           const gapline = Object.entries(r.gapCounts).sort((a, b) => b[1] - a[1]).map(([g, c]) => `${g} ×${c}`).join("  ") || "—";
           const top = r.flagged.slice(0, 20).map((f) => `  ⚠ ${f.name.slice(0, 46).padEnd(48)} ${f.gaps.map((g) => g.split(":")[0]).join(", ")}`).join(`
 `);
           const dupline = dups.length ? `
 ⧉ cross-shelf duplicates (consolidate — stale copy diverging): ${dups.map((x) => `${x.name} [${x.shelves.join("+")}]`).join(", ")}` : "";
-          return { type: "output", output: `\uD83C\uDFC5 SOTA library audit — ${r.total} skills · ${r.clean} top-tier (${pct}%) · ${r.flagged.length} to upgrade${dups.length ? ` · ${dups.length} dup` : ""}
+          return { type: "output", output: `\uD83C\uDFC5 SOTA library audit — ${r.total} skills · ${r.clean} top-tier (${pct2}%) · ${r.flagged.length} to upgrade${dups.length ? ` · ${dups.length} dup` : ""}
 gaps: ${gapline}
 ${top}${r.flagged.length > 20 ? `
   …and ${r.flagged.length - 20} more` : ""}${dupline}` };
@@ -4139,13 +5868,13 @@ ${issues}${reps}${dupline}
             const target = String(argv?.[2] || "").trim();
             if (!target)
               return { type: "output", output: "usage: /muscle-memory shelf publish <skill>  (publishes the SANITIZED staged copy — run `publish stage <skill>` first)" };
-            const stagedPath = join10(STATE_DIR, "publish-staged", slug(target), "SKILL.md");
-            if (!existsSync8(stagedPath))
+            const stagedPath = join12(STATE_DIR, "publish-staged", slug(target), "SKILL.md");
+            if (!existsSync10(stagedPath))
               return { type: "output", output: `\uD83D\uDEAB no sanitized staged copy for '${target}' — run \`/muscle-memory publish stage ${target}\` first (the shelf only ever receives sanitized content)` };
             const archiveId = await ensureSquadArchive(letta.client);
             if (!archiveId)
               return { type: "output", output: "\uD83D\uDEAB could not ensure the squad shelf archive (client lacks the archives surface?)" };
-            const res = await publishSkillToShelf(letta.client, archiveId, slug(target), readFileSync8(stagedPath, "utf8"), String(process.env.MM_AGENT || "agent"));
+            const res = await publishSkillToShelf(letta.client, archiveId, slug(target), readFileSync10(stagedPath, "utf8"), String(process.env.MM_AGENT || "agent"));
             return { type: "output", output: res.ok ? `\uD83D\uDCE1 shelf-published '${target}' → ${SQUAD_ARCHIVE_NAME} (${archiveId})
   squad agents: attach once, then \`/muscle-memory shelf pull ${target}\`` : `\uD83D\uDEAB shelf publish failed — ${res.reason}` };
           }
@@ -4169,14 +5898,24 @@ ${issues}${reps}${dupline}
         if (sub === "rate") {
           const target = String(argv?.[1] || "").trim();
           const dir = String(argv?.[2] || "").toLowerCase();
-          const stepId = String(argv?.[3] || "").trim() || null;
-          if (!target || dir !== "up" && dir !== "down")
-            return { type: "output", output: "usage: /muscle-memory rate <skill> up|down [step-id]" };
-          const res = await rateSkill(letta.client, slug(target), dir === "up", stepId);
-          const net = res.rating.plus - res.rating.minus;
-          return { type: "output", output: `\uD83C\uDFC0 ${res.skill}: ${net >= 0 ? "+" : ""}${net} (+${res.rating.plus}/-${res.rating.minus}) — ${res.reason}
+          const reason = (argv?.slice(3).join(" ") || "").trim();
+          if (!target || dir !== "up" && dir !== "down" && dir !== "no_rate")
+            return { type: "output", output: "usage: /muscle-memory rate <skill> up|down|no_rate [reason...]   (reason required for down/no_rate)" };
+          const skill = slug(target);
+          if (!isInstalledSkill(skill, ctx))
+            return { type: "output", output: `\uD83D\uDEAB not recorded — skill '${skill}' is not installed on this agent` };
+          const res = await rateSkill(letta.client, skill, dir, null, {
+            reason,
+            rater: process.env.MM_AGENT ?? "user",
+            source: "manual",
+            model: modelIdentity(ctx?.model),
+            provider: providerIdentity(ctx?.model)
+          });
+          if (!res.recorded)
+            return { type: "output", output: `\uD83D\uDEAB not recorded — ${res.reason}` };
+          return { type: "output", output: `${renderRatingReceipt(res)}
 
-plus-minus board:
+FIELD RATINGS · next-task outcomes
 ${renderPlusMinus(loadPlusMinus())}` };
         }
         if (sub === "engram") {
@@ -4192,28 +5931,50 @@ ${plan.digest}` };
           const reg = buildRegistry(dirs);
           let staged2 = [];
           try {
-            staged2 = existsSync8(STAGED_DIR) ? readdirSync4(STAGED_DIR).filter((n) => existsSync8(join10(STAGED_DIR, n, "SKILL.md"))) : [];
+            staged2 = existsSync10(STAGED_DIR) ? readdirSync4(STAGED_DIR).filter((n) => existsSync10(join12(STAGED_DIR, n, "SKILL.md"))) : [];
           } catch {}
           const used = reg.skills.filter((s) => s.uses > 0);
           const idle = reg.skills.filter((s) => s.uses === 0 && s.state !== "archived");
           const archived = reg.skills.filter((s) => s.state === "archived");
+          const field = loadPlusMinus();
+          const fieldScore = (name) => {
+            const row = field[name];
+            if (!row)
+              return "";
+            return ` · outcomes ${row.plus} helped / ${row.minus} missed`;
+          };
+          const distribution = (name) => existsSync10(join12(GLOBAL_SKILLS, name, "SKILL.md")) ? " · \uD83D\uDCE1 catalog" : "";
           const L = ["\uD83D\uDCBE muscle-memory · skill lifecycle (creation → use → prune)"];
           L.push(`
 \uD83C\uDF31 staged · 1-tap to graduate (${staged2.length})`);
           staged2.slice(0, 8).forEach((n) => L.push(`   · ${n}`));
           L.push(`
 ✅ active · earning context (${used.length})`);
-          used.slice(0, 10).forEach((s) => L.push(`   · ${s.name} — ${s.uses} uses${s.pinned ? " \uD83D\uDCCC" : ""}`));
+          used.slice(0, 10).forEach((s) => L.push(`   · ${s.name} — ${s.uses} uses${fieldScore(s.name)}${distribution(s.name)}${s.pinned ? " \uD83D\uDCCC" : ""}`));
           L.push(`
 \uD83D\uDCA4 idle · prune candidates (${idle.length})`);
-          idle.slice(0, 10).forEach((s) => L.push(`   · ${s.name}${s.pinned ? " \uD83D\uDCCC pinned (protected)" : " — retires after 30d unused (reversible)"}`));
+          idle.slice(0, 10).forEach((s) => L.push(`   · ${s.name}${fieldScore(s.name)}${distribution(s.name)}${s.pinned ? " \uD83D\uDCCC pinned (protected)" : " — retires after 30d unused (reversible)"}`));
           if (archived.length) {
             L.push(`
 \uD83D\uDDC4 retired · reversible quarantine (${archived.length})`);
-            archived.slice(0, 6).forEach((s) => L.push(`   · ${s.name}${s.absorbedInto ? ` → absorbed into ${s.absorbedInto}` : ""}`));
+            archived.slice(0, 6).forEach((s) => L.push(`   · ${s.name}${fieldScore(s.name)}${distribution(s.name)}${s.absorbedInto ? ` → absorbed into ${s.absorbedInto}` : ""}`));
           }
           return { type: "output", output: L.join(`
 `) };
+        }
+        if (sub !== "filmroom") {
+          return {
+            type: "output",
+            output: [
+              "usage: /muscle-memory                → Decision Report (home)",
+              "       /muscle-memory pending        → resume open possessions",
+              "       /muscle-memory prescribe --gap <task>",
+              "       /muscle-memory roster|wins|ratings|lifecycle|staged",
+              "       /muscle-memory filmroom       → tape / coverage / candidates (debug)",
+              "loop:  muscle_memory_prescribe → Skill(exact name) → muscle_memory_close → /muscle-memory"
+            ].join(`
+`)
+          };
         }
         const rows = loadExperience();
         const byTool = {};
@@ -4234,7 +5995,7 @@ ${plan.digest}` };
                 managed++;
         } catch {}
         try {
-          staged = existsSync8(STAGED_DIR) ? readdirSync4(STAGED_DIR).filter((n) => existsSync8(join10(STAGED_DIR, n, "SKILL.md"))).length : 0;
+          staged = existsSync10(STAGED_DIR) ? readdirSync4(STAGED_DIR).filter((n) => existsSync10(join12(STAGED_DIR, n, "SKILL.md"))).length : 0;
         } catch {}
         const cov = (() => {
           try {
@@ -4245,7 +6006,7 @@ ${plan.digest}` };
           }
         })();
         const out = [
-          `\uD83D\uDCBE muscle-memory · reflect ${mode}`,
+          `\uD83D\uDCBE muscle-memory · filmroom · reflect ${mode}`,
           `last review: ${lastReview}`,
           `library: ${managed} managed · ${staged} staged · coverage ${cov}`,
           ``,
@@ -4261,7 +6022,9 @@ ${plan.digest}` };
           `mature candidates: ${candidates.length} (${templates.length} templates, ${sequences.length} sequences)`,
           cand || `  (none mature yet — need ≥${MM.MIN_COUNT}× across ≥${MM.MIN_CONVS} conversations)`,
           ``,
-          `commands: /muscle-memory [wins|lifecycle|staged|coverage|engram|events|squad]`
+          `inspect: wins · ratings · roster · prescribe · lifecycle · coverage · engram · audit`,
+          `act: rate · mine · publish · shelf`,
+          `home: /muscle-memory  ·  loop: prescribe → Skill → close`
         ].join(`
 `);
         return { type: "output", output: out };
@@ -4269,15 +6032,41 @@ ${plan.digest}` };
     }));
   }
   if (letta.capabilities?.tools) {
+    const advancedAgentSurface = /^(1|true|on)$/i.test(String(process.env.MM_ADVANCED || ""));
     const readParams = {
       type: "object",
       properties: {
-        action: { type: "string", enum: ["candidates", "draft", "load", "list", "curate", "repairs", "antipatterns", "defenses", "defense_hits", "registry", "autopilot_plan", "reflect_plan", "coverage"], description: "read-only operation to perform" },
+        action: { type: "string", enum: ["report", "boxscore", "pending_possessions", "share_card", "candidates", "draft", "load", "list", "curate", "roster", "prescribe", "repairs", "antipatterns", "defenses", "defense_hits", "registry", "autopilot_plan", "reflect_plan", "coverage"], description: "read-oriented operation; report is the canonical Decision Report and boxscore remains a legacy alias; prescribe appends one private decision event to the possession ledger" },
         name: { type: "string", description: "skill name — for load" },
         candidate_key: { type: "string", description: "candidate key or substring to draft; defaults to top mature candidate" },
+        task: { type: "string", description: "current task/procedure gap — for prescribe; raw task text is never persisted" },
+        task_class: { type: "string", description: "optional privacy-safe lowercase task-class slug for possession stats; otherwise a one-way hash label is used" },
+        difficulty: { type: "string", enum: ["routine", "standard", "hard", "unknown"], description: "coarse task difficulty stratum for exposure control; use unknown rather than guessing" },
+        verification_task_id: { type: "string", description: "optional pre-registered immutable exact-file verification task to bind before the prescribed work begins" },
+        gap_observed: { type: "boolean", description: "for prescribe: caller attests a concrete miss or known missing procedure; false means abstain. The router does not infer the model's hidden capability" },
+        period: { type: "string", description: "optional allowlisted period label for the private aggregate share payload; caller identity is never accepted" },
+        verified_gap: { type: "boolean", description: "deprecated alias for gap_observed" },
         mode: { type: "string", enum: ["staged", "auto"], description: "autopilot mode preview — for autopilot_plan" }
       },
       required: ["action"],
+      additionalProperties: false
+    };
+    const leanReadParams = {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["report", "pending_possessions", "roster", "load"], description: "report current evidence, resume one pending possession, review the skill roster, or load one known skill" },
+        name: { type: "string", description: "skill name — required only for load" }
+      },
+      required: ["action"],
+      additionalProperties: false
+    };
+    const prescribeParams = {
+      type: "object",
+      properties: {
+        task: { type: "string", description: "the current procedural miss or known missing procedure; raw task text is never persisted" },
+        gap_observed: { type: "boolean", description: "caller attests a concrete miss or known missing procedure; false means abstain. Muscle Memory never infers hidden model capability" }
+      },
+      required: ["task", "gap_observed"],
       additionalProperties: false
     };
     const writeParams = {
@@ -4304,8 +6093,25 @@ ${plan.digest}` };
     const readRun = async (ctx) => {
       const a = ctx?.args || {};
       const dirs = scanDirs(ctx);
-      const findSkillDir = (name) => dirs.find((d) => existsSync8(join10(d, name, "SKILL.md")));
+      const findSkillDir = (name) => dirs.find((d) => existsSync10(join12(d, name, "SKILL.md")));
       try {
+        if (a.action === "report" || a.action === "boxscore") {
+          const summary = summarizePossessionLedger();
+          return renderDecisionReport(summary, ctx);
+        }
+        if (a.action === "pending_possessions") {
+          return renderPendingPossessions();
+        }
+        if (a.action === "share_card") {
+          const summary = summarizePossessionLedger();
+          return JSON.stringify(buildShareCardPayload(summary, { period: String(a.period || "All time") }), null, 2);
+        }
+        if (a.action === "prescribe") {
+          return prescribeForTask(String(a.task || ""), a.gap_observed === true || a.verified_gap === true, ctx, a.task_class ? String(a.task_class) : undefined, a.difficulty ? String(a.difficulty) : "unknown", a.verification_task_id ? String(a.verification_task_id) : undefined);
+        }
+        if (a.action === "roster") {
+          return renderRosterReport(ctx, !advancedAgentSurface);
+        }
         if (a.action === "candidates") {
           const rows = loadExperience();
           const { candidates } = detect(rows);
@@ -4329,8 +6135,8 @@ ${plan.digest}` };
         }
         if (a.action === "defense_hits") {
           const hits = [];
-          if (existsSync8(DEFENSE_HITS))
-            for (const l of readFileSync8(DEFENSE_HITS, "utf8").trim().split(`
+          if (existsSync10(DEFENSE_HITS))
+            for (const l of readFileSync10(DEFENSE_HITS, "utf8").trim().split(`
 `).slice(-20)) {
               if (l)
                 try {
@@ -4357,9 +6163,10 @@ skipped: ${plan.skipped.length}`;
         }
         if (a.action === "reflect_plan") {
           const ev = buildCrossConversationEvidence(loadExperience());
-          const top = searchSkills([...dirs, STAGED_DIR], ev.digest, 3);
-          const tgt = pickUpdateTarget(top, 18);
-          const route = tgt ? `UPDATE-FIRST → "${tgt.name}" (score ${tgt.score}, ${tgt.matched} distinctive terms, dominant)` : "CREATE (no existing skill safely covers this — matches too weak/ambiguous/tied)";
+          const reviewDirs = [...new Set([...dirs, STAGED_DIR])];
+          const top = searchSkills(reviewDirs, ev.digest, 3);
+          const decision = routeSkill(top, [], (name) => reviewDirs.some((dir) => existsSync10(join12(dir, name, "SKILL.md"))), 18);
+          const route = decision.route === "update" && decision.target ? `UPDATE-FIRST → "${decision.target.name}" (score ${decision.target.score}, ${decision.target.matched} distinctive terms, dominant)` : decision.route === "park-ambiguous" ? "PARK (ambiguous overlap — refusing autonomous create)" : decision.route === "park-semantic" ? `PARK (possible semantic duplicate of "${decision.suspect}")` : "CREATE (no existing skill safely covers this)";
           return `reflective review preview — ${ev.convs} sessions, ${ev.items} durable signals
 routing: ${route}
 top matches: ${top.map((t) => `${t.name}(s${t.score}/m${t.matched})`).join(", ") || "none"}
@@ -4375,12 +6182,8 @@ ${ev.digest.slice(0, 700)}`;
 `);
         }
         if (a.action === "list") {
-          const managed = [];
-          for (const d of dirs)
-            for (const n of listSkillNames(d))
-              if (isManaged(d, n))
-                managed.push(`- ${n}: ${skillDesc(d, n)}`);
-          return managed.length ? managed.join(`
+          const managed = buildRegistry(dirs).skills;
+          return managed.length ? managed.map((skill) => `- ${skill.name}: ${skill.description}`).join(`
 `) : "(no muscle-memory-managed skills yet — use muscle_memory_skill_write action:create)";
         }
         if (a.action === "curate") {
@@ -4421,26 +6224,33 @@ ${d.body}` };
       const a = ctx?.args || {};
       const dir = agentSkillsDir(ctx);
       const dirs = scanDirs(ctx);
-      const findSkillDir = (name) => dirs.find((d) => existsSync8(join10(d, name, "SKILL.md")));
+      const findSkillDir = (name) => dirs.find((d) => existsSync10(join12(d, name, "SKILL.md")));
       try {
         if (a.action === "autopilot_run") {
           const cfg = { ...AUTOPILOT_DEFAULT, mode: a.mode === "auto" ? "auto" : "staged" };
           const r = await runAutopilot(ctx, cfg);
           const res = r.result || { graduated: [], staged: [], refined: [], retired: [] };
-          return `autopilot ${cfg.mode}: graduated ${res.graduated.length} ${JSON.stringify(res.graduated)}, staged ${res.staged.length}, refined ${res.refined.length} ${JSON.stringify(res.refined)}, retired ${res.retired.length} ${JSON.stringify(res.retired)}. budget ${r.budget.used + res.graduated.length + res.staged.length}/${r.budget.limit}.`;
+          const ledgerWarnings = [
+            ...res.graduated.map((name) => recordLifecycle("graduate", slug(name), "autopilot graduated skill after gates")),
+            ...res.refined.map((name) => recordLifecycle("update", slug(name), "autopilot refined existing skill after gates")),
+            ...res.retired.map((name) => recordLifecycle("retire", slug(name), "autopilot retired skill after evidence gate"))
+          ].join("");
+          return `autopilot ${cfg.mode}: graduated ${res.graduated.length} ${JSON.stringify(res.graduated)}, staged ${res.staged.length}, refined ${res.refined.length} ${JSON.stringify(res.refined)}, retired ${res.retired.length} ${JSON.stringify(res.retired)}. budget ${r.budget.used + res.graduated.length + res.staged.length}/${r.budget.limit}.${ledgerWarnings}`;
         }
         if (a.action === "reflect") {
           const r = await runReflectiveReview(ctx, { mode: a.mode === "auto" ? "auto" : "staged", semanticFn: semanticFnFor(ctx?.agent?.id) });
           if (r.action === "none" || r.action === "reject")
             return `reflect: ${r.action} — ${r.reason || ""}`;
           const graduated = !!r.wrote && !String(r.wrote).startsWith(STAGED_DIR);
-          return `reflect: ${r.action} skill "${r.name}"${r.updateTarget ? ` (updated existing — anti-bloat)` : ""}${graduated ? " (graduated)" : ""} → ${r.wrote || "(write failed)"}`;
+          const ledgerWarning = r.wrote && r.updateTarget ? recordLifecycle("update", slug(r.name), "reflect updated existing skill after evidence review") : graduated ? recordLifecycle("graduate", slug(r.name), "reflect graduated a new skill to the active shelf") : "";
+          return `reflect: ${r.action} skill "${r.name}"${r.updateTarget ? ` (updated existing — anti-bloat)` : ""}${graduated ? " (graduated)" : ""} → ${r.wrote || "(write failed)"}${ledgerWarning}`;
         }
         if (a.action === "graduate") {
           if (!a.name)
             return { status: "error", content: "name required" };
           const p = graduateStagedSkill(String(a.name), ctx);
-          return `graduated '${slug(a.name)}' -> ${p}`;
+          const ledgerWarning = recordLifecycle("graduate", slug(a.name), "graduated staged skill to active shelf");
+          return `graduated '${slug(a.name)}' -> ${p}${ledgerWarning}`;
         }
         if (a.action === "catalog_sync") {
           if (!a.name)
@@ -4463,8 +6273,10 @@ ${d.body}` };
         if (a.action === "retire") {
           if (!a.name)
             return { status: "error", content: "name required" };
-          const target = retireManagedSkill(slug(a.name), String(a.reason || "retired by muscle-memory"), ctx, a.absorbed_into ? slug(a.absorbed_into) : undefined);
-          return `retired '${slug(a.name)}'${a.absorbed_into ? ` (absorbed into ${slug(a.absorbed_into)})` : ""} -> ${target} (reversible quarantine)`;
+          const reason = String(a.reason || "retired by muscle-memory");
+          const target = retireManagedSkill(slug(a.name), reason, ctx, a.absorbed_into ? slug(a.absorbed_into) : undefined);
+          const ledgerWarning = recordLifecycle("retire", slug(a.name), reason);
+          return `Retired '${slug(a.name)}'${a.absorbed_into ? ` (absorbed into ${slug(a.absorbed_into)})` : ""} → ${target} (reversible quarantine)${ledgerWarning}`;
         }
         if (a.action === "create_from_candidate") {
           const c = findCandidate(a.candidate_key);
@@ -4498,8 +6310,9 @@ ${d.body}${prov}
 `;
           const p = writeSkill(dir, nm, content);
           syncSkillToDesktopCatalog(nm, ctx);
+          const ledgerWarning = recordLifecycle("learn", nm, `created from mature candidate ${c.kind}`);
           return `created '${nm}' from candidate '${c.key}'${repair ? ` (w/ observed Pitfall: ${repair.errClass})` : ""} -> ${p}
-Load with muscle_memory_skill_read action:load, then invoke the normal Skill tool with skill="${nm}". Dedup max overlap ${Math.round(dc.overlap * 100)}% (${dc.name || "none"}); lint OK.`;
+Load with muscle_memory_skill_read action:load, then invoke the normal Skill tool with skill="${nm}". Dedup max overlap ${Math.round(dc.overlap * 100)}% (${dc.name || "none"}); lint OK.${ledgerWarning}`;
         }
         if (a.action === "create") {
           if (!a.name || !a.description || !a.body)
@@ -4530,8 +6343,9 @@ ${body}
 `;
           const p = writeSkill(dir, nm, content);
           syncSkillToDesktopCatalog(nm, ctx);
+          const ledgerWarning = recordLifecycle("learn", nm, "created after authoring and anti-bloat gates");
           return `created '${nm}' -> ${p}
-Load with muscle_memory_skill_read action:load, then invoke the normal Skill tool with skill="${nm}" when you want to use it. Dedup max overlap ${Math.round(dc.overlap * 100)}% (${dc.name || "none"}).`;
+Load with muscle_memory_skill_read action:load, then invoke the normal Skill tool with skill="${nm}" when you want to use it. Dedup max overlap ${Math.round(dc.overlap * 100)}% (${dc.name || "none"}).${ledgerWarning}`;
         }
         if (a.action === "patch") {
           if (!a.name || a.old == null || a.replacement == null)
@@ -4548,7 +6362,8 @@ Load with muscle_memory_skill_read action:load, then invoke the normal Skill too
             return { status: "error", content: `security blocked: ${secP.issues.join("; ")}` };
           writeSkill(d, a.name, nt);
           syncSkillToDesktopCatalog(String(a.name), ctx);
-          return `patched '${a.name}' in ${d}`;
+          const ledgerWarning = recordLifecycle("update", slug(a.name), "patched active skill after review");
+          return `patched '${a.name}' in ${d}${ledgerWarning}`;
         }
         if (a.action === "edit_full") {
           if (!a.name || !a.body)
@@ -4567,7 +6382,8 @@ Load with muscle_memory_skill_read action:load, then invoke the normal Skill too
 <!-- ${MM_TAG}: edited ${new Date().toISOString().slice(0, 10)} -->
 `);
           syncSkillToDesktopCatalog(String(a.name), ctx);
-          return `full-rewrote '${a.name}'`;
+          const ledgerWarning = recordLifecycle("update", slug(a.name), "full skill rewrite passed authoring gates");
+          return `full-rewrote '${a.name}'${ledgerWarning}`;
         }
         if (a.action === "write_file") {
           if (!a.name || !a.file_path || a.file_content == null)
@@ -4585,7 +6401,8 @@ Load with muscle_memory_skill_read action:load, then invoke the normal Skill too
           if (!a.name)
             return { status: "error", content: "name required" };
           const p = restoreManagedSkill(slug(a.name), ctx);
-          return `restored '${slug(a.name)}' -> ${p}`;
+          const ledgerWarning = recordLifecycle("restore", slug(a.name), "restored quarantined skill to active shelf");
+          return `Restored '${slug(a.name)}' to the active shelf → ${p}${ledgerWarning}`;
         }
         return { status: "error", content: "unknown write action" };
       } catch (e) {
@@ -4609,56 +6426,345 @@ Load with muscle_memory_skill_read action:load, then invoke the normal Skill too
           if (r.action === "none" || r.action === "reject")
             return `reflect: ${r.action} — ${r.reason || ""}`;
           const graduated = !!r.wrote && !String(r.wrote).startsWith(STAGED_DIR);
-          return `reflect: ${r.action} skill "${r.name}"${r.updateTarget ? ` (updated existing — anti-bloat)` : ""}${graduated ? " (graduated)" : ""} → ${r.wrote || "(write failed)"}`;
+          if (r.updateTarget) {
+            const ledgerWarning = r.wrote ? recordLifecycle("update", slug(r.name), "autonomous reflect updated existing skill") : "";
+            return `reflect: Updated existing skill "${r.name}" — anti-bloat, live → ${r.wrote || "(write failed)"}${ledgerWarning}`;
+          }
+          if (graduated) {
+            const ledgerWarning = recordLifecycle("graduate", slug(r.name), "autonomous reflect graduated new skill");
+            return `reflect: Graduated new skill "${r.name}" to the active shelf → ${r.wrote || "(write failed)"}${ledgerWarning}`;
+          }
+          return `reflect: Staged new skill "${r.name}" for review → ${r.wrote || "(write failed)"}`;
         }
         if (a.action === "graduate") {
           if (!a.name)
             return { status: "error", content: "name required" };
           const p = graduateStagedSkill(String(a.name), ctx);
-          return `graduated '${slug(a.name)}' -> ${p}`;
+          const ledgerWarning = recordLifecycle("graduate", slug(a.name), "graduated staged skill to active shelf");
+          return `Graduated '${slug(a.name)}' to the active shelf → ${p}${ledgerWarning}`;
         }
         if (a.action === "publish") {
           if (!a.name)
             return { status: "error", content: "name required" };
           const p = publishSkillToCatalog(String(a.name), ctx);
-          return `published '${slug(a.name)}' -> ${p}`;
+          return `Published '${slug(a.name)}' to the shared Custom Skills catalog → ${p}`;
         }
         if (a.action === "prune") {
           const r = runAutonomousPrune(ctx, { maxRetire: 1 });
-          return `prune: retired ${r.retired.length} ${JSON.stringify(r.retired)}, flagged ${r.flagged.length}, kept ${r.kept.length}`;
+          const ledgerWarnings = r.retired.map((name) => recordLifecycle("retire", slug(name), "autonomous prune retired skill after evidence gate")).join("");
+          return `prune: retired ${r.retired.length} ${JSON.stringify(r.retired)}, flagged ${r.flagged.length}, kept ${r.kept.length}${ledgerWarnings}`;
         }
         return { status: "error", content: "unknown lifecycle action" };
       } catch (e) {
         return { status: "error", content: String(e?.message ?? e) };
       }
     };
+    const rateParams = {
+      type: "object",
+      properties: {
+        skill: { type: "string", description: "the skill name (slug) you are rating" },
+        rating: { type: "string", enum: ["up", "down", "no_rate"], description: "up = it helped the next possession; down = it misled / wasted time / added drag; no_rate = you used it but it was genuinely neutral" },
+        reason: { type: "string", description: "why — REQUIRED for down and no_rate; strongly encouraged for up. State the OUTCOME you saw, not that you remembered the skill." },
+        evidence_ref: { type: "string", description: "optional receipt path/id/url — stored as a display string only, NEVER opened" },
+        task: { type: "string", description: "optional short task/thread label this rating came from" },
+        step_id: { type: "string", description: "optional Letta step id — when present the rating also posts to native steps.feedback" }
+      },
+      required: ["skill", "rating"],
+      additionalProperties: false
+    };
+    const rateRun = async (ctx) => {
+      const a = ctx?.args || {};
+      const skill = slug(String(a.skill || "").trim());
+      const rating = String(a.rating || "").toLowerCase();
+      if (!skill)
+        return "\uD83D\uDEAB skill is required";
+      if (rating !== "up" && rating !== "down" && rating !== "no_rate")
+        return "\uD83D\uDEAB rating must be up|down|no_rate";
+      if (!isInstalledSkill(skill, ctx))
+        return `\uD83D\uDEAB not recorded — skill '${skill}' is not installed on this agent`;
+      const res = await rateSkill(letta.client, skill, rating, a.step_id ? String(a.step_id) : null, {
+        reason: a.reason ? String(a.reason) : "",
+        rater: process.env.MM_AGENT || "agent",
+        evidenceRef: a.evidence_ref ? String(a.evidence_ref) : "",
+        task: a.task ? String(a.task) : "",
+        source: "agent",
+        model: modelIdentity(ctx?.model),
+        provider: providerIdentity(ctx?.model)
+      });
+      if (!res.recorded)
+        return `\uD83D\uDEAB not recorded — ${res.reason}`;
+      return renderRatingReceipt(res);
+    };
+    const outcomeParams = {
+      type: "object",
+      properties: {
+        possession_id: { type: "string", description: "possession ID returned by action:prescribe" },
+        result: { type: "string", enum: ["helped", "harmed", "neutral", "succeeded_unaided", "failed_unaided"], description: "observed result; prescribe uses helped|harmed|neutral, abstain uses succeeded_unaided|failed_unaided" },
+        evidence_tier: { type: "string", enum: ["human_judged", "agent_judged"], description: "caller-recorded outcomes are judged only. Bound verification is reserved for a future instrument-owned adapter and cannot be self-awarded" },
+        reason: { type: "string", description: "required observed outcome; privately redacted before append" },
+        evidence_ref: { type: "string", description: "optional receipt ID/path label; privately redacted and never opened" },
+        supersedes_event_id: { type: "string", description: "optional exact active outcome event ID when correcting a prior judged outcome; append-only correction, never overwrite" }
+      },
+      required: ["possession_id", "result", "evidence_tier", "reason"],
+      additionalProperties: false
+    };
+    const outcomeRun = async (ctx) => {
+      const a = ctx?.args || {};
+      const possessionId = String(a.possession_id || "").trim();
+      const result = String(a.result || "");
+      const tier = String(a.evidence_tier || "");
+      const events = loadPossessionEvents();
+      const decision = events.find((event) => event.type === "decision" && event.possession_id === possessionId);
+      if (!decision || decision.type !== "decision")
+        return `\uD83D\uDEAB not recorded — unknown possession '${possessionId}'`;
+      const activeOutcome = events.filter((event) => event.type === "outcome" && event.possession_id === possessionId).at(-1);
+      const supersedes = String(a.supersedes_event_id || "").trim();
+      if (activeOutcome && !supersedes)
+        return `\uD83D\uDEAB not recorded — possession '${possessionId}' already has an outcome; correction requires supersedes_event_id='${activeOutcome.event_id}'`;
+      if (!activeOutcome && supersedes)
+        return `\uD83D\uDEAB not recorded — cannot supersede a missing outcome for '${possessionId}'`;
+      const prescribeResult = result === "helped" || result === "harmed" || result === "neutral";
+      const abstainResult = result === "succeeded_unaided" || result === "failed_unaided";
+      if (decision.action === "prescribe" && !prescribeResult || decision.action === "abstain" && !abstainResult) {
+        return `\uD83D\uDEAB not recorded — result '${result}' is incompatible with decision '${decision.action}'`;
+      }
+      if (tier !== "human_judged" && tier !== "agent_judged")
+        return "\uD83D\uDEAB not recorded — callers cannot self-award verified; evidence_tier must be human_judged|agent_judged";
+      if (!String(a.reason || "").trim())
+        return "\uD83D\uDEAB not recorded — reason is required";
+      try {
+        const recorded = recordPossessionEvent({
+          schema: "mm.possession.v1",
+          event_id: `o-${possessionId}-${Date.now().toString(36)}-${randomBytes(4).toString("hex")}`,
+          possession_id: possessionId,
+          ts: Date.now(),
+          type: "outcome",
+          result,
+          evidence_tier: tier,
+          reason: String(a.reason),
+          ...a.evidence_ref ? { evidence_ref: String(a.evidence_ref) } : {},
+          ...supersedes ? { supersedes_event_id: supersedes } : {}
+        });
+        const earned = !supersedes && (result === "helped" || result === "succeeded_unaided");
+        const affectedSkill = decision.action === "prescribe" ? String(decision.skill || "") : "";
+        if (earned)
+          flashEarnedMinute(affectedSkill || "smart restraint", affectedSkill);
+        else
+          writeUiState({ phase: "idle", last: "", skill: "", route: "" });
+        const beat = !supersedes && result === "helped" ? `✓ skill helped · ${String(decision.skill || "prescribed skill")}` : !supersedes && result === "succeeded_unaided" ? "✓ no skill needed · task completed" : "";
+        const receipt = `recorded ${tier.toUpperCase()} outcome '${result}' for ${possessionId}${supersedes ? ` · superseded ${supersedes}` : ""} · event ${recorded.event_id} · Decision Report updated from observed evidence`;
+        return beat ? `${beat}
+${receipt}` : receipt;
+      } catch (error) {
+        return `\uD83D\uDEAB not recorded — ${String(error?.message || error)}`;
+      }
+    };
+    const closeParams = {
+      type: "object",
+      properties: {
+        possession_id: { type: "string", description: "possession ID returned by muscle_memory_prescribe" },
+        result: { type: "string", enum: ["helped", "harmed", "neutral", "succeeded_unaided", "failed_unaided"], description: "observed result; prescriptions use helped|harmed|neutral and abstentions use succeeded_unaided|failed_unaided" },
+        reason: { type: "string", description: "one concrete sentence describing the observed task outcome" }
+      },
+      required: ["possession_id", "result", "reason"],
+      additionalProperties: false
+    };
+    const closeRun = async (ctx) => {
+      const a = ctx?.args || {};
+      const possessionId = String(a.possession_id || "").trim();
+      const result = String(a.result || "");
+      const recorded = await outcomeRun({
+        ...ctx,
+        args: {
+          possession_id: possessionId,
+          result,
+          evidence_tier: "agent_judged",
+          reason: String(a.reason || "")
+        }
+      });
+      if (recorded.startsWith("\uD83D\uDEAB"))
+        return recorded;
+      const events = loadPossessionEvents();
+      const decision = events.find((event) => event.type === "decision" && event.possession_id === possessionId);
+      const outcome = [...events].reverse().find((event) => event.type === "outcome" && event.possession_id === possessionId);
+      const receipt = outcome?.event_id ? `
+RECEIPT · ${outcome.event_id}` : "";
+      if (!decision)
+        return recorded;
+      if (decision.action === "abstain") {
+        const abstentionRead = result === "succeeded_unaided" ? "smart restraint confirmed" : "task failed unaided";
+        return `OUTCOME RECORDED · ${result.replace(/_/g, " ")} · agent-judged
+DECISION · abstained · ${abstentionRead}
+EVIDENCE · judged result added · not verified${receipt}`;
+      }
+      const skill = String(decision.skill || "prescribed skill");
+      const decisions = new Map(events.filter((event) => event.type === "decision").map((event) => [event.possession_id, event]));
+      let judged = 0;
+      let verified = 0;
+      for (const event of events) {
+        if (event.type !== "outcome")
+          continue;
+        const source = decisions.get(event.possession_id);
+        if (!source || source.action !== "prescribe" || source.skill !== skill)
+          continue;
+        if (event.evidence_tier === "verified" && event.result === "helped" && source.verification && event.verification && isStoredVerificationReceiptBound(source.verification, event.verification, source.possession_id, source.event_id))
+          verified++;
+        else if (event.evidence_tier === "agent_judged" || event.evidence_tier === "human_judged")
+          judged++;
+      }
+      const proven = renderRosterSnapshot(ctx).provenNames.includes(skill);
+      return `OUTCOME RECORDED · ${result} · agent-judged
+SKILL · ${skill}
+EVIDENCE · ${judged} judged · ${verified} verified · ${proven ? "proven" : "still unproven"}${receipt}`;
+    };
+    const verifierRegistrationParams = {
+      type: "object",
+      properties: {
+        task_id: { type: "string", description: "unique lowercase verification task slug" },
+        task_class: { type: "string", description: "lowercase task-class slug that must match the later possession" },
+        target_rel: { type: "string", description: "canonical relative path under the trusted MM_EXACT_FILE_ROOT; absolute/traversing/symlink targets are refused" },
+        expected_sha256: { type: "string", description: "canonical lowercase SHA-256 of the expected final file bytes" }
+      },
+      required: ["task_id", "task_class", "target_rel", "expected_sha256"],
+      additionalProperties: false
+    };
+    const verifierRegistrationRun = async (ctx) => {
+      const a = ctx?.args || {};
+      try {
+        const created = createExactFileVerificationTask({
+          taskId: String(a.task_id || ""),
+          taskClass: String(a.task_class || ""),
+          targetRel: String(a.target_rel || ""),
+          expectedSha256: String(a.expected_sha256 || "")
+        });
+        return `\uD83D\uDD12 verification task registered read-only · ${created.task.task_id} · ${created.task.task_class} · manifest ${created.manifestSha256.slice(0, 12)}… · bind it during prescribe before work begins`;
+      } catch (error) {
+        return `\uD83D\uDEAB verification task refused — ${String(error?.message || error)}`;
+      }
+    };
+    const verifierParams = {
+      type: "object",
+      properties: {
+        possession_id: { type: "string", description: "possession ID whose pre-work exact-file manifest binding will be verified; no caller-supplied result/path/hash/tier is accepted" }
+      },
+      required: ["possession_id"],
+      additionalProperties: false
+    };
+    const verifierRun = async (ctx) => {
+      const possessionId = String(ctx?.args?.possession_id || "").trim();
+      const events = loadPossessionEvents();
+      const decision = events.find((event) => event.type === "decision" && event.possession_id === possessionId);
+      if (!decision)
+        return `\uD83D\uDEAB verification refused — unknown possession '${possessionId}'`;
+      if (!decision.verification)
+        return `\uD83D\uDEAB verification refused — possession '${possessionId}' has no pre-work instrument binding`;
+      if (events.some((event) => event.type === "outcome" && event.possession_id === possessionId)) {
+        return `\uD83D\uDEAB verification refused — possession '${possessionId}' already has an outcome`;
+      }
+      try {
+        const verified = verifyExactFilePossession(decision);
+        const stamp = Date.now();
+        const recorded = recordInstrumentVerifiedOutcome({
+          schema: "mm.possession.v1",
+          event_id: `o-${possessionId}-${stamp.toString(36)}-${randomBytes(4).toString("hex")}`,
+          possession_id: possessionId,
+          ts: stamp,
+          type: "outcome",
+          ...verified
+        });
+        if (verified.result === "helped") {
+          const affectedSkill = String(decision.skill || "");
+          flashEarnedMinute(affectedSkill || "prescribed skill", affectedSkill);
+        } else
+          writeUiState({ phase: "idle", last: "", skill: "", route: "" });
+        return `\uD83D\uDD2C BOUND-VERIFIED '${verified.result}' for ${possessionId} · adapter ${verified.verification.adapter_id} · manifest ${verified.verification.manifest_sha256.slice(0, 12)}… · event ${recorded.event_id}`;
+      } catch (error) {
+        return `\uD83D\uDEAB verification refused — ${String(error?.message || error)}`;
+      }
+    };
     disposers.push(letta.tools.register({
       name: "muscle_memory_skill_read",
-      description: "muscle-memory = self-improving skills distilled from your own work. Read-only inspection (no approval, no writes). START HERE with action:reflect_plan — it previews the class-level skill it would distill from your cross-session history + the update-first routing (which existing skill it would create or patch). Also: coverage (skill-gap map), candidates/registry/curate (what it has observed + manages), list/load (inspect a managed skill). Run before any write.",
-      parameters: readParams,
+      description: advancedAgentSurface ? "Read Muscle Memory state. START with action:report for the private Decision Report (boxscore is a legacy alias). Use action:pending_possessions to resume open work, action:roster for conservative outcome review, and action:reflect_plan before learning. For a current task gap, prefer the dedicated muscle_memory_prescribe tool; legacy action:prescribe remains compatible. Coverage and low-level tape are diagnostics, not the primary workflow." : "Read the private Decision Report, resume a pending possession, review the skill roster, or load one known skill. For a current task gap, use muscle_memory_prescribe.",
+      parameters: advancedAgentSurface ? readParams : leanReadParams,
       requiresApproval: false,
       async run(ctx) {
         return readRun(ctx);
       }
     }));
     disposers.push(letta.tools.register({
-      name: "muscle_memory_skill_write",
-      description: "muscle-memory writes (approval-gated, reversible). THE CORE LOOP: action:reflect distills a class-level skill from your cross-conversation work → update-first anti-bloat, security/lint-gated, staged by default. graduate promotes a staged skill to your active skill shelf. Plus create/patch/edit_full/retire/restore/pin lifecycle + write_file for support files. Preview first with reflect_plan (the read tool). For no-approval reflect/graduate/publish/prune, use muscle_memory_lifecycle_run.",
-      parameters: writeParams,
-      requiresApproval: true,
+      name: "muscle_memory_prescribe",
+      description: "Use after you observe a real procedural miss, or when you know you lack the procedure for the current task. Provide only the task and your explicit gap attestation. Returns exactly ONE installed Skill or ABSTAIN and opens one private possession. It never dumps the shelf, creates a skill, or infers hidden model capability. If you already know the recovery, do not call this tool; continue unaided. After a prescription, invoke the exact Skill tool, complete the task, then use muscle_memory_close.",
+      parameters: prescribeParams,
+      requiresApproval: false,
       async run(ctx) {
-        return writeRun(ctx);
+        return readRun({ ...ctx, args: { task: ctx?.args?.task, gap_observed: ctx?.args?.gap_observed, action: "prescribe" } });
       }
     }));
     disposers.push(letta.tools.register({
-      name: "muscle_memory_lifecycle_run",
-      description: "muscle-memory autonomous lifecycle (no-approval, safe, reversible): reflect (distill a skill from your work), graduate (promote a staged skill → active shelf), publish (mirror a skill → shared Custom Skills catalog), prune (retire stale/unused skills). This is the full self-improvement loop. Broad/manual skill edits → muscle_memory_skill_write; preview → reflect_plan in muscle_memory_skill_read.",
-      parameters: lifecycleParams,
+      name: "muscle_memory_close",
+      description: "Lightweight default closeout for a Muscle Memory possession. Provide the returned possession_id, the observed result, and one concrete reason. The tool records agent_judged evidence automatically, reports whether the skill remains unproven, and cannot accept or self-award verified evidence. Use record_agent_possession only for human-judged closeout, evidence references, or append-only corrections; use verify_agent_possession for pre-bound instrument proof.",
+      parameters: closeParams,
       requiresApproval: false,
       async run(ctx) {
-        return lifecycleRun(ctx);
+        return closeRun(ctx);
       }
     }));
+    if (advancedAgentSurface) {
+      disposers.push(letta.tools.register({
+        name: "record_agent_possession",
+        description: "Advanced judged closeout and correction surface. Prefer muscle_memory_close for ordinary agent-judged outcomes. Use this full tool when a human owns the judgment, an evidence reference must be attached, or an append-only correction must supersede the exact active outcome event. Caller-recorded evidence remains human_judged or agent_judged only; verified is reserved for an instrument-owned adapter and cannot be self-awarded. Never promotes, publishes, or mutates a skill.",
+        parameters: outcomeParams,
+        requiresApproval: false,
+        async run(ctx) {
+          return outcomeRun(ctx);
+        }
+      }));
+      disposers.push(letta.tools.register({
+        name: "register_exact_file_verification",
+        description: "Pre-register one immutable exact-file SHA-256 verification task before a prescribed edit begins. The caller defines the task class, trusted-root-relative target, and expected final digest; the mod writes a read-only manifest and returns its hash. It accepts no outcome/evidence tier and cannot close a possession.",
+        parameters: verifierRegistrationParams,
+        requiresApproval: false,
+        async run(ctx) {
+          return verifierRegistrationRun(ctx);
+        }
+      }));
+      disposers.push(letta.tools.register({
+        name: "verify_agent_possession",
+        description: "Instrument-owned exact-file SHA-256 closeout for a possession that was bound to a pre-registered immutable verification task before work began. Accepts only possession_id; the adapter derives the trusted root, task, manifest, target, hash, result, evidence tier, reason, and receipt. Refuses unbound, tampered, replayed, symlinked, traversing, or already-closed possessions.",
+        parameters: verifierParams,
+        requiresApproval: false,
+        async run(ctx) {
+          return verifierRun(ctx);
+        }
+      }));
+      disposers.push(letta.tools.register({
+        name: "muscle_memory_skill_write",
+        description: "muscle-memory writes (approval-gated, reversible). THE CORE LOOP: action:reflect distills a class-level skill from your cross-conversation work → update-first anti-bloat, security/lint-gated, staged by default. graduate promotes a staged skill to your active skill shelf. Plus create/patch/edit_full/retire/restore/pin lifecycle + write_file for support files. Preview first with reflect_plan (the read tool). For no-approval reflect/graduate/publish/prune, use muscle_memory_lifecycle_run.",
+        parameters: writeParams,
+        requiresApproval: true,
+        async run(ctx) {
+          return writeRun(ctx);
+        }
+      }));
+      disposers.push(letta.tools.register({
+        name: "muscle_memory_lifecycle_run",
+        description: "muscle-memory autonomous lifecycle (no-approval, safe, reversible): reflect (distill a skill from your work), graduate (promote a staged skill → active shelf), publish (mirror a skill → shared Custom Skills catalog), prune (retire stale/unused skills). This is the full self-improvement loop. Broad/manual skill edits → muscle_memory_skill_write; preview → reflect_plan in muscle_memory_skill_read.",
+        parameters: lifecycleParams,
+        requiresApproval: false,
+        async run(ctx) {
+          return lifecycleRun(ctx);
+        }
+      }));
+      disposers.push(letta.tools.register({
+        name: "rate_skill",
+        description: "Rate a muscle-memory skill from YOUR experience of whether it helped the NEXT possession — the field-referee signal (both agents rate at their own natural boundaries). rating: up (it helped), down (it misled / wasted time / added drag), no_rate (you used it but it was genuinely neutral). reason REQUIRED for down/no_rate — state the OUTCOME you saw; never rate because you remembered the skill or to self-congratulate (that is Goodhart on our own instrument). rater is auto-set to the calling agent. Writes an append-only reasoned event (rating-reasons.jsonl) + the backward-compatible plus-minus aggregate, feeding the read-only roster recommendations. Field ratings are ASSOCIATIONAL — they can flag a skill for patch/bench, never auto-promote or auto-retire it.",
+        parameters: rateParams,
+        requiresApproval: false,
+        async run(ctx) {
+          return rateRun(ctx);
+        }
+      }));
+    }
   }
   return () => {
     for (const d of disposers.reverse())

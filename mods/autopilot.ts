@@ -41,6 +41,7 @@ export function autopilotPlan(input: { rows: Row[]; managed: ManagedView[]; dirs
   if (cfg.mode === "off") return { decisions, skipped: [{ what: "all", why: "autopilot off" }], budget: { used, limit: cfg.dailyBudget }, mode: cfg.mode };
 
   const existing = new Set(input.managed.map((m) => m.name));
+  const existingByIdentity = new Map(input.managed.map((m) => [canonicalSkillIdentity(m.name), m.name]));
   const refineTargets = new Set<string>();
 
   // 1) REFINE: a managed skill whose documented failure recurs in current anti-patterns.
@@ -57,21 +58,32 @@ export function autopilotPlan(input: { rows: Row[]; managed: ManagedView[]; dirs
   // 2) DISTILL: mature, high-impact, novel candidates (gated + budgeted).
   for (const c of detect(input.rows).candidates) {
     if (used >= cfg.dailyBudget) { skipped.push({ what: c.key, why: "daily budget reached" }); continue; }
+    // A repeated one-liner is command recall, not procedural memory. Keep it observable for manual review,
+    // but autonomous distillation requires a multi-step workflow. Verified recoveries enter separately
+    // through repairCandidates, so a template's fail→success counter never earns an auto-created skill.
+    if (c.kind === "template") { skipped.push({ what: c.key, why: "single-command repetition — observe, don't auto-distill" }); continue; }
     if (DESTRUCTIVE.test(c.key)) { skipped.push({ what: c.key, why: "destructive workflow — never auto-distilled" }); continue; } // explicit safety gate, before impact
     const imp = impactScore(c).score;
     if (imp < cfg.minImpact) { skipped.push({ what: c.key, why: `impact ${imp} < ${cfg.minImpact}` }); continue; }
     const draft = draftWithRepair(c, repairForRows(c, input.rows));
     const nm = slug(draft.name);
+    if (!isValidSkillName(nm)) { skipped.push({ what: nm || c.key, why: "invalid or command-transition-shaped skill name" }); continue; }
+    const identity = canonicalSkillIdentity(nm);
+    const identityMatch = identity && existingByIdentity.get(identity);
+    if (identityMatch) { skipped.push({ what: nm, why: `canonical duplicate of ${identityMatch} — refine, don't re-distill` }); continue; }
     if (existing.has(nm)) { skipped.push({ what: nm, why: "already managed — refine, don't re-distill" }); continue; }
     const dc = dedupCheck(nm, draft.description, input.dirsForDedup);
     if (dc.dup) { skipped.push({ what: nm, why: `dedup: ${dc.reason}` }); continue; }
     const lint = lintSkillDraft({ name: nm, description: draft.description, body: draft.body }, { needsPitfalls: !!c.fixes });
     if (!lint.ok) { skipped.push({ what: nm, why: `lint: ${lint.issues[0]}` }); continue; }
+    const quality = sotaQualityGaps({ name: nm, description: draft.description, body: draft.body });
+    if (quality.length) { skipped.push({ what: nm, why: `quality: ${quality[0]}` }); continue; }
     // Auto-graduate only in full-auto mode AND with a verified success in the pattern; else stage for 1-tap.
     const verified = c.fixes > 0 || c.count >= MM.STRONG_SINGLE;
     const gate: "graduate" | "stage" = cfg.mode === "auto" && verified ? "graduate" : "stage";
     decisions.push({ op: "distill", candidate: c, name: nm, reason: `impact ${imp}, ${c.count} reps${verified ? ", verified" : ""}`, gate });
     existing.add(nm); // dedup: same repair surfaced as both a template + a sequence won't double-distill this pass
+    if (identity) existingByIdentity.set(identity, nm);
     used++;
   }
 
@@ -141,8 +153,10 @@ export function saveAutopilotState(s: { date: string; used: number }) { try { en
 export function managedView(dirs: string[]): ManagedView[] {
   const usage = loadUsage();
   const out: ManagedView[] = [];
+  const seen = new Set<string>();
   for (const d of dirs) for (const n of listSkillNames(d)) {
-    if (!isManaged(d, n)) continue;
+    if (!isManaged(d, n) || seen.has(n)) continue;
+    seen.add(n); // one canonical managed view per skill name; first shelf has precedence
     const u = usage[n] || {};
     const created = u.created || Date.now();
     out.push({ name: n, description: skillDesc(d, n), body: readSkill(d, n), uses: u.uses || 0, ageDays: Math.floor((Date.now() - created) / 86400000), pinned: !!u.pinned });
@@ -182,6 +196,25 @@ export async function consumeStreamBounded(stream: AsyncIterable<unknown>): Prom
   return Promise.race([reader, timer]);
 }
 
+// Hidden model-fork calls are expensive: each fork creates a new conversation with the agent's full
+// system prompt. Reuse one hidden bench conversation per live ctx + purpose so dogfood/review loops
+// do not mint fresh threads every call. If the cached fork fails, drop it and let the next call retry.
+const HIDDEN_FORKS = new WeakMap<object, Map<string, Promise<any>>>();
+
+async function hiddenForkFor(ctx: any, purpose: string): Promise<any | null> {
+  if (typeof ctx?.conversation?.fork !== "function") return null;
+  const key = (typeof ctx === "object" && ctx) ? ctx : ctx.conversation;
+  let byPurpose = HIDDEN_FORKS.get(key);
+  if (!byPurpose) { byPurpose = new Map(); HIDDEN_FORKS.set(key, byPurpose); }
+  let forked = byPurpose.get(purpose);
+  if (!forked) {
+    forked = Promise.resolve(ctx.conversation.fork({ hidden: true }));
+    byPurpose.set(purpose, forked);
+  }
+  try { return await forked; }
+  catch (e) { byPurpose.delete(purpose); throw e; }
+}
+
 
 /** Optional model-fork author: the model writes a richer SKILL.md body in a hidden conversation.
  * Fully guarded — ANY failure returns null and the executor falls back to the deterministic drafter,
@@ -191,7 +224,8 @@ export async function forkAuthor(ctx: any, c: Candidate, repair?: RepairChain): 
     if (typeof ctx?.conversation?.fork !== "function") return null;
     const det = draftWithRepair(c, repair);
     const prompt = `You are muscle-memory's skill author. Write ONLY the markdown BODY (no YAML frontmatter) of a SKILL.md capturing this recurring real workflow. Keep it under 120 lines. Required sections in order: "## Trigger", "## Observed pattern" (include the exact pattern in a code block), "## Procedure" (numbered, concrete, adaptable), ${repair ? `"## Pitfalls" (the observed error "${repair.errClass}" and its fix "${repair.fixStep}"), ` : ""}"## Verification". Pattern: ${c.key}. Reps: ${c.count} across ${c.convs} conversation(s). Output ONLY the markdown body, nothing else.`;
-    const forked = await ctx.conversation.fork({ hidden: true });
+    const forked = await hiddenForkFor(ctx, "fork-author");
+    if (!forked) return null;
     const stream = await forked.sendMessageStream([{ role: "user", content: prompt }]);
     let body = await consumeStreamBounded(stream as AsyncIterable<unknown>);
     body = body.trim().replace(/^```(?:markdown|md)?\n?|\n?```$/g, "");
@@ -222,15 +256,25 @@ export async function runAutopilot(ctx: any, config?: AutopilotConfig): Promise<
   // Mirror autopilot activity to the LIVE PANEL — the always-on path (fires even with MM_REFLECT=off).
   // This is the showcase moment: the agent watches itself distill a skill, with no user command.
   if (result.graduated.length || result.staged.length) {
-    const g = result.graduated[0], s = result.staged[0];
+    const activeDir = agentSkillsDir(ctx);
+    const verifiedGraduated = result.graduated.filter((n) => {
+      const proof = graduationProof(activeDir, n);
+      if (!proof.ok) appendUiEvent({ phase: "graduation_unverified", summary: `not claiming graduation for '${n}': ${proof.reason.slice(0, 100)}`, skill: n, action: "graduate", route: "autopilot truth-guard" });
+      return proof.ok;
+    });
+    const g = verifiedGraduated[0], s = result.staged[0];
     const summary = g
-      ? `graduated '${g}'${result.graduated.length > 1 ? ` +${result.graduated.length - 1}` : ""}`
+      ? `graduated '${g}'${verifiedGraduated.length > 1 ? ` +${verifiedGraduated.length - 1}` : ""}`
       : `staged '${s}'${result.staged.length > 1 ? ` +${result.staged.length - 1}` : ""} for review`;
-    appendUiEvent({ phase: g ? "skill_graduated" : "skill_staged", summary, skill: g || s, action: g ? "graduate" : "stage", route: "autopilot" });
-    writeUiState({ phase: "done", last: summary, route: `AUTOPILOT · ${g ? "graduate" : "stage"}` });
-    for (const n of result.graduated) appendMeshFeed({ type: "skill_graduated", skill: n, route: "AUTOPILOT", signals: 0 });
+    if (g || s) {
+      appendUiEvent({ phase: g ? "skill_graduated" : "skill_staged", summary, skill: g || s, action: g ? "graduate" : "stage", route: "autopilot" });
+      writeUiState(g
+        ? { phase: "rotation", skill: g, last: summary, route: "AUTOPILOT · graduate" }
+        : { phase: "idle", last: "", route: "AUTOPILOT · stage" });
+    }
+    for (const n of verifiedGraduated) appendMeshFeed({ type: "skill_graduated", skill: n, route: "AUTOPILOT", signals: 0 });
     // v1.1 parity: auto publishability preflight (read-only) on AUTOPILOT graduation too, not just manual.
-    for (const n of result.graduated) { try { const _d = agentSkillsDir(ctx); const _b = readSkill(_d, n); if (_b) { const _p = publishPlan({ name: n, description: skillDesc(_d, n), body: _b, shelf: "agent" }); appendUiEvent({ phase: "skill_publish_preflight", summary: `${n}: ${_p.publishability}/100 · tier=${publishTier(_p)} · ${_p.recommended}`, skill: n, route: "auto-after-graduate" }); } } catch { /* preflight must never break autopilot */ } }
+    for (const n of verifiedGraduated) { try { const _d = agentSkillsDir(ctx); const _b = readSkill(_d, n); if (_b) { const _p = publishPlan({ name: n, description: skillDesc(_d, n), body: _b, shelf: "agent" }); appendUiEvent({ phase: "skill_publish_preflight", summary: `${n}: ${_p.publishability}/100 · tier=${publishTier(_p)} · ${_p.recommended}`, skill: n, route: "auto-after-graduate" }); } } catch { /* preflight must never break autopilot */ } }
   }
   // OPT-IN promotion (MM_PUBLISH=auto): copy freshly-graduated skills to the shared shelf
   // (~/.letta/skills) so they appear under the app's Custom Skills, reusable for ALL agents.
@@ -241,7 +285,7 @@ export async function runAutopilot(ctx: any, config?: AutopilotConfig): Promise<
     for (const n of result.graduated) { try { publishSkillToCatalog(n, ctx); published.push(n); } catch { /* privacy/lint gate or no-op — skip */ } }
     if (published.length) {
       appendUiEvent({ phase: "skill_published", summary: `published ${published.length} to catalog (Custom Skills)`, skill: published[0], action: "publish", route: "autopilot" });
-      writeUiState({ phase: "done", last: `published '${published[0]}' to catalog`, route: "AUTOPILOT · publish" });
+      writeUiState({ phase: "rotation", skill: published[0], last: `published '${published[0]}' to catalog`, route: "AUTOPILOT · publish" });
       for (const n of published) appendMeshFeed({ type: "skill_published", skill: n, route: "CATALOG", signals: 0 });
     }
   }
@@ -281,10 +325,27 @@ export const SEARCH_STOP = new Set("the and for with via use using used run runn
 
 export const SEARCH_DISTINCT_MIN = 3; // ≥3 distinctive (non-stopword) hits in name/desc — prevents cross-domain false-positives (e.g. browser-QA→cloud-forensics)
 
+/** Product-name mentions describe the router being tested, not the missing procedure.
+ * Strip only this self-reference for task-time prescription search; durable update/create routing keeps the raw evidence. */
+export function normalizePrescriptionQuery(query: string): string {
+  return String(query).replace(/\bmuscle[\s-]+memory\b/gi, " ").replace(/\s+/g, " ").trim();
+}
+
+const IDENTITY_STOP = new Set(["recovering", "repairing", "recovery", "repair", "repairs", "from", "failing", "failed", "failure", "failures", "runs", "run", "at"]);
+
+/** Collapse naming aliases to a conservative class identity for anti-bloat checks.
+ * `recovering-from-failing-script-runs` and `repairing-failing-script-runs` are one class. */
+export function canonicalSkillIdentity(name: string): string {
+  return [...new Set(slug(name).split("-").filter((token) => token && !IDENTITY_STOP.has(token)))].join("-");
+}
+
 export function searchSkills(dirs: string[], query: string, k = 5): Array<{ name: string; description: string; dir: string; score: number; matched: number }> {
   const terms = [...new Set(String(query).toLowerCase().split(/[^a-z0-9.]+/).filter((t) => t.length > 2 && !SEARCH_STOP.has(t)))];
   const out: Array<{ name: string; description: string; dir: string; score: number; matched: number }> = [];
+  const seen = new Set<string>();
   for (const d of dirs) for (const n of listSkillNames(d)) {
+    if (seen.has(n)) continue;
+    seen.add(n); // precedence-ordered shelves: one skill gets one routing vote, even when mirrored globally
     const body = readSkill(d, n).toLowerCase();
     const desc = skillDesc(d, n);
     const nl = n.toLowerCase(), dl = desc.toLowerCase();
@@ -631,6 +692,21 @@ export function isHighConfidenceCreate(res: ReviewResult, ev: { items: number; c
   return ev.convs >= 3 && ev.items >= 1 && cleanRoute && richDraft;
 }
 
+export function graduationProof(skillsDir: string, name: string): { ok: boolean; path: string; reason: string } {
+  const nm = slug(name);
+  const path = join(skillsDir, nm, "SKILL.md");
+  if (!nm) return { ok: false, path, reason: "name required" };
+  if (!existsSync(path)) return { ok: false, path, reason: "SKILL.md missing after write" };
+  try {
+    const content = readFileSync(path, "utf8");
+    const fmName = slug((content.match(/^name:\s*(.+)$/im)?.[1] || "").trim());
+    if (fmName !== nm) return { ok: false, path, reason: `frontmatter name mismatch: expected ${nm}, got ${fmName || "(none)"}` };
+    return { ok: true, path, reason: "write visible on active shelf" };
+  } catch (e: any) {
+    return { ok: false, path, reason: String(e?.message ?? e) };
+  }
+}
+
 
 export function graduateStagedSkill(name: string, ctx?: any): string {
   const nm = slug(name);
@@ -645,15 +721,19 @@ export function graduateStagedSkill(name: string, ctx?: any): string {
   const body = content.replace(/^---[\s\S]*?\n---\s*\n?/, "");
   const lint = lintSkillDraft({ name: nm, description: desc, body });
   if (!lint.ok) throw new Error(`linter blocked: ${lint.issues.join("; ")}`);
+  const quality = sotaQualityGaps({ name: nm, description: desc, body });
+  if (quality.length) throw new Error(`quality blocked: ${quality.join("; ")}`);
   const sec = scanSkillContent(body); if (!sec.ok) throw new Error(`security blocked: ${sec.issues.join("; ")}`);
   const dstRoot = agentSkillsDir(ctx);
   const dst = writeSkill(dstRoot, nm, content.includes(MM_TAG) ? content : content + `\n<!-- ${MM_TAG}: graduated ${new Date().toISOString().slice(0, 10)} -->\n`);
+  const proof = graduationProof(dstRoot, nm);
+  if (!proof.ok) throw new Error(`graduation proof failed: ${proof.reason}`);
   syncSkillToDesktopCatalog(nm, ctx);
   mkdirSync(STAGED_RETIRED_DIR, { recursive: true });
   try { renameSync(srcDir, join(STAGED_RETIRED_DIR, `${nm}-graduated-${Date.now()}`)); } catch { /* best-effort quarantine */ }
   appendUiEvent({ phase: "skill_graduated", summary: `graduated '${nm}'`, skill: nm, action: "graduate", route: "manual" });
   appendMeshFeed({ type: "skill_graduated", skill: nm, route: "GRADUATE", signals: 0 });
-  writeUiState({ phase: "done", last: `graduated '${nm}'`, route: "GRADUATE · live" });
+  writeUiState({ phase: "rotation", skill: nm, last: `graduated '${nm}'`, route: "GRADUATE · live" });
   // MM_PUBLISH v1.1: auto-run the publishability preflight right after graduation (READ-ONLY — never
   // auto-publishes). Surfaces quality+publishability score, tier, and the recommended shelf so a good
   // skill can be promoted to shared Custom Skills without manual babysitting. Best-effort, never breaks graduation.
@@ -668,8 +748,9 @@ export function reviewForkAuthor(ctx: any): (sys: string, user: string) => Promi
   return async (sys: string, user: string) => {
     try {
       if (typeof ctx?.conversation?.fork !== "function") return "";
-      const forked = await ctx.conversation.fork({ hidden: true });
-      const stream = await forked.sendMessageStream([{ role: "user", content: `${sys}\n\n${user}` }]);
+      const forked = await hiddenForkFor(ctx, "review-author");
+      if (!forked) return "";
+      const stream = await forked.sendMessageStream([{ role: "user", content: `${sys}\n\nTreat this request independently from prior messages in this hidden bench thread.\n\n${user}` }]);
       const out = await consumeStreamBounded(stream as AsyncIterable<unknown>);
       return out.trim();
     } catch { return ""; }
@@ -709,9 +790,9 @@ export async function runReflectiveReview(ctx: any, config: { mode?: "staged" | 
     writeUiState({ phase: "idle", last: summary, route: "SKIP · handled" });
     return { action: "none", reason: summary };
   }
-  writeUiState({ phase: "routing", route: preTgt ? `UPDATE → ${preTgt.name}` : "CREATE (new skill)" });
+  writeUiState({ phase: "checking", subject: preTgt?.name || "", route: preTgt ? `UPDATE → ${preTgt.name}` : "CREATE (new skill)" });
   appendUiEvent({ phase: "review_planned", summary: preTgt ? `route UPDATE → ${preTgt.name}` : "route CREATE — no existing skill safely covers this" });
-  writeUiState({ phase: "writing", skill: preTgt?.name, route: preTgt ? `UPDATE → ${preTgt.name}` : "CREATE" });
+  writeUiState({ phase: "shaping", skill: preTgt?.name || "", route: preTgt ? `UPDATE → ${preTgt.name}` : "CREATE" });
   const author = config.authorFn || reviewForkAuthor(ctx);
   let res: ReviewResult;
   try {
@@ -750,7 +831,15 @@ export async function runReflectiveReview(ctx: any, config: { mode?: "staged" | 
         }
       }
       const oldContent = res.action === "update" && res.updateTarget ? (() => { const d = reviewDirs.find((x) => existsSync(join(x, res.updateTarget!, "SKILL.md"))); return d ? readSkill(d, res.updateTarget!) : undefined; })() : undefined;
+      writeUiState({ phase: "saving", skill: res.name, route: res.action.toUpperCase() });
       writeSkill(dir, res.name, tagged);
+      writeUiState({ phase: "testing", skill: res.name, route: res.action.toUpperCase() });
+      const proof = graduate ? graduationProof(dir, res.name) : { ok: true, path: join(dir, res.name, "SKILL.md"), reason: "staged write" };
+      if (!proof.ok) {
+        appendUiEvent({ phase: "graduation_unverified", summary: `not claiming graduation for '${res.name}': ${proof.reason.slice(0, 100)}`, skill: res.name, action: res.action, route: "truth-guard" });
+        writeUiState({ phase: "idle", last: `graduation unverified for '${res.name}'`, route: "SKIP · truth-guard" });
+        return { ...res, wrote: join(dir, res.name), reason: `graduation proof failed: ${proof.reason}` };
+      }
       if (graduate) syncSkillToDesktopCatalog(res.name, ctx);
       // EVIDENCE-PACK MANIFEST: provenance next to the skill (not model vibes — a git object).
       const manifest = buildEvidenceManifest({ action: res.action, skill: res.name, updateTarget: res.updateTarget, convs: ev.convs, signals: ev.items, memfsHits: res.matches || [], preferences: prefs, rejected: ev.rejected, newContent: tagged, oldContent });
@@ -769,7 +858,9 @@ export async function runReflectiveReview(ctx: any, config: { mode?: "staged" | 
       appendUiEvent({ phase: "evidence_manifest_written", summary: "wrote evidence manifest" });
       if (ev.rejected.length) appendUiEvent({ phase: "noise_rejected", summary: `rejected ${ev.rejected.length} env-noise items` });
       if (prefs.length) appendUiEvent({ phase: "memory_pref_injected", summary: `injected ${prefs.length} user preferences` });
-      writeUiState({ phase: "done", last: summary, route: `${graduate ? "GRADUATE" : res.action.toUpperCase()}${res.updateTarget ? " " + res.updateTarget : ""} · ${graduate ? "live" : "staged"}` });
+      writeUiState(graduate
+        ? { phase: res.action === "update" ? "updated" : "learned", skill: res.name, last: summary, route: `${graduate ? "GRADUATE" : res.action.toUpperCase()}${res.updateTarget ? " " + res.updateTarget : ""} · live` }
+        : { phase: "idle", last: "", route: `${res.action.toUpperCase()} · staged` });
       return { ...res, wrote: join(dir, res.name) };
     } catch (e: any) { appendUiEvent({ phase: "reflect_error", summary: `write failed: ${String(e?.message ?? e).slice(0, 80)}` }); return { ...res, reason: String(e?.message ?? e) }; }
   }

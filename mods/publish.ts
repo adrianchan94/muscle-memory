@@ -54,6 +54,15 @@ function runtimeUserIdentifiers(): string[] {
   return [...vals].sort((a, b) => b.length - a.length);
 }
 
+function runtimePrivateAgentIdentifiers(): string[] {
+  const vals = new Set<string>();
+  for (const raw of [process.env.MM_AGENT || "", ...(process.env.MM_PRIVATE_IDENTIFIERS || "").split(/[,;\n]/)]) {
+    const value = raw.trim();
+    if (value.length >= 3 && !/^(agent|assistant|worker|reviewer|user)$/i.test(value)) vals.add(value);
+  }
+  return [...vals].sort((a, b) => b.length - a.length);
+}
+
 // Sanitize identifiers → placeholders. Preserves all mechanism/code/worked-examples; only swaps PRIVATE terms.
 export function sanitizeForPublish(body: string): { sanitized: string; replacements: Array<{ kind: string; from: string; to: string }> } {
   const replacements: Array<{ kind: string; from: string; to: string }> = []; let s = body;
@@ -63,6 +72,7 @@ export function sanitizeForPublish(body: string): { sanitized: string; replaceme
   sub("agent-id", /\bagent-[a-f0-9]{6,}(?:-[a-f0-9]+)+\b/g, "<agent id>");
   sub("user", /\b(?:localuser|private-user|chan2saucy|adrianchan|adrian chan)\b/gi, "<user>");
   for (const id of runtimeUserIdentifiers()) sub("user", new RegExp(`\\b${escapeRegExp(id)}\\b`, "gi"), "<user>");
+  for (const id of runtimePrivateAgentIdentifiers()) sub("agent", new RegExp(`\\b${escapeRegExp(id)}\\b`, "gi"), "<agent>");
   sub("project", /\b(?:ProjectX|ExampleCorp)\b/g, "<project>");
   sub("provider-env", /\b(?:ZAI|Z_AI|OPENAI|ANTHROPIC|GLM|MORPH|KIMI|MINIMAX|GEMINI|XAI)_API_KEY\b/g, "PROVIDER_API_KEY");
   return { sanitized: s, replacements };
@@ -217,6 +227,6 @@ export function publishSkillToCatalog(name: string, ctx?: any): string {
   writeFileSync(join(dstDir, "SKILL.md"), published);
   appendUiEvent({ phase: "skill_published", summary: `published '${nm}' to custom skill catalog`, skill: nm, action: "publish", route: "global-catalog" });
   appendMeshFeed({ type: "skill_published", skill: nm, route: "PUBLISH", signals: 0 });
-  writeUiState({ phase: "done", last: `published '${nm}' to catalog`, route: "PUBLISH · catalog" });
+  writeUiState({ phase: "rotation", skill: nm, last: `published '${nm}' to catalog`, route: "PUBLISH · catalog" });
   return join(dstDir, "SKILL.md");
 }

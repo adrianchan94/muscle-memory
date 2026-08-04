@@ -83,7 +83,7 @@ export function isMature(count: number, convs: number, m: number): boolean {
 
 // Trivial verbs carry no procedural meaning on their own — a sequence made only of
 // these is noise, not a skill.
-export const TRIVIAL = new Set(["echo", "cd", "ls", "cat", "true", "pwd", "sleep", ":"]);
+export const TRIVIAL = new Set(["echo", "printf", "cd", "ls", "cat", "grep", "rg", "sed", "pgrep", "true", "pwd", "sleep", "timeout", "gtimeout", "letta", ":"]);
 
 // Multi-subcommand tools where the 2nd token is the meaningful verb (git commit vs git add).
 export const SUBCMD = new Set(["git", "letta", "npm", "npx", "gh", "docker", "cargo", "bun", "pnpm", "yarn", "kubectl", "jq"]);
@@ -174,10 +174,10 @@ export function finalize(kind: "template" | "sequence", byKey: Map<string, { cou
 
 // A single tool-call primitive (read a file, write a file, grep) is never a "skill".
 // Skills are multi-step workflows or distinctive command pipelines.
-export const PRIMITIVE = /^(Read|Write|Edit|Glob|Grep|fast_apply|structural_search)\b/;
+export const PRIMITIVE = /^(Read|Write|Edit|Glob|Grep|Skill|fast_apply|structural_search)\b/;
 
 // Shell noise: commands that are the universal texture of every session, never a skill on their own.
-export const TRIVIAL_CMD = new Set(["echo", "cd", "ls", "cat", "true", "false", "pwd", "sleep", ":", "mkdir", "rmdir", "touch", "which", "whoami", "find", "head", "tail", "wc", "chmod", "chown", "cp", "mv", "rm", "export", "unset", "source", "clear", "env", "printenv", "date", "tree", "cut", "tr", "sort", "uniq", "basename", "dirname", "realpath", "test"]);
+export const TRIVIAL_CMD = new Set(["echo", "printf", "cd", "ls", "cat", "grep", "rg", "sed", "pgrep", "shasum", "sha256sum", "md5", "true", "false", "pwd", "sleep", "timeout", "gtimeout", "letta", ":", "mkdir", "rmdir", "touch", "which", "whoami", "find", "head", "tail", "wc", "chmod", "chown", "cp", "mv", "rm", "export", "unset", "source", "clear", "env", "printenv", "date", "tree", "cut", "tr", "sort", "uniq", "basename", "dirname", "realpath", "test"]);
 
 // Bare interpreter/runtime invocation ("run it") — the universal step; only a skill with a real fix or distinctive verb.
 export const BARE_RUN = /^(python3?|node|deno|bun|ruby|go|php|perl|java|dotnet|sh|bash|zsh)$|^\.\//i;
@@ -200,34 +200,80 @@ export function templateVerb(key: string): string {
 export function isDistinctiveStep(sig: string): boolean {
   if (PRIMITIVE.test(sig)) return false;
   if (BARE_RUN.test(sig)) return false;
+  if (isInspectionTemplate(sig)) return false;
+  // stepSig intentionally compresses multi-token commands; these read-only Letta lookup families
+  // therefore arrive as `letta models` / `letta skills` without the trailing `list` verb.
+  if (/^letta (?:models|agents|skills|conversations|environments)\b/i.test(sig)) return false;
   const v = sig.split(/\s+/)[0].replace(/^.*\//, "");
   if (TRIVIAL_CMD.has(v)) return false;
   return /[a-z]/i.test(sig);
 }
 
+
+/** High-frequency read-only inspection commands are receipts, not reusable skills. Repetition does
+ * not turn `list|status|view` into procedural knowledge; real recoveries still enter through the
+ * repair-candidate lane. Keep this deliberately narrow so build/deploy/test rituals still qualify. */
+export function isInspectionTemplate(key: string): boolean {
+  let normalized = String(key || "").toLowerCase().replace(/\s+/g, " ").trim();
+  // Shell/cwd wrappers do not turn a read-only lookup into procedural knowledge.
+  normalized = normalized.replace(/^cd\s+<(?:str|path)>\s*&&\s*/, "");
+  normalized = normalized.replace(/^(?:g?timeout)\s+(?:<n>|\d+(?:\.\d+)?[smhd]?)\s+/, "");
+  normalized = normalized.replace(/^git\s+-c\s+<(?:str|path)>\s+/, "git ");
+  const first = normalized.split(/&&|\|\||\||;/, 1)[0].trim();
+  return /(?:^|\s)--(?:help|version)\b/.test(first)
+    || /^letta (?:models?|agents?|skills?|conversations?|environments?) (?:list|show|current|<n>)\b/.test(first)
+    || /^git (?:status|log|diff|show|shortlog|rev-parse)\b/.test(first)
+    || /^gh (?:pr|issue|run|repo|release) (?:view|list|status|checks)\b/.test(first)
+    || (/^gh api\b/.test(first) && !/(?:--method|-x)\s*(?:post|put|patch|delete)\b/.test(first))
+    || /^gh search\b/.test(first)
+    || /^(?:npm|pnpm|yarn|bun) (?:list|ls|view|info|why|outdated)\b/.test(first)
+    || /^docker (?:ps|images|inspect|info|version)\b/.test(first)
+    || /^kubectl (?:get|describe|logs|api-resources|version)\b/.test(first);
+}
+
 export function isSkillWorthy(c: Candidate): boolean {
   if (!c.mature) return false;
   if (c.kind === "template") {
+    if (/^(?:<[^>]+>)+$/.test(c.key.trim())) return false;  // placeholder-only shell artifact, no procedure
+    if (/^(?:python3?|node|deno|bun|ruby|perl)\s+(?:-c|-e)\s+<str>(?:\s|$)/i.test(c.key)) return false; // redacted inline program, no reusable content
     if (PRIMITIVE.test(c.key)) return false;                // primitive file-op, not a skill
     if (TRIVIAL_CMD.has(templateVerb(c.key))) return false; // shell noise (ls/cat/echo/mkdir…) — never a skill
+    if (isInspectionTemplate(c.key)) return false;          // repeated read-only lookup/receipt, not procedural knowledge
     return true;
   }
-  // sequence: a fix-free chain of only primitives/bare-runs/noise is the universal edit→run loop, not a skill.
-  if (c.kind === "sequence" && c.fixes === 0 && !c.key.split(/→/).some((s) => isDistinctiveStep(s.trim()))) return false;
+  // Sequence candidates never get a free pass merely because one row failed: durable recoveries are
+  // emitted separately by repairCandidates. A chain of only primitives/bare-runs/inspection noise is not a skill.
+  if (c.kind === "sequence" && !c.key.split(/→/).some((s) => isDistinctiveStep(s.trim()))) return false;
   return true;
 }
 
+
+/** Primitive/file-tool/environment repairs are useful telemetry, but they are not standalone skills.
+ * A generalized class such as `failing-script-runs` survives; raw Read/Edit/env/inspection loops do not. */
+export function isDurableRepairChain(r: RepairChain): boolean {
+  if (!isDurableLesson(r.errClass)) return false;
+  const trigger = String(r.trigger || "").trim();
+  if (!trigger || PRIMITIVE.test(trigger)) return false;
+  if (/^(?:Read|Write|Edit|Glob|Grep)(?:\.|\b)/i.test(trigger)) return false;
+  if (/^(?:[A-Z_][A-Z0-9_]*=|#)/.test(trigger)) return false;
+  if (!r.generalized && BARE_RUN.test(trigger)) return false;
+  if (TRIVIAL_CMD.has(templateVerb(trigger)) || isInspectionTemplate(trigger)) return false;
+  return true;
+}
+
+export function isMatureRepairChain(r: RepairChain): boolean {
+  return isDurableRepairChain(r)
+    && ((r.convs >= MM.MIN_CONVS && r.count >= 2) || (!!r.generalized && r.count >= 2) || r.count >= MM.MIN_COUNT);
+}
 
 /** A real recovery IS a high-value skill. In realistic varied work the same literal command rarely
  * recurs, but the same repair SHAPE does — so mature repairs (incl. generalized cross-command classes)
  * become first-class distill candidates, not just enrichment for a separately-maturing sequence. */
 export function repairCandidates(rows: Row[]): Candidate[] {
   const out: Candidate[] = [];
-  for (const r of detectRepairChains(rows)) {
+  for (const r of detectRepairChains(rows).filter(isMatureRepairChain)) {
     // a real recovery is high-signal: mature at ≥2 reps/≥2 sessions, OR a generalized cross-command class, OR ≥3 reps.
-    const mature = (r.convs >= MM.MIN_CONVS && r.count >= 2) || (!!r.generalized && r.count >= 2) || r.count >= MM.MIN_COUNT;
-    if (!mature) continue;
-    out.push({ kind: "sequence", key: r.verifyStep, count: r.count, convs: r.convs, fixes: r.count, maturity: +maturityScore(r.count, r.convs, r.count).toFixed(2), mature: true });
+    out.push({ kind: "sequence", key: r.generalized ? r.trigger : r.verifyStep, count: r.count, convs: r.convs, fixes: r.count, maturity: +maturityScore(r.count, r.convs, r.count).toFixed(2), mature: true });
   }
   return out;
 }
@@ -501,7 +547,7 @@ export function isDurableLesson(text: unknown): boolean {
 export function isValidSkillName(name: unknown): boolean {
   const n = String(name ?? "").trim();
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(n) || n.length > 64) return false;
-  const ANTI = [/^fix-/, /^debug-/, /^audit-/, /^patch-/, /-to-/, /\d{3,}/, /v?\d+[._]\d+/, /\berror\b|\bexception\b/, /-today$|-now$|-temp$|-wip$/];
+  const ANTI = [/^fix-/, /^debug-/, /^audit-/, /^patch-/, /(?:^|-)to(?:-|$)/, /\d{3,}/, /v?\d+[._]\d+/, /\berror\b|\bexception\b/, /-today$|-now$|-temp$|-wip$/];
   return !ANTI.some((p) => p.test(n));
 }
 
@@ -537,10 +583,10 @@ export function multiInstanceSupport(topic: string, signals: EvidenceSignal[], m
 export function buildCrossConversationEvidence(rows: Row[]): { digest: string; convs: number; items: number; signals: EvidenceSignal[]; rejected: Array<{ item: string; reason: string }> } {
   const convs = new Set(rows.map((r) => String(r.conv ?? "?"))).size;
   const allRepairs = detectRepairChains(rows), allAps = detectAntiPatterns(rows);
-  const repairs = allRepairs.filter((r) => isDurableLesson(r.errClass));
+  const repairs = allRepairs.filter(isDurableRepairChain);
   const aps = allAps.filter((p) => isDurableLesson(p.errClass));
   const rejected: Array<{ item: string; reason: string }> = [];
-  for (const r of allRepairs) if (!isDurableLesson(r.errClass)) rejected.push({ item: `${r.trigger} (${r.errClass})`, reason: "environment/transient — negative filter" });
+  for (const r of allRepairs) if (!isDurableRepairChain(r)) rejected.push({ item: `${r.trigger} (${r.errClass})`, reason: isDurableLesson(r.errClass) ? "primitive/inspection repair — not a standalone skill" : "environment/transient — negative filter" });
   for (const p of allAps) if (!isDurableLesson(p.errClass)) rejected.push({ item: `${p.step} (${p.errClass})`, reason: "environment/transient — negative filter" });
   const tmpl = new Map<string, number>();
   const highSignal = new Map<string, { count: number; failures: number; convs: Set<string>; tool: string }>();
