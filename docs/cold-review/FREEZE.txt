@@ -1,0 +1,65 @@
+MUSCLE MEMORY — COLD REVIEW FREEZE RECORD
+=========================================
+
+CANDIDATE
+  package            @adrianchan94/muscle-memory
+  version            1.0.0-rc.3
+  status             RELEASE CANDIDATE — not published, not tagged, not merged
+
+EXACT BYTES
+  packed tarball     c68e29d28fc6efe802f8f26ed55c9f491317e9c9e59a9f98ff076f94e6a8ff7e
+  tarball bytes      249342
+  bundled entry      6a3ab91243780550088e2417c4b56012ee3f5cb60484156d2d2997148a24e60e
+  packed file set    MOD.md, CHANGELOG.md, README.md, LICENSE, mods/   (21 files)
+
+  The tarball is NOT committed. Rebuild it with `npm ci && npm run build && npm pack`
+  and compare. See VERIFY-REPRODUCTION.md.
+
+FROZEN COMMIT
+  branch             release/muscle-memory-v1
+  pull request       https://github.com/adrianchan94/muscle-memory/pull/2
+
+  The frozen commit SHA is the head of PR #2 at the moment the offline archive was
+  sealed, and is recorded authoritatively in that archive's MANIFEST. A file cannot
+  contain its own commit hash, so this record deliberately does not restate it.
+
+  To confirm you are on the frozen commit:
+    git rev-parse HEAD          # compare against the archive MANIFEST
+    git status --porcelain      # must be empty
+    git diff --check            # must be empty
+
+GATES ON THE FROZEN TREE
+  npm test                      241 pass / 0 fail        exit 0
+  npm run verify                all stages green         exit 0
+  node scripts/final-gate.mjs   PASS_RELEASE_CANDIDATE   exit 0
+  package smoke                 PASS, privatePathHits []
+
+  CI (ubuntu-latest), commit f85cedc:
+    https://github.com/adrianchan94/muscle-memory/actions/runs/30972814200
+    https://github.com/adrianchan94/muscle-memory/actions/runs/30972816048
+
+GENERATED EVIDENCE (regenerate and diff)
+  node scripts/dump-package-manifest.mjs   -> PACKAGE-MANIFEST.json
+  node scripts/dump-tool-schemas.mjs       -> TOOL-SCHEMAS.json
+  Both exit non-zero if their assertions fail.
+
+INVALIDATION RULE
+  Any change to MOD.md, CHANGELOG.md, README.md, LICENSE, or mods/ changes the packed
+  bytes and VOIDS this freeze. A new candidate identity must be minted and both cold
+  reviews re-run. This has already happened twice in this cycle:
+
+    cbfcbf6d…  248199 B  VOID — superseded by the canonical-research-record wording
+    f0f63ae5…  248204 B  VOID — superseded by the README product-hierarchy rewrite
+    c68e29d2…  249342 B  CURRENT
+
+  Changes under docs/ do NOT affect the packed bytes; docs/ is excluded from the
+  package `files` field, and PACKAGE-MANIFEST.json asserts that no review doc ships.
+
+NON-INHERITANCE
+  RC3 inherits no prior qualification. The historical product tarball e2b9c4a1…,
+  cold-review archive v6 cb951cbe…, and owner candidate d97875fa… are preserved as
+  history. None of their seals, reviews, or approvals transfer to these bytes.
+
+BLOCKED AT FREEZE TIME
+  no git tag · no GitHub release (not even a draft) · no npm publish ·
+  no merge to main · no external research send
