@@ -45,7 +45,7 @@ The research demonstrates bounded effects in tested tool-use tasks. It does not 
 
 - Historical reference candidate: `1.0.0-rc.2`, product tarball `e2b9c4a1…`, cold-review archive v6.
 - New owner candidate: `1.0.0-rc.3`.
-  - packed tarball sha256 `d96b59fdb0bda65c2ec213d219b1f1a9e780b9bce71a692dd9313c69e34deff2` · 248016 B
+  - packed tarball sha256 `cbfcbf6d6d1094e4bd4b3438a011ad14b2265c717e900ef2a37cbf2256fbd983` · 248199 B
   - bundled entry sha256 `6a3ab91243780550088e2417c4b56012ee3f5cb60484156d2d2997148a24e60e`
   - minted from the packed file set (`MOD.md`, `CHANGELOG.md`, `README.md`, `LICENSE`, `mods`) after the review bytes settled. Any further edit to those paths invalidates this hash and requires a re-mint.
   - awaiting independent custody confirmation; not yet cold-reviewed.

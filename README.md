@@ -6,6 +6,8 @@
 
 > **Context is treatment, not nutrition.** Relevance earns a look. Observed outcomes earn another possession.
 
+> 🏆 **Winner — Letta Mod Challenge (July 2026).** Following the challenge, Letta distributed `muscle-memory` through their [mods repo](https://github.com/letta-ai/mods/tree/main/packages/muscle-memory) and npm org as [`@letta-ai/muscle-memory`](https://www.npmjs.com/package/@letta-ai/muscle-memory). That remains the legacy distribution; this repository is the owner-maintained continuation and its `@adrianchan94/muscle-memory` identity is not published yet.
+
 [Research](https://muscle-memory-v1-research.vercel.app/) · [RC3 release notes](./docs/RELEASE-NOTES-v1.0.0-rc.3.md) · [Agent guide](./MOD.md) · [Security](./SECURITY.md) · [Contributing](./CONTRIBUTING.md)
 
 ```txt
