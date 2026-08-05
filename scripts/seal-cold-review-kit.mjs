@@ -176,6 +176,13 @@ of these, you have the wrong bytes and the review does not count:
 | \`8d965bfd…\` | **superseded archive — the one G1 CLEAR and the G2 dogfood were bound to.** If you are holding it, stop |
 | \`9e7b7668…\` | superseded archive previously placed on the Desktop |
 | \`6bd385b0…\`, \`39057acc…\` | superseded archives from the void-ledger completion reseals |
+| \`cc9241d2…\`, \`3fbfa9f7…\`, \`5e516367…\`, \`82e9b16a…\` | superseded archives from the docs-honesty cut |
+| \`9d5093eb…\`, \`c4186c2a…\`, \`a527e649…\` | superseded commits from the docs-honesty cut |
+
+The cold-review archive is a gzip of a tar and carries timestamps, so **the archive sha is not
+byte-reproducible across seals** — only the product tarball is. Always compare the tarball
+sha256 and the tar-stream sha256, and treat the archive sha as an identity pin for the exact
+file you were handed, not something you can re-derive.
 | \`3097a31d…\` | superseded commit — the product-freeze head before the generator-only void-ledger fix |
 | \`385e648e…\` | superseded product tarball from the P0-wiring HOLD candidate |
 
