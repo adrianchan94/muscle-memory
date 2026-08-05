@@ -34,9 +34,15 @@ GATES ON THE FROZEN TREE
   node scripts/final-gate.mjs   PASS_RELEASE_CANDIDATE   exit 0
   package smoke                 PASS, privatePathHits []
 
-  CI (ubuntu-latest), commit f85cedc:
-    https://github.com/adrianchan94/muscle-memory/actions/runs/30972814200
-    https://github.com/adrianchan94/muscle-memory/actions/runs/30972816048
+  CI (ubuntu-latest) for the frozen commit:
+    Run IDs are NOT restated here. Any commit that edits this file changes the head,
+    so an inline run ID is guaranteed to name a different commit than the one you are
+    reviewing. That mismatch already voided one review; the structure now prevents it.
+
+    The authoritative run IDs for the exact frozen commit are in the sealed archive's
+    MANIFEST (field: ci). To look them up yourself:
+      gh run list --branch release/muscle-memory-v1 \
+        --json headSha,conclusion,url --jq '.[] | select(.headSha=="<FROZEN_SHA>")'
 
 GENERATED EVIDENCE (regenerate and diff)
   node scripts/dump-package-manifest.mjs   -> PACKAGE-MANIFEST.json

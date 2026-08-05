@@ -117,12 +117,19 @@ Known and intended matches:
 
 ## 7 · CI on clean Linux
 
-Runs on `ubuntu-latest`. The freeze commit's runs are linked in `FREEZE.txt`; earlier green runs in the same range:
+Runs on `ubuntu-latest`. Run IDs are deliberately **not** listed in this file — a commit that
+edits this file changes the head, so any inline ID would name a different commit than the one
+you are reviewing.
 
-- <https://github.com/adrianchan94/muscle-memory/actions/runs/30971752511>
-- <https://github.com/adrianchan94/muscle-memory/actions/runs/30971754855>
-- <https://github.com/adrianchan94/muscle-memory/actions/runs/30971207172>
-- <https://github.com/adrianchan94/muscle-memory/actions/runs/30971238643>
+The authoritative run IDs for the exact frozen commit are in the sealed archive's `MANIFEST.json`
+(field `ci`). To confirm independently:
+
+```bash
+gh run list --branch release/muscle-memory-v1 \
+  --json headSha,conclusion,url --jq '.[] | select(.headSha=="<FROZEN_SHA>")'
+```
+
+Every run for the frozen commit must be `success`.
 
 ### Why CI history before this range is red
 
