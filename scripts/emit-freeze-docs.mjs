@@ -8,7 +8,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { gunzipSync } from "node:zlib";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -198,6 +198,34 @@ The snapshot is a content export (\`git archive\`) and carries no git history, s
 comparing the frozen commit SHA on GitHub. The final gate's \`diff-check\` step is skipped in a
 git-less export by design; that is not a failure.
 `;
+
+
+  // Hand docs may LINK to the freeze record but must never restate a product identity by hand.
+  // Both of these carried a stale sha for a void, exploitable tarball — the fifth occurrence of
+  // that class — so the identity lines are generated here instead of maintained.
+  const identityRewrites = [
+    {
+      rel: "docs/cold-review/README.md",
+      find: /\| Packed tarball sha256 \| `[0-9a-f]{64}` \|/,
+      to: `| Packed tarball sha256 | \`${tarSha}\` |`,
+    },
+    {
+      rel: "docs/cold-review/README.md",
+      find: /\| Tarball bytes \| `\d+` \|/,
+      to: `| Tarball bytes | \`${tarBytes}\` |`,
+    },
+    {
+      rel: "docs/RELEASE-NOTES-v1.0.0-rc.3.md",
+      find: /- packed tarball sha256 `[0-9a-f]{64}` · \d+ B/,
+      to: "- packed tarball sha256: see `docs/cold-review/FREEZE.txt` — do not restate a sha by hand",
+    },
+  ];
+  for (const { rel, find, to } of identityRewrites) {
+    const path = join(root, rel);
+    if (!existsSync(path)) continue;
+    const body = readFileSync(path, "utf8");
+    if (find.test(body)) writeFileSync(path, body.replace(find, to));
+  }
 
   writeFileSync(join(root, "docs", "cold-review", "FREEZE.txt"), freeze);
   writeFileSync(join(root, "docs", "cold-review", "VERIFY-REPRODUCTION.md"), verify);

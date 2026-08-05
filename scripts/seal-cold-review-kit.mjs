@@ -222,6 +222,36 @@ for (const name of readdirSync(kit).sort()) {
 writeFileSync(join(kit, "MANIFEST.json"), JSON.stringify(manifest, null, 2) + "\n");
 
 // ── 6 · seal ────────────────────────────────────────────────────────────────
+// HARD GATE — kills the hand-restated-identity class permanently.
+// Five times a superseded product sha survived in a hand-maintained doc and was read as current.
+// Any void-ledger sha that appears in a shipped doc WITHOUT being marked superseded fails the
+// seal outright, so a sixth occurrence cannot reach a reviewer.
+{
+  const voidShas = [...brief.matchAll(/\|\s*`([0-9a-f]{8})…/g)].map((m) => m[1]);
+  const offenders = [];
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) { if (!/node_modules|^\.git$/.test(entry.name)) walk(full); continue; }
+      if (!/\.(md|txt)$/.test(entry.name)) continue;
+      const lines = readFileSync(full, "utf8").split("\n");
+      for (const line of lines) {
+        for (const sha of voidShas) {
+          if (!line.includes(sha)) continue;
+          if (/void|superseded|do not review|historical|no seal transfers/i.test(line)) continue;
+          offenders.push(`${full.replace(root + "/", "")}: ${line.trim().slice(0, 90)}`);
+        }
+      }
+    }
+  };
+  walk(join(root, "docs"));
+  if (offenders.length) {
+    console.error("SEAL FAILED — a superseded product sha is presented as current identity:");
+    for (const o of offenders.slice(0, 8)) console.error("  " + o);
+    process.exit(1);
+  }
+}
+
 const archivePath = join(outDir, archiveName);
 execFileSync("tar", ["-czf", archivePath, "-C", outDir, "kit"]);
 const archiveSha = shaFile(archivePath);
