@@ -26,7 +26,9 @@ export function runTestCounts() {
     MM_GLOBAL_SKILLS_DIR: mkdtempSync(join(tmpdir(), "mm-freeze-glob-")),
   };
   // bun writes its summary to stderr, so capture both streams or the counts are invisible.
-  const run = spawnSync("bun", ["test"], { cwd: root, encoding: "utf8", env });
+  // Count from `npm test` — the command the docs tell a reviewer to run. Counting from a bare
+  // runner can report a different number than the documented path produces.
+  const run = spawnSync("npm", ["test"], { cwd: root, encoding: "utf8", env });
   let out = `${run.stdout ?? ""}\n${run.stderr ?? ""}`;
   // bun colourises its summary, so strip ANSI before matching or every number is invisible.
   out = out.replace(/\u001b\[[0-9;]*m/g, "");

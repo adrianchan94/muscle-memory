@@ -101,7 +101,16 @@ catch { /* command result already carries the parseable failure context */ }
 
 const freshBundle = join(candidateDir, "index.fresh.mjs");
 commands.push(runStep("independent-bundle", "bun", ["build", "mods/index.ts", "--target", "node", "--outfile", freshBundle]));
-commands.push(runStep("diff-check", "git", ["diff", "--check"]));
+// A content export carries no .git, so `git diff --check` cannot run. Say so explicitly:
+// a silent PASS would claim a check that never happened, and a HOLD would fail an honest
+// reviewer for using the snapshot exactly as instructed.
+if (existsSync(join(ROOT, ".git"))) {
+  commands.push(runStep("diff-check", "git", ["diff", "--check"]));
+} else {
+  // exitCode 0 is required: the evaluator keys off it, and an absent code reads as a failure.
+  commands.push({ name: "diff-check", exitCode: 0, ok: true, skipped: true,
+    note: "SKIPPED (no-git-context) — snapshot is a content export; integrity is asserted by the sealed MANIFEST hashes instead" });
+}
 
 const checkedInBundle = join(ROOT, "mods", "index.bundled.mjs");
 const checkedInBundleSha256 = existsSync(checkedInBundle) ? sha256(checkedInBundle) : null;

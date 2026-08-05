@@ -85,7 +85,11 @@ That is the whole install. A fresh agent then sees **three tools** — `muscle_m
 
 ```bash
 tar -xzf adrianchan94-muscle-memory-1.0.0-rc.3.tgz -C /tmp/mm
-node scripts/dump-package-manifest.mjs --stdout   # compare per-file hashes
+
+# Compare per-file hashes. scripts/ is NOT inside the tarball — it ships only in the repo — so
+# run this from a full clone at the frozen commit, not from /tmp/mm/package:
+node scripts/dump-package-manifest.mjs --stdout
+
 letta install /tmp/mm/package
 ```
 

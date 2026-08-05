@@ -5832,7 +5832,7 @@ Next: continue unaided, or inspect one candidate without loading the full shelf.
   const renderPendingPossessions = () => {
     const rows = pendingPossessionViews(loadPossessionEvents());
     if (!rows.length)
-      return "NONE OPEN · continue work, or run /muscle-memory for the report";
+      return "NONE OPEN · continue work, or run `/muscle-memory` for the report";
     return rows.slice(0, 10).map((row) => {
       const ageMinutes = Math.max(0, Math.floor((Date.now() - row.openedAt) / 60000));
       const skill = row.skill ? `
@@ -6079,7 +6079,8 @@ STATUS · ${res.reason}`;
       const rfMode = process.env.MM_REFLECT;
       if (rfMode === "staged" || rfMode === "auto") {
         runReflectiveReview(ctx ?? { agentId: event?.agentId }, { mode: rfMode, semanticFn: semanticFnFor(event?.agentId ?? ctx?.agent?.id) }).then(() => {
-          runAutonomousPrune(ctx ?? { agentId: event?.agentId }, { maxRetire: 1 });
+          if (process.env.MM_PRUNE === "enabled")
+            runAutonomousPrune(ctx ?? { agentId: event?.agentId }, { maxRetire: 1 });
           try {
             panel?.update();
           } catch {}
@@ -6158,6 +6159,18 @@ STATUS · ${res.reason}`;
         if (!sub || sub === "report" || sub === "boxscore") {
           const summary = summarizePossessionLedger();
           return { type: "output", output: renderDecisionReport(summary, ctx) };
+        }
+        if (sub === "instrument") {
+          const action = String(argv?.[1] || "").trim();
+          if (action && action !== "init")
+            return { type: "output", output: `unknown instrument action '${action}' — try: /muscle-memory instrument init` };
+          try {
+            const { created, keyId, keyPath } = initInstrumentKey({ stateDir: STATE_DIR });
+            return { type: "output", output: created ? `\uD83D\uDD11 instrument key created · id ${keyId} · ${keyPath}
+Verified evidence is now reachable. The key itself is never printed or logged.` : `\uD83D\uDD11 instrument key already present · id ${keyId} · ${keyPath}` };
+          } catch (error) {
+            return { type: "output", output: `\uD83D\uDEAB instrument init refused — ${error instanceof Error ? error.message : String(error)}` };
+          }
         }
         if (sub === "pending") {
           return { type: "output", output: renderPendingPossessions() };
@@ -6426,7 +6439,7 @@ ${plan.digest}` };
               "       /muscle-memory pending        → resume open possessions",
               "       /muscle-memory prescribe --gap <task>",
               "       /muscle-memory roster|wins|ratings|lifecycle|staged",
-              "       /muscle-memory filmroom       → tape / coverage / candidates (debug)",
+              "       /muscle-memory coverage|audit|engram → tape / coverage / candidates (debug)",
               "loop:  muscle_memory_prescribe → Skill(exact name) → muscle_memory_close → /muscle-memory"
             ].join(`
 `)

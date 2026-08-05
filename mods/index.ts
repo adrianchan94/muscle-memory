@@ -209,7 +209,7 @@ export default function activate(letta: any) {
   };
   const renderPendingPossessions = () => {
     const rows = pendingPossessionViews(loadPossessionEvents());
-    if (!rows.length) return "NONE OPEN · continue work, or run /muscle-memory for the report";
+    if (!rows.length) return "NONE OPEN · continue work, or run `/muscle-memory` for the report";
     return rows.slice(0, 10).map((row) => {
       const ageMinutes = Math.max(0, Math.floor((Date.now() - row.openedAt) / 60_000));
       const skill = row.skill ? `\nSKILL · ${row.skill}` : "";
@@ -455,7 +455,13 @@ export default function activate(letta: any) {
       const rfMode = process.env.MM_REFLECT;
       if (rfMode === "staged" || rfMode === "auto") {
         runReflectiveReview(ctx ?? { agentId: event?.agentId }, { mode: rfMode, semanticFn: semanticFnFor(event?.agentId ?? ctx?.agent?.id) })
-          .then(() => { runAutonomousPrune(ctx ?? { agentId: event?.agentId }, { maxRetire: 1 }); try { panel?.update(); } catch { /* */ } })
+          // Retirement is NOT a side effect of reflection. `staged` means staged — a skill must
+          // never be quietly benched because a session ended. Real retirement requires an
+          // explicit opt-in or an explicit lifecycle action, so this only surfaces advice.
+          .then(() => {
+            if (process.env.MM_PRUNE === "enabled") runAutonomousPrune(ctx ?? { agentId: event?.agentId }, { maxRetire: 1 });
+            try { panel?.update(); } catch { /* */ }
+          })
           .catch(() => { /* reflection/prune must never break the app */ });
       }
     }));
@@ -529,6 +535,20 @@ export default function activate(letta: any) {
         if (!sub || sub === "report" || sub === "boxscore") {
           const summary = summarizePossessionLedger();
           return { type: "output", output: renderDecisionReport(summary, ctx) };
+        }
+        if (sub === "instrument") {
+          // instrumentStatusLine tells operators to run this. It did not exist — the one
+          // documented recovery path for a disabled verified lane was a dead end.
+          const action = String(argv?.[1] || "").trim();
+          if (action && action !== "init") return { type: "output", output: `unknown instrument action '${action}' — try: /muscle-memory instrument init` };
+          try {
+            const { created, keyId, keyPath } = initInstrumentKey({ stateDir: STATE_DIR });
+            return { type: "output", output: created
+              ? `🔑 instrument key created · id ${keyId} · ${keyPath}\nVerified evidence is now reachable. The key itself is never printed or logged.`
+              : `🔑 instrument key already present · id ${keyId} · ${keyPath}` };
+          } catch (error) {
+            return { type: "output", output: `🚫 instrument init refused — ${error instanceof Error ? error.message : String(error)}` };
+          }
         }
         if (sub === "pending") {
           return { type: "output", output: renderPendingPossessions() };
@@ -721,7 +741,7 @@ export default function activate(letta: any) {
               "       /muscle-memory pending        → resume open possessions",
               "       /muscle-memory prescribe --gap <task>",
               "       /muscle-memory roster|wins|ratings|lifecycle|staged",
-              "       /muscle-memory filmroom       → tape / coverage / candidates (debug)",
+              "       /muscle-memory coverage|audit|engram → tape / coverage / candidates (debug)",
               "loop:  muscle_memory_prescribe → Skill(exact name) → muscle_memory_close → /muscle-memory",
             ].join("\n"),
           };
