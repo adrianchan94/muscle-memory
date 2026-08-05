@@ -16,7 +16,10 @@ import { join } from "node:path";
 import { runAutonomousPrune } from "../mods/lifecycle";
 import { STATE_DIR, USAGE_PATH } from "../mods/core";
 
-const NAME = "stale-unused-skill";
+// A unique name per test. Sharing one name coupled these tests through the shelf and the
+// quarantine directory, which passed locally and failed in CI — order and timing dependent.
+let seq = 0;
+const nextName = () => `stale-unused-skill-${++seq}`;
 
 /** A skill that IS a genuine prune candidate: agent-local, managed, aged, zero uses. */
 function ownShelf(): string {
@@ -27,7 +30,8 @@ function ownShelf(): string {
   return join(process.env.MEMORY_DIR, "skills");
 }
 
-function eligibleSkill(): { shelf: string; file: string; ctx: { agentId: string } } {
+function eligibleSkill(): { shelf: string; file: string; name: string; ctx: { agentId: string } } {
+  const NAME = nextName();
   const shelf = ownShelf();
   const dir = join(shelf, NAME);
   mkdirSync(dir, { recursive: true });
@@ -35,25 +39,25 @@ function eligibleSkill(): { shelf: string; file: string; ctx: { agentId: string 
     `---\nname: ${NAME}\ndescription: An old managed skill with zero uses, past the retirement window\n---\n<!-- muscle-memory provenance: graduated -->\n## Procedure\n1. x\n`);
   mkdirSync(STATE_DIR, { recursive: true });
   writeFileSync(USAGE_PATH, JSON.stringify({ [NAME]: { created: Date.now() - 45 * 864e5, uses: 0, state: "active" } }));
-  return { shelf, file: join(dir, "SKILL.md"), ctx: { agentId: "claims-test" } };
+  return { shelf, file: join(dir, "SKILL.md"), name: NAME, ctx: { agentId: "claims-test" } };
 }
 
 test("the fixture is genuinely eligible — prune retires it when asked", () => {
   // Positive control. Without this, every claim below could pass because nothing was retirable.
-  const { file, ctx } = eligibleSkill();
+  const { file, ctx, name } = eligibleSkill();
   const result = runAutonomousPrune(ctx, { maxRetire: 1 });
-  expect(result.retired).toContain(NAME);
+  expect(result.retired).toContain(name);
   expect(existsSync(file)).toBe(false);
 });
 
 test("claim: retirement is reversible, never a deletion", () => {
-  const { shelf, ctx } = eligibleSkill();
-  runAutonomousPrune(ctx, { maxRetire: 1 });
+  const { shelf, ctx, name } = eligibleSkill();
+  expect(runAutonomousPrune(ctx, { maxRetire: 1 }).retired).toContain(name);
   // Quarantine is timestamped: _retired/<name>-<iso>, so the original is recoverable and a
   // second retire of the same name cannot clobber the first.
   // Tests in this file share one shelf, so more than one quarantine entry may exist by now —
   // which is itself the property: the timestamp means a second retire never clobbers the first.
-  const quarantined = readdirSync(join(shelf, "_retired")).filter((d) => d.startsWith(NAME));
+  const quarantined = readdirSync(join(shelf, "_retired")).filter((d) => d.startsWith(name));
   expect(quarantined.length).toBeGreaterThan(0);
   expect(new Set(quarantined).size).toBe(quarantined.length);
   for (const entry of quarantined) expect(existsSync(join(shelf, "_retired", entry, "SKILL.md"))).toBe(true);
@@ -74,15 +78,15 @@ test("claim: prune never touches the shared global shelf", () => {
 });
 
 test("claim: a used skill is never retired, however old", () => {
-  const { file, ctx } = eligibleSkill();
-  writeFileSync(USAGE_PATH, JSON.stringify({ [NAME]: { created: Date.now() - 900 * 864e5, uses: 1, state: "active" } }));
+  const { file, ctx, name } = eligibleSkill();
+  writeFileSync(USAGE_PATH, JSON.stringify({ [name]: { created: Date.now() - 900 * 864e5, uses: 1, state: "active" } }));
   expect(runAutonomousPrune(ctx, { maxRetire: 1 }).retired).toEqual([]);
   expect(existsSync(file)).toBe(true);
 });
 
 test("claim: a pinned skill is never retired", () => {
-  const { file, ctx } = eligibleSkill();
-  writeFileSync(USAGE_PATH, JSON.stringify({ [NAME]: { created: Date.now() - 45 * 864e5, uses: 0, state: "active", pinned: true } }));
+  const { file, ctx, name } = eligibleSkill();
+  writeFileSync(USAGE_PATH, JSON.stringify({ [name]: { created: Date.now() - 45 * 864e5, uses: 0, state: "active", pinned: true } }));
   expect(runAutonomousPrune(ctx, { maxRetire: 1 }).retired).toEqual([]);
   expect(existsSync(file)).toBe(true);
 });
