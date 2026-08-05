@@ -3463,91 +3463,17 @@ function renderMuscleMemoryPanel(state) {
 }
 
 // mods/invocation.ts
-import { appendFileSync as appendFileSync2, existsSync as existsSync5, mkdirSync as mkdirSync5, readFileSync as readFileSync5 } from "node:fs";
+import { appendFileSync as appendFileSync2, existsSync as existsSync6, mkdirSync as mkdirSync6, readFileSync as readFileSync6 } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { dirname as dirname2, join as join6 } from "node:path";
-var INVOCATION_LOG_PATH = join6(STATE_DIR, "invocations.jsonl");
-var SCHEMA = "mm.invocation.v1";
-var SAFE = /^[a-z0-9][a-z0-9._:-]{0,127}$/i;
-var pending = new Map;
-function appendInvocation(event) {
-  mkdirSync5(dirname2(INVOCATION_LOG_PATH), { recursive: true });
-  appendFileSync2(INVOCATION_LOG_PATH, `${JSON.stringify(event)}
-`, "utf8");
-}
-function loadInvocations() {
-  if (!existsSync5(INVOCATION_LOG_PATH))
-    return [];
-  const rows = [];
-  for (const line of readFileSync5(INVOCATION_LOG_PATH, "utf8").split(`
-`)) {
-    const text = line.trim();
-    if (!text)
-      continue;
-    try {
-      const raw = JSON.parse(text);
-      if (raw?.schema !== SCHEMA)
-        continue;
-      if (!SAFE.test(String(raw.possession_id ?? "")) || !SAFE.test(String(raw.invocation_id ?? "")))
-        continue;
-      rows.push(raw);
-    } catch {}
-  }
-  return rows;
-}
-function qualifyingInvocation(opts) {
-  const rows = (opts.invocations ?? loadInvocations()).filter((row) => row.possession_id === opts.possessionId && row.decision_event_id === opts.decisionEventId && row.skill === opts.skill && row.started_at >= opts.baselineAt && row.ended_at >= row.started_at && row.ended_at <= opts.verifiedAt);
-  return rows.length === 1 ? rows[0] : null;
-}
-function observeToolStart(event, now = Date.now()) {
-  if (String(event?.toolName ?? "") !== "Skill")
-    return;
-  const skill = String(event?.args?.skill ?? "");
-  const callId = String(event?.toolCallId ?? "");
-  if (!skill || !callId || !SAFE.test(callId))
-    return;
-  pending.set(callId, { skill, startedAt: now });
-  if (pending.size > 256) {
-    const first = pending.keys().next().value;
-    if (first !== undefined)
-      pending.delete(first);
-  }
-}
-function observeToolEnd(event, openPossessions, now = Date.now()) {
-  const callId = String(event?.toolCallId ?? "");
-  const started = callId ? pending.get(callId) : undefined;
-  if (!started)
-    return null;
-  pending.delete(callId);
-  const status = String(event?.status ?? "");
-  const ok = status ? status === "success" : event?.ok ?? !(event?.isError || event?.error);
-  if (!ok)
-    return null;
-  const matches = openPossessions.filter((row) => row.skill === started.skill);
-  if (matches.length !== 1)
-    return null;
-  const invocation = {
-    schema: SCHEMA,
-    invocation_id: `inv-${randomUUID()}`,
-    possession_id: matches[0].possession_id,
-    decision_event_id: matches[0].event_id,
-    skill: started.skill,
-    call_id: callId,
-    started_at: started.startedAt,
-    ended_at: now,
-    nonce: randomUUID()
-  };
-  appendInvocation(invocation);
-  return invocation;
-}
+import { dirname as dirname3, join as join7 } from "node:path";
 
 // mods/instrument.ts
 import { createHash as createHash2, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { chmodSync, existsSync as existsSync6, mkdirSync as mkdirSync6, readFileSync as readFileSync6, realpathSync, statSync, writeFileSync as writeFileSync5 } from "node:fs";
+import { chmodSync, existsSync as existsSync5, mkdirSync as mkdirSync5, readFileSync as readFileSync5, realpathSync, statSync, writeFileSync as writeFileSync5 } from "node:fs";
 import { homedir as homedir2 } from "node:os";
-import { dirname as dirname3, join as join7, resolve, sep } from "node:path";
+import { dirname as dirname2, join as join6, resolve, sep } from "node:path";
 function defaultInstrumentKeyPath(home = homedir2()) {
-  return join7(home, ".letta", "instrument", "muscle-memory.key");
+  return join6(home, ".letta", "instrument", "muscle-memory.key");
 }
 function resolveInstrumentKeyPath(opts = {}) {
   const env = opts.env ?? process.env;
@@ -3563,7 +3489,7 @@ function isInsideStateDir(candidate, stateDir) {
     }
   };
   const key = real(candidate);
-  const keyDir = real(dirname3(candidate));
+  const keyDir = real(dirname2(candidate));
   const state = real(stateDir);
   const under = (p) => p === state || p.startsWith(state + sep);
   return under(key) || under(keyDir);
@@ -3572,15 +3498,15 @@ function loadInstrumentKey(opts) {
   const keyPath = opts.keyPath ?? resolveInstrumentKeyPath({ env: opts.env });
   if (isInsideStateDir(keyPath, opts.stateDir))
     return { available: false, reason: "key_inside_state_dir", keyPath };
-  if (!existsSync6(keyPath))
+  if (!existsSync5(keyPath))
     return { available: false, reason: "key_absent", keyPath };
   const mode = statSync(keyPath).mode & 511;
   if (mode !== 384)
     return { available: false, reason: "key_permissions", keyPath, detail: mode.toString(8) };
-  const dirMode = statSync(dirname3(keyPath)).mode & 511;
+  const dirMode = statSync(dirname2(keyPath)).mode & 511;
   if (dirMode & 63)
     return { available: false, reason: "key_dir_permissions", keyPath, detail: dirMode.toString(8) };
-  const raw = readFileSync6(keyPath, "utf8").trim();
+  const raw = readFileSync5(keyPath, "utf8").trim();
   const [keyId, material] = raw.split(".");
   if (!keyId || !material || !/^[a-z0-9]{8}$/.test(keyId))
     return { available: false, reason: "key_malformed", keyPath };
@@ -3595,8 +3521,8 @@ function initInstrumentKey(opts) {
   const existing = loadInstrumentKey({ keyPath, stateDir: opts.stateDir });
   if (existing.available)
     return { created: false, keyId: existing.keyId, keyPath };
-  mkdirSync6(dirname3(keyPath), { recursive: true, mode: 448 });
-  chmodSync(dirname3(keyPath), 448);
+  mkdirSync5(dirname2(keyPath), { recursive: true, mode: 448 });
+  chmodSync(dirname2(keyPath), 448);
   const material = randomBytes(32);
   const keyId = createHash2("sha256").update(material).digest("hex").slice(0, 8);
   writeFileSync5(keyPath, `${keyId}.${material.toString("base64url")}
@@ -3656,6 +3582,17 @@ var EVIDENCE_FIELDS = [
   "target_rel",
   "result_class"
 ];
+function signInstrumentTuple(tuple, key) {
+  const bytes = Buffer.from(JSON.stringify(tuple, Object.keys(tuple).sort()), "utf8");
+  return `${key.keyId}:${createHmac("sha256", key.secret).update(bytes).digest("hex")}`;
+}
+function verifyInstrumentTuple(tuple, mac, key) {
+  if (typeof mac !== "string")
+    return false;
+  const expected = Buffer.from(signInstrumentTuple(tuple, key), "utf8");
+  const actual = Buffer.from(mac, "utf8");
+  return expected.length === actual.length && timingSafeEqual(actual, expected);
+}
 function canonicalEvidenceBytes(payload) {
   if (!payload || typeof payload !== "object")
     throw new Error("evidence payload must be an object");
@@ -3686,6 +3623,107 @@ function verifyEvidenceSignature(payload, signature, key) {
   if (actual.length !== expected.length)
     return { ok: false, reason: "length mismatch" };
   return timingSafeEqual(actual, expected) ? { ok: true } : { ok: false, reason: "signature mismatch" };
+}
+
+// mods/invocation.ts
+var INVOCATION_LOG_PATH = join7(STATE_DIR, "invocations.jsonl");
+var SCHEMA = "mm.invocation.v1";
+var SAFE = /^[a-z0-9][a-z0-9._:-]{0,127}$/i;
+function invocationTuple(e) {
+  return {
+    schema: e.schema,
+    invocation_id: e.invocation_id,
+    possession_id: e.possession_id,
+    decision_event_id: e.decision_event_id,
+    skill: e.skill,
+    call_id: e.call_id,
+    started_at: e.started_at,
+    ended_at: e.ended_at,
+    nonce: e.nonce
+  };
+}
+function instrumentKey() {
+  const loaded = loadInstrumentKey({ stateDir: STATE_DIR });
+  return loaded.available ? { keyId: loaded.keyId, secret: loaded.secret } : null;
+}
+var unauthenticatedInvocationsSeen = 0;
+var pending = new Map;
+function appendInvocation(event) {
+  const key = instrumentKey();
+  const signed = key ? { ...event, mac: signInstrumentTuple(invocationTuple(event), key) } : event;
+  mkdirSync6(dirname3(INVOCATION_LOG_PATH), { recursive: true });
+  appendFileSync2(INVOCATION_LOG_PATH, `${JSON.stringify(signed)}
+`, "utf8");
+}
+function loadInvocations() {
+  if (!existsSync6(INVOCATION_LOG_PATH))
+    return [];
+  const rows = [];
+  for (const line of readFileSync6(INVOCATION_LOG_PATH, "utf8").split(`
+`)) {
+    const text = line.trim();
+    if (!text)
+      continue;
+    try {
+      const raw = JSON.parse(text);
+      if (raw?.schema !== SCHEMA)
+        continue;
+      if (!SAFE.test(String(raw.possession_id ?? "")) || !SAFE.test(String(raw.invocation_id ?? "")))
+        continue;
+      const key = instrumentKey();
+      if (!key || !raw.mac || !verifyInstrumentTuple(invocationTuple(raw), raw.mac, key)) {
+        unauthenticatedInvocationsSeen++;
+        continue;
+      }
+      rows.push(raw);
+    } catch {}
+  }
+  return rows;
+}
+function qualifyingInvocation(opts) {
+  const rows = (opts.invocations ?? loadInvocations()).filter((row) => row.possession_id === opts.possessionId && row.decision_event_id === opts.decisionEventId && row.skill === opts.skill && row.started_at >= opts.decisionAt && row.started_at >= opts.baselineAt && row.ended_at >= row.started_at && row.ended_at <= opts.verifiedAt);
+  return rows.length === 1 ? rows[0] : null;
+}
+function observeToolStart(event, now = Date.now()) {
+  if (String(event?.toolName ?? "") !== "Skill")
+    return;
+  const skill = String(event?.args?.skill ?? "");
+  const callId = String(event?.toolCallId ?? "");
+  if (!skill || !callId || !SAFE.test(callId))
+    return;
+  pending.set(callId, { skill, startedAt: now });
+  if (pending.size > 256) {
+    const first = pending.keys().next().value;
+    if (first !== undefined)
+      pending.delete(first);
+  }
+}
+function observeToolEnd(event, openPossessions, now = Date.now()) {
+  const callId = String(event?.toolCallId ?? "");
+  const started = callId ? pending.get(callId) : undefined;
+  if (!started)
+    return null;
+  pending.delete(callId);
+  const status = String(event?.status ?? "");
+  const ok = status ? status === "success" : event?.ok ?? !(event?.isError || event?.error);
+  if (!ok)
+    return null;
+  const matches = openPossessions.filter((row) => row.skill === started.skill);
+  if (matches.length !== 1)
+    return null;
+  const invocation = {
+    schema: SCHEMA,
+    invocation_id: `inv-${randomUUID()}`,
+    possession_id: matches[0].possession_id,
+    decision_event_id: matches[0].event_id,
+    skill: started.skill,
+    call_id: callId,
+    started_at: started.startedAt,
+    ended_at: now,
+    nonce: randomUUID()
+  };
+  appendInvocation(invocation);
+  return invocation;
 }
 
 // mods/possessions.ts
@@ -3948,6 +3986,12 @@ function verifyExactFilePossession(decision) {
     throw new Error("possession verification binding is not the exact-file adapter");
   }
   const { task, manifestSha256 } = loadTask(binding.task_id);
+  {
+    const bound = loadPossessionEvents().filter((row) => row.type === "decision" && row.verification?.task_id === binding.task_id);
+    if (bound.some((row) => row.possession_id !== decision.possession_id)) {
+      throw new Error("verification task_id is already bound to a different possession");
+    }
+  }
   if (manifestSha256 !== binding.manifest_sha256)
     throw new Error("verification manifest hash mismatch after decision binding");
   if (task.task_class !== binding.task_class || decision.task_class !== task.task_class)
@@ -3994,6 +4038,7 @@ function verifyExactFilePossession(decision) {
     decisionEventId: decision.event_id,
     skill: decision.skill,
     baselineAt: task.registered_at,
+    decisionAt: decision.ts,
     verifiedAt
   }) : null;
   const proceduralCredit = matched && !preExisting && invocation !== null;
@@ -4392,8 +4437,13 @@ function recordPossessionEvent(input) {
 function recordInstrumentVerifiedOutcome(input, context) {
   const key = currentInstrumentKey();
   const receipt = input.verification;
-  if (receipt && typeof receipt === "object" && receipt.procedural_credit === true && !String(context?.invocationReceiptId ?? "").trim()) {
-    throw new Error("procedural credit requires an observed invocation receipt id at the signing boundary");
+  if (receipt && typeof receipt === "object" && receipt.procedural_credit === true) {
+    const namedId = String(context?.invocationReceiptId ?? "").trim();
+    if (!namedId)
+      throw new Error("procedural credit requires an observed invocation receipt id at the signing boundary");
+    const owned = loadInvocations().some((row) => row.invocation_id === namedId && row.possession_id === input.possession_id);
+    if (!owned)
+      throw new Error("procedural credit names an invocation that is not an authenticated observation of this possession");
   }
   if (key && receipt && typeof receipt === "object") {
     const r = receipt;
@@ -4467,6 +4517,22 @@ function claimBearingVerdict(decision, outcome) {
   const structurallyBound = !!decision.verification && !!outcome.verification && isStoredVerificationReceiptBound(decision.verification, outcome.verification, decision.possession_id, decision.event_id);
   if (!structurallyBound)
     return { verified: false, proceduralCredit: false, downgrade: "bad_signature" };
+  const payload = outcome.evidence?.payload ?? {};
+  const receipt = outcome.verification;
+  if (receipt.procedural_credit !== undefined && typeof receipt.procedural_credit !== "boolean") {
+    return { verified: false, proceduralCredit: false, downgrade: "evidence_transplanted" };
+  }
+  const sameRow = String(payload.possession_id ?? "") === decision.possession_id && String(payload.decision_event_id ?? "") === decision.event_id;
+  const sameInstrumentEvent = String(payload.task_id ?? "") === String(receipt.task_id ?? "") && String(payload.manifest_sha256 ?? "") === String(receipt.manifest_sha256 ?? "") && String(payload.expected_sha256 ?? "") === String(receipt.artifact_sha256 ?? "");
+  if (!sameRow || !sameInstrumentEvent) {
+    return { verified: false, proceduralCredit: false, downgrade: "evidence_transplanted" };
+  }
+  const namedInvocation = String(payload.invocation_receipt_id ?? "").trim();
+  if (namedInvocation) {
+    const owned = loadInvocations().some((row) => row.invocation_id === namedInvocation && row.possession_id === decision.possession_id);
+    if (!owned)
+      return { verified: false, proceduralCredit: false, downgrade: "evidence_transplanted" };
+  }
   return { verified: true, proceduralCredit: verdict.proceduralCredit, proceduralReason: verdict.proceduralReason };
 }
 function summarizePossessions(events, integrity = cleanIntegrity()) {
@@ -4504,6 +4570,7 @@ function summarizePossessions(events, integrity = cleanIntegrity()) {
   let verifiedGood = 0;
   let judgedGood = 0;
   let unboundVerifiedDowngraded = 0;
+  let transplantDemoted = 0;
   let verifiedNeutralDecisions = 0;
   let prescribedEvaluated = 0;
   for (const decision of decisions) {
@@ -4542,6 +4609,8 @@ function summarizePossessions(events, integrity = cleanIntegrity()) {
     const boundVerified = verdict.verified;
     if (outcome.evidence_tier === "verified" && !boundVerified)
       unboundVerifiedDowngraded++;
+    if (verdict.downgrade === "evidence_transplanted")
+      transplantDemoted++;
     let good = false;
     if (decision.action === "prescribe") {
       prescribedEvaluated++;
@@ -4657,6 +4726,7 @@ function summarizePossessions(events, integrity = cleanIntegrity()) {
     judgedDecisions,
     judgedGoodDecisions: judgedGood,
     unboundVerifiedDowngraded,
+    transplantDemoted,
     verifiedNeutralDecisions,
     decisionEfficiencyPct: pct(goodDecisions, scoredDecisions),
     verifiedEfficiencyPct: pct(verifiedGood, verifiedDecisions),

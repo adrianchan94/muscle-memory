@@ -134,6 +134,22 @@ const EVIDENCE_FIELDS = [
 export type EvidencePayload = Record<(typeof EVIDENCE_FIELDS)[number], string | number>;
 
 /** Sorted-key JSON over the exact field set. Order-independent, so re-serialisation is safe. */
+/**
+ * MAC over an arbitrary sorted-key tuple, under the SAME instrument key.
+ * The evidence payload has a fixed 19-field contract; other instrument-owned records (invocation
+ * observations) have their own shapes but must not get a second, weaker key.
+ */
+export function signInstrumentTuple(tuple: Record<string, unknown>, key: { keyId: string; secret: Buffer }): string {
+  const bytes = Buffer.from(JSON.stringify(tuple, Object.keys(tuple).sort()), "utf8");
+  return `${key.keyId}:${createHmac("sha256", key.secret).update(bytes).digest("hex")}`;
+}
+export function verifyInstrumentTuple(tuple: Record<string, unknown>, mac: unknown, key: { keyId: string; secret: Buffer }): boolean {
+  if (typeof mac !== "string") return false;
+  const expected = Buffer.from(signInstrumentTuple(tuple, key), "utf8");
+  const actual = Buffer.from(mac, "utf8");
+  return expected.length === actual.length && timingSafeEqual(actual, expected);
+}
+
 export function canonicalEvidenceBytes(payload: unknown): Buffer {
   if (!payload || typeof payload !== "object") throw new Error("evidence payload must be an object");
   const raw = payload as Record<string, unknown>;

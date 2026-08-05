@@ -12,6 +12,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { STATE_DIR } from "./core";
+import { loadInstrumentKey, signInstrumentTuple, verifyInstrumentTuple } from "./instrument";
 
 export const INVOCATION_LOG_PATH = join(STATE_DIR, "invocations.jsonl");
 
@@ -25,17 +26,40 @@ export type SkillInvocationEvent = {
   started_at: number;
   ended_at: number;
   nonce: string;
+  /** MAC over the exact tuple below, under the instrument key. An unsigned row is not evidence. */
+  mac?: string;
 };
 
 const SCHEMA = "mm.invocation.v1" as const;
 const SAFE = /^[a-z0-9][a-z0-9._:-]{0,127}$/i;
 
+/** The exact fields a MAC covers. Anything outside this set cannot ride along authenticated. */
+function invocationTuple(e: SkillInvocationEvent) {
+  return {
+    schema: e.schema, invocation_id: e.invocation_id, possession_id: e.possession_id,
+    decision_event_id: e.decision_event_id, skill: e.skill, call_id: e.call_id,
+    started_at: e.started_at, ended_at: e.ended_at, nonce: e.nonce,
+  };
+}
+function instrumentKey(): { keyId: string; secret: Buffer } | null {
+  const loaded = loadInstrumentKey({ stateDir: STATE_DIR });
+  return loaded.available ? { keyId: loaded.keyId, secret: loaded.secret } : null;
+}
+/** Rows dropped for a bad or missing MAC. Visible, so a forged log is never silent. */
+export let unauthenticatedInvocationsSeen = 0;
+export function __resetInvocationCounters(): void { unauthenticatedInvocationsSeen = 0; }
+
 /** In-flight Skill calls, keyed by the runtime's call id. Bounded; same-turn only. */
 const pending = new Map<string, { skill: string; startedAt: number }>();
 
 function appendInvocation(event: SkillInvocationEvent): void {
+  // The observer is the only thing allowed to say an invocation happened, so what it writes is
+  // signed. Without this an attacker who can write the state directory mints credit by appending
+  // a line, and the instrument then notarizes that lie.
+  const key = instrumentKey();
+  const signed = key ? { ...event, mac: signInstrumentTuple(invocationTuple(event), key) } : event;
   mkdirSync(dirname(INVOCATION_LOG_PATH), { recursive: true });
-  appendFileSync(INVOCATION_LOG_PATH, `${JSON.stringify(event)}\n`, "utf8");
+  appendFileSync(INVOCATION_LOG_PATH, `${JSON.stringify(signed)}\n`, "utf8");
 }
 
 export function loadInvocations(): SkillInvocationEvent[] {
@@ -48,6 +72,11 @@ export function loadInvocations(): SkillInvocationEvent[] {
       const raw = JSON.parse(text);
       if (raw?.schema !== SCHEMA) continue;
       if (!SAFE.test(String(raw.possession_id ?? "")) || !SAFE.test(String(raw.invocation_id ?? ""))) continue;
+      const key = instrumentKey();
+      if (!key || !raw.mac || !verifyInstrumentTuple(invocationTuple(raw as SkillInvocationEvent), raw.mac, key)) {
+        unauthenticatedInvocationsSeen++;
+        continue;   // a row the instrument did not sign is not an observation
+      }
       rows.push(raw as SkillInvocationEvent);
     } catch { /* a malformed line is not an invocation */ }
   }
@@ -66,6 +95,9 @@ export function qualifyingInvocation(opts: {
   decisionEventId: string;
   skill: string;
   baselineAt: number;
+  /** The decision's own timestamp. A skill that ran BEFORE the prescription existed cannot be
+   *  evidence that the prescription caused anything — adopting it was a second way to fake credit. */
+  decisionAt: number;
   verifiedAt: number;
   invocations?: SkillInvocationEvent[];
 }): SkillInvocationEvent | null {
@@ -73,6 +105,7 @@ export function qualifyingInvocation(opts: {
     row.possession_id === opts.possessionId
     && row.decision_event_id === opts.decisionEventId
     && row.skill === opts.skill
+    && row.started_at >= opts.decisionAt
     && row.started_at >= opts.baselineAt
     && row.ended_at >= row.started_at   // a fast skill can start and finish inside one millisecond
     && row.ended_at <= opts.verifiedAt);

@@ -1,3 +1,4 @@
+import { loadInvocations } from "./invocation";
 import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -36,7 +37,10 @@ export const POSSESSION_SCHEMA = "mm.possession.v1" as const;
 /** Why a stored `verified` row did not authenticate. Each is counted separately so a downgrade
  *  is visible in the Decision Report rather than silently reclassified. */
 export type EvidenceDowngradeReason =
-  | "legacy_unsigned" | "missing_signature" | "bad_signature" | "key_unavailable" | "unknown_key";
+  | "legacy_unsigned" | "missing_signature" | "bad_signature" | "key_unavailable" | "unknown_key"
+  // An authentic signature lifted off a DIFFERENT possession and pasted onto this row. Its own
+  // reason because a reviewer must be able to see credit theft as distinct from a lost key.
+  | "evidence_transplanted";
 
 /** Why an authenticated row still earned no procedural credit. Artifact truth and causation are
  *  separate questions: a target that was already correct proves nothing about the skill. */
@@ -255,6 +259,8 @@ export type PossessionSummary = {
   judgedDecisions: number;
   judgedGoodDecisions: number;
   unboundVerifiedDowngraded: number;
+  /** Authentic evidence found on a row it does not describe — credit theft, counted separately. */
+  transplantDemoted: number;
   verifiedNeutralDecisions: number;
   decisionEfficiencyPct: number | null;
   verifiedEfficiencyPct: number | null;
@@ -557,9 +563,13 @@ export function recordInstrumentVerifiedOutcome(input: PossessionOutcomeEvent, c
   // Never sign a hollow credit. If the receipt claims the prescription caused the change, the
   // signed payload must name the invocation that proves it. Silence here is how a legitimate
   // receipt got demoted and how an illegitimate one could have been signed.
-  if (receipt && typeof receipt === "object" && (receipt as Record<string, unknown>).procedural_credit === true
-    && !String(context?.invocationReceiptId ?? "").trim()) {
-    throw new Error("procedural credit requires an observed invocation receipt id at the signing boundary");
+  if (receipt && typeof receipt === "object" && (receipt as Record<string, unknown>).procedural_credit === true) {
+    const namedId = String(context?.invocationReceiptId ?? "").trim();
+    if (!namedId) throw new Error("procedural credit requires an observed invocation receipt id at the signing boundary");
+    // The id must resolve to a MAC-authenticated observation owned by THIS possession. An id
+    // alone is just a string; without this the signer notarizes an unverified claim.
+    const owned = loadInvocations().some((row) => row.invocation_id === namedId && row.possession_id === input.possession_id);
+    if (!owned) throw new Error("procedural credit names an invocation that is not an authenticated observation of this possession");
   }
   if (key && receipt && typeof receipt === "object") {
     const r = receipt as Record<string, unknown>;
@@ -656,6 +666,33 @@ export function claimBearingVerdict(
     && isStoredVerificationReceiptBound(decision.verification, outcome.verification, decision.possession_id, decision.event_id);
   if (!structurallyBound) return { verified: false, proceduralCredit: false, downgrade: "bad_signature" };
 
+  // CROSS-BIND. Authenticity and structure were two self-consistent gates that never compared
+  // notes: the signature proved a payload was genuine, the binder proved a receipt belonged to
+  // this decision, and nothing proved the payload and the receipt described the SAME event.
+  // An authentic payload lifted from another possession therefore rode in on this row's own
+  // valid receipt and was awarded credit, invisibly. The payload must now name this row.
+  const payload = (outcome.evidence?.payload ?? {}) as Record<string, unknown>;
+  const receipt = outcome.verification as Record<string, unknown>;
+  // A non-boolean procedural_credit must never be coerced into truth.
+  if (receipt.procedural_credit !== undefined && typeof receipt.procedural_credit !== "boolean") {
+    return { verified: false, proceduralCredit: false, downgrade: "evidence_transplanted" };
+  }
+  const sameRow = String(payload.possession_id ?? "") === decision.possession_id
+    && String(payload.decision_event_id ?? "") === decision.event_id;
+  const sameInstrumentEvent = String(payload.task_id ?? "") === String(receipt.task_id ?? "")
+    && String(payload.manifest_sha256 ?? "") === String(receipt.manifest_sha256 ?? "")
+    && String(payload.expected_sha256 ?? "") === String(receipt.artifact_sha256 ?? "");
+  if (!sameRow || !sameInstrumentEvent) {
+    return { verified: false, proceduralCredit: false, downgrade: "evidence_transplanted" };
+  }
+  // The invocation named in the payload must also belong to THIS possession. Without this a
+  // signature could name a real invocation that happened under someone else's work.
+  const namedInvocation = String(payload.invocation_receipt_id ?? "").trim();
+  if (namedInvocation) {
+    const owned = loadInvocations().some((row) => row.invocation_id === namedInvocation && row.possession_id === decision.possession_id);
+    if (!owned) return { verified: false, proceduralCredit: false, downgrade: "evidence_transplanted" };
+  }
+
   // `verified` is about PROVENANCE, not about whether the artifact matched. A verified negative
   // is still instrument-derived evidence and must count as verified; whether it matched decides
   // the result class, not the tier. Conflating the two suppressed genuine negatives.
@@ -697,6 +734,7 @@ export function summarizePossessions(events: PossessionEvent[], integrity: Ledge
   let verifiedGood = 0;
   let judgedGood = 0;
   let unboundVerifiedDowngraded = 0;
+  let transplantDemoted = 0;
   let verifiedNeutralDecisions = 0;
   let prescribedEvaluated = 0;
 
@@ -730,6 +768,7 @@ export function summarizePossessions(events: PossessionEvent[], integrity: Ledge
     const verdict = claimBearingVerdict(decision, outcome);
     const boundVerified = verdict.verified;
     if (outcome.evidence_tier === "verified" && !boundVerified) unboundVerifiedDowngraded++;
+    if (verdict.downgrade === "evidence_transplanted") transplantDemoted++;
     let good = false;
 
     if (decision.action === "prescribe") {
@@ -844,6 +883,7 @@ export function summarizePossessions(events: PossessionEvent[], integrity: Ledge
     judgedDecisions,
     judgedGoodDecisions: judgedGood,
     unboundVerifiedDowngraded,
+    transplantDemoted,
     verifiedNeutralDecisions,
     decisionEfficiencyPct: pct(goodDecisions, scoredDecisions),
     verifiedEfficiencyPct: pct(verifiedGood, verifiedDecisions),

@@ -14,6 +14,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { qualifyingInvocation } from "./invocation";
+import { loadPossessionEvents } from "./possessions";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { STATE_DIR } from "./core";
@@ -296,6 +297,16 @@ export function verifyExactFilePossession(decision: PossessionDecisionEvent): In
     throw new Error("possession verification binding is not the exact-file adapter");
   }
   const { task, manifestSha256 } = loadTask(binding.task_id);
+  // One sealed manifest backs exactly one decision. Reusing a task_id lets a second possession
+  // ride a manifest that was frozen for the first, so refuse it rather than verify it.
+  {
+    const bound = loadPossessionEvents().filter((row) =>
+      row.type === "decision"
+      && (row as { verification?: { task_id?: string } }).verification?.task_id === binding.task_id);
+    if (bound.some((row) => row.possession_id !== decision.possession_id)) {
+      throw new Error("verification task_id is already bound to a different possession");
+    }
+  }
   if (manifestSha256 !== binding.manifest_sha256) throw new Error("verification manifest hash mismatch after decision binding");
   if (task.task_class !== binding.task_class || decision.task_class !== task.task_class) throw new Error("verification task_class mismatch");
   if (task.task_id !== binding.task_id) throw new Error("verification task_id mismatch");
@@ -339,6 +350,7 @@ export function verifyExactFilePossession(decision: PossessionDecisionEvent): In
         decisionEventId: decision.event_id,
         skill: decision.skill,
         baselineAt: task.registered_at,
+        decisionAt: decision.ts,
         verifiedAt,
       })
     : null;

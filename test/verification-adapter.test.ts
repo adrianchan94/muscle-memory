@@ -384,13 +384,11 @@ test("an authentic receipt cannot be replayed across a second bound possession",
     type: "decision", agent: "test", model: "test", action: "prescribe", task_class: "exact-file-repair",
     difficulty: "standard", gap_observed: true, route: "matched", skill: "recovering-failed-exact-match-edits", verification: binding,
   });
-  const verified = verifyExactFilePossession(first);
-  recordInstrumentVerifiedOutcome({
-    schema: "mm.possession.v1", event_id: "cross-o1", possession_id: first.possession_id, ts: 300, type: "outcome", ...verified,
-  });
-  expect(() => recordInstrumentVerifiedOutcome({
-    schema: "mm.possession.v1", event_id: "cross-o2", possession_id: second.possession_id, ts: 301, type: "outcome", ...verified,
-  })).toThrow("not bound to the possession decision");
+  // Two possessions bound to ONE sealed manifest contaminates that manifest. The instrument now
+  // refuses BOTH rather than guessing which decision owns it — the cross-possession replay this
+  // test used to construct is no longer reachable, which is the stronger guarantee.
+  expect(() => verifyExactFilePossession(first)).toThrow("already bound to a different possession");
+  expect(() => verifyExactFilePossession(second)).toThrow("already bound to a different possession");
 });
 
 test("decision binding rejects wrong task class, late registration, and replayed outcome", () => {

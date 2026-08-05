@@ -325,3 +325,196 @@ console.log("RESULT " + JSON.stringify({ preVerified: pre.verifiedDecisions, ver
   expect(out.verifiedGood, JSON.stringify(out)).toBe(1);   // the causal row signed despite the earlier miss
   expect(out.downgraded).toBe(1);                           // and the seeded unsigned row is still refused
 }, 60_000);
+
+test("evidence transplant · an authentic signature cannot be moved onto another row", () => {
+  // The P0 a cold reviewer found. Authenticity and structural binding were two self-consistent
+  // gates that never compared notes: the HMAC proved a payload was genuine, the binder proved a
+  // receipt belonged to this decision, and nothing proved they described the SAME event. So an
+  // authentic payload lifted from a possession that earned credit rode in on a different row's
+  // own valid receipt and was awarded credit with no downgrade recorded.
+  //
+  // Donor A: real repair, observed invocation, legitimately earns credit.
+  // Victim B: same shape, NO invocation, correctly earns nothing.
+  // Attack:   B keeps its OWN receipt, but takes A's signed evidence.
+  const pkg = packedPackage();
+  const state = mkdtempSync(join(tmpdir(), "mm-transplant-"));
+  const keyHome = mkdtempSync(join(tmpdir(), "mm-transplant-key-"));
+  const work = join(state, "workspace");
+  mkdirSync(work, { recursive: true });
+  const shelf = join(state, "g", "recovering-failed-exact-match-edits");
+  mkdirSync(shelf, { recursive: true });
+  writeFileSync(join(shelf, "SKILL.md"), "---\nname: recovering-failed-exact-match-edits\ndescription: Use when an exact-match file edit fails because target text is stale and must be re-anchored\n---\n## Procedure\n1. Read.\n");
+  const probe = join(state, "transplant.mjs");
+  writeFileSync(probe, `
+import { pathToFileURL } from "node:url";
+import { writeFileSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { createHash } from "node:crypto";
+const sha = (s) => createHash("sha256").update(s).digest("hex");
+const NL = String.fromCharCode(10);
+const mod = await import(pathToFileURL(${JSON.stringify(join(pkg, "mods", "index.bundled.mjs"))}).href);
+const mm = mod.__mm;
+mm.initInstrumentKey({ keyPath: process.env.MM_INSTRUMENT_KEY_FILE, stateDir: process.env.MM_STATE_DIR });
+const tools = new Map(); const handlers = {};
+const fire = (n, e) => { for (const f of handlers[n] || []) { try { f(e); } catch {} } };
+await mod.default({
+  capabilities: { tools: true, commands: true, permissions: true, ui: { panels: true }, events: { tools: true } },
+  events: { on(n, f) { (handlers[n] ||= []).push(f); return () => {}; } },
+  tools: { register(d) { tools.set(d.name, d); return () => {}; } },
+  commands: { register: () => () => {} }, permissions: { register: () => () => {} },
+  ui: { panels: { register: () => () => {} } },
+});
+const W = process.env.MM_EXACT_FILE_ROOT;
+const mk = async (id, file, invoke) => {
+  writeFileSync(join(W, file), "broken" + NL);
+  await tools.get("register_exact_file_verification").run({ args: { task_id: id, task_class: "exact-file-repair", target_rel: file, expected_sha256: sha("repaired" + NL) } });
+  const p = String(await tools.get("muscle_memory_skill_read").run({ args: { action: "prescribe", gap_observed: true, task: "exact-match file edit failed because target text was stale", task_class: "exact-file-repair", difficulty: "standard", verification_task_id: id }, model: { id: "m", provider: "t" }, agent: { name: "a" } }));
+  const pid = p.match(/possession: ([a-z0-9._:-]+)/i)?.[1] || "";
+  const c = "c-" + id;
+  if (invoke) fire("tool_start", { toolName: "Skill", toolCallId: c, args: { skill: "recovering-failed-exact-match-edits" } });
+  writeFileSync(join(W, file), "repaired" + NL);
+  if (invoke) fire("tool_end", { toolName: "Skill", toolCallId: c, status: "success", output: "ok" });
+  await tools.get("verify_agent_possession").run({ args: { possession_id: pid } });
+  return pid;
+};
+const A = await mk("ta", "a.txt", true);
+const B = await mk("tb", "b.txt", false);
+const before = mm.summarizePossessionLedger();
+const L = join(process.env.MM_STATE_DIR, "possessions.jsonl");
+const rows = readFileSync(L, "utf8").trim().split(NL).map(JSON.parse);
+const oa = rows.find((r) => r.type === "outcome" && r.possession_id === A);
+const ob = rows.find((r) => r.type === "outcome" && r.possession_id === B);
+ob.evidence = oa.evidence;          // authentic signature from a different possession
+ob.result = "helped";               // and the caller asserts the win
+writeFileSync(L, rows.map((r) => JSON.stringify(r)).join(NL) + NL);
+const after = mm.summarizePossessionLedger();
+console.log("RESULT " + JSON.stringify({
+  beforeVG: before.verifiedGoodDecisions,
+  afterVG: after.verifiedGoodDecisions,
+  transplantDemoted: after.transplantDemoted ?? 0,
+}));
+`);
+  const raw = execFileSync("node", [probe], {
+    cwd: state, encoding: "utf8",
+    env: {
+      ...process.env, MM_STATE_DIR: state, MEMORY_DIR: join(state, "m"), MM_GLOBAL_SKILLS_DIR: join(state, "g"),
+      MM_EXACT_FILE_ROOT: work, MM_INSTRUMENT_KEY_FILE: join(keyHome, "mm.key"), MM_ADVANCED: "on",
+    },
+  });
+  const out = JSON.parse(raw.split("RESULT ")[1].trim().split("\n")[0]);
+  rmSync(state, { recursive: true, force: true });
+  rmSync(keyHome, { recursive: true, force: true });
+  expect(out.beforeVG, JSON.stringify(out)).toBe(1);
+  expect(out.afterVG, JSON.stringify(out)).toBe(1);      // the theft must not inflate the score
+  expect(out.transplantDemoted).toBeGreaterThan(0);       // and must be visibly recorded
+}, 90_000);
+
+/** Shared driver for the fix-v2 attack classes, all against the SHIPPED bundle. */
+function attack(body: string): Record<string, number> {
+  const pkg = packedPackage();
+  const state = mkdtempSync(join(tmpdir(), "mm-atk-"));
+  const keyHome = mkdtempSync(join(tmpdir(), "mm-atk-key-"));
+  const work = join(state, "workspace");
+  mkdirSync(work, { recursive: true });
+  const shelf = join(state, "g", "recovering-failed-exact-match-edits");
+  mkdirSync(shelf, { recursive: true });
+  writeFileSync(join(shelf, "SKILL.md"), "---\nname: recovering-failed-exact-match-edits\ndescription: Use when an exact-match file edit fails because target text is stale and must be re-anchored\n---\n## Procedure\n1. Read.\n");
+  const probe = join(state, "atk.mjs");
+  writeFileSync(probe, `
+import { pathToFileURL } from "node:url";
+import { writeFileSync, readFileSync, appendFileSync } from "node:fs";
+import { join } from "node:path";
+import { createHash } from "node:crypto";
+const sha = (s) => createHash("sha256").update(s).digest("hex");
+const NL = String.fromCharCode(10);
+const mod = await import(pathToFileURL(${JSON.stringify(join(pkg, "mods", "index.bundled.mjs"))}).href);
+const mm = mod.__mm;
+mm.initInstrumentKey({ keyPath: process.env.MM_INSTRUMENT_KEY_FILE, stateDir: process.env.MM_STATE_DIR });
+const tools = new Map(); const handlers = {};
+const fire = (n, e) => { for (const f of handlers[n] || []) { try { f(e); } catch {} } };
+await mod.default({
+  capabilities: { tools: true, commands: true, permissions: true, ui: { panels: true }, events: { tools: true } },
+  events: { on(n, f) { (handlers[n] ||= []).push(f); return () => {}; } },
+  tools: { register(d) { tools.set(d.name, d); return () => {}; } },
+  commands: { register: () => () => {} }, permissions: { register: () => () => {} },
+  ui: { panels: { register: () => () => {} } },
+});
+const W = process.env.MM_EXACT_FILE_ROOT;
+const LEDGER = join(process.env.MM_STATE_DIR, "possessions.jsonl");
+const INVLOG = join(process.env.MM_STATE_DIR, "invocations.jsonl");
+const register = async (id, file) => {
+  writeFileSync(join(W, file), "broken" + NL);
+  await tools.get("register_exact_file_verification").run({ args: { task_id: id, task_class: "exact-file-repair", target_rel: file, expected_sha256: sha("repaired" + NL) } });
+};
+const prescribe = async (id) => {
+  const p = String(await tools.get("muscle_memory_skill_read").run({ args: { action: "prescribe", gap_observed: true, task: "exact-match file edit failed because target text was stale", task_class: "exact-file-repair", difficulty: "standard", verification_task_id: id }, model: { id: "m", provider: "t" }, agent: { name: "a" } }));
+  return p.match(/possession: ([a-z0-9._:-]+)/i)?.[1] || "";
+};
+const verify = async (pid) => { try { return String(await tools.get("verify_agent_possession").run({ args: { possession_id: pid } })); } catch (e) { return "threw: " + e.message; } };
+const score = () => { const s = mm.summarizePossessionLedger(); return { vg: s.verifiedGoodDecisions, helped: s.helpfulInterventions }; };
+const out = {};
+${body}
+console.log("ATK " + JSON.stringify(out));
+`);
+  const raw = execFileSync("node", [probe], {
+    cwd: state, encoding: "utf8",
+    env: {
+      ...process.env, MM_STATE_DIR: state, MEMORY_DIR: join(state, "m"), MM_GLOBAL_SKILLS_DIR: join(state, "g"),
+      MM_EXACT_FILE_ROOT: work, MM_INSTRUMENT_KEY_FILE: join(keyHome, "mm.key"), MM_ADVANCED: "on",
+    },
+  });
+  const out = JSON.parse(raw.split("ATK ")[1].trim().split("\n")[0]);
+  rmSync(state, { recursive: true, force: true });
+  rmSync(keyHome, { recursive: true, force: true });
+  return out;
+}
+
+test("forged invocation · an unsigned observation cannot mint procedural credit", () => {
+  // The observer log was plain JSONL: anyone who could write the state directory appended a line
+  // and the instrument then notarized that lie as verified evidence.
+  const r = attack(`
+await register("t1", "target.txt");
+const pid = await prescribe("t1");
+const dec = readFileSync(LEDGER, "utf8").trim().split(NL).map(JSON.parse).find((x) => x.type === "decision");
+appendFileSync(INVLOG, JSON.stringify({
+  schema: "mm.invocation.v1", invocation_id: "inv-forged", possession_id: pid,
+  decision_event_id: dec.event_id, skill: "recovering-failed-exact-match-edits",
+  call_id: "forged", started_at: dec.ts + 1, ended_at: dec.ts + 2, nonce: "n",
+}) + NL);
+writeFileSync(join(W, "target.txt"), "repaired" + NL);
+out.verify = (await verify(pid)).slice(0, 60);
+Object.assign(out, score());
+`);
+  expect(r.vg, JSON.stringify(r)).toBe(0);
+}, 90_000);
+
+test("pre-decision invocation · a skill that ran before the prescription earns nothing", () => {
+  // An invocation whose started_at preceded the decision was adopted as proof the decision caused
+  // the repair. Causation cannot run backwards.
+  const r = attack(`
+await register("t1", "target.txt");
+const cid = "c-early";
+fire("tool_start", { toolName: "Skill", toolCallId: cid, args: { skill: "recovering-failed-exact-match-edits" } });
+fire("tool_end", { toolName: "Skill", toolCallId: cid, status: "success", output: "ran before any prescription existed" });
+const pid = await prescribe("t1");
+writeFileSync(join(W, "target.txt"), "repaired" + NL);
+out.verify = (await verify(pid)).slice(0, 60);
+Object.assign(out, score());
+`);
+  expect(r.vg, JSON.stringify(r)).toBe(0);
+}, 90_000);
+
+test("task reuse · one sealed manifest cannot back two possessions", () => {
+  const r = attack(`
+await register("t1", "target.txt");
+const p1 = await prescribe("t1");
+const p2 = await prescribe("t1");
+writeFileSync(join(W, "target.txt"), "repaired" + NL);
+out.v1 = (await verify(p1)).slice(0, 80);
+out.v2 = (await verify(p2)).slice(0, 80);
+out.refused = (out.v1 + out.v2).includes("already bound to a different") ? 1 : 0;
+Object.assign(out, score());
+`);
+  expect(r.refused, JSON.stringify(r)).toBe(1);
+  expect(r.vg).toBe(0);
+}, 90_000);
