@@ -193,3 +193,68 @@ try { mm.recordPossessionEvent({ schema: "mm.possession.v1", type: "outcome", re
   expect(s.good).toBe(0);
   expect(s.helped).toBe(0);
 });
+
+test("positive control · the real tool path lands verifiedGood on the shipped bundle", () => {
+  // Mack's G1.4: the adapter computed credit correctly while the scoreboard stayed 0, because
+  // the signing context never left verifierRun. This drives the packed bundle's REAL tool chain -
+  // register, prescribe, observe a Skill call, verify - and reads the scoreboard afterwards.
+  const pkg = packedPackage();
+  const state = mkdtempSync(join(tmpdir(), "mm-positive-"));
+  const keyHome = mkdtempSync(join(tmpdir(), "mm-positive-key-"));
+  const work = join(state, "workspace");
+  mkdirSync(work, { recursive: true });
+  writeFileSync(join(work, "target.txt"), "broken\n");
+  // The router only prescribes an INSTALLED skill, so the shelf has to be real.
+  const shelf = join(state, "g", "recovering-failed-exact-match-edits");
+  mkdirSync(shelf, { recursive: true });
+  writeFileSync(join(shelf, "SKILL.md"), "---\nname: recovering-failed-exact-match-edits\ndescription: Use when an exact-match file edit fails because target text is stale and must be re-anchored\n---\n## Procedure\n1. Read current content.\n2. Re-anchor.\n3. Verify.\n");
+  const probe = join(state, "positive.mjs");
+  writeFileSync(probe, `
+import { pathToFileURL } from "node:url";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { createHash } from "node:crypto";
+const mod = await import(pathToFileURL(${JSON.stringify(join(pkg, "mods", "index.bundled.mjs"))}).href);
+mod.__mm.initInstrumentKey({ keyPath: process.env.MM_INSTRUMENT_KEY_FILE, stateDir: process.env.MM_STATE_DIR });
+
+const tools = new Map(); const handlers = {};
+const fire = (n, e) => { for (const fn of handlers[n] || []) { try { fn(e); } catch {} } };
+const letta = {
+  capabilities: { tools: true, commands: true, permissions: true, ui: { panels: true }, events: { tools: true } },
+  events: { on(n, fn) { (handlers[n] ||= []).push(fn); return () => {}; } },
+  tools: { register(d) { tools.set(d.name, d); return () => {}; } },
+  commands: { register: () => () => {} }, permissions: { register: () => () => {} },
+  ui: { panels: { register: () => () => {} } },
+};
+await mod.default(letta);
+const skill = "recovering-failed-exact-match-edits";
+const expected = createHash("sha256").update("repaired\\n").digest("hex");
+await tools.get("register_exact_file_verification").run({ args: { task_id: "t1", task_class: "exact-file-repair", target_rel: "target.txt", expected_sha256: expected } });
+const prescribed = String(await tools.get("muscle_memory_skill_read").run({
+  args: { action: "prescribe", gap_observed: true, task: "exact-match file edit failed because target text was stale", task_class: "exact-file-repair", difficulty: "standard", verification_task_id: "t1" },
+  model: { id: "probe", provider: "test" }, agent: { name: "probe" },
+}));
+const pid = prescribed.match(/possession: ([a-z0-9._:-]+)/i)?.[1] || "";
+// the skill runs, and the runtime witnesses it
+fire("tool_start", { toolName: "Skill", toolCallId: "call-1", args: { skill } });
+writeFileSync(join(process.env.MM_EXACT_FILE_ROOT, "target.txt"), "repaired\\n");
+fire("tool_end", { toolName: "Skill", toolCallId: "call-1", status: "success", output: "applied" });
+const verification = String(await tools.get("verify_agent_possession").run({ args: { possession_id: pid } }));
+const s = mod.__mm.summarizePossessionLedger();
+console.log("RESULT " + JSON.stringify({ verifiedGood: s.verifiedGoodDecisions, verified: s.verifiedDecisions, helped: s.helpfulInterventions, saysHelped: verification.includes("BOUND-VERIFIED 'helped'") , v: verification.slice(0, 150) }));
+`);
+  const raw = execFileSync("node", [probe], {
+    cwd: state, encoding: "utf8",
+    env: {
+      ...process.env, MM_STATE_DIR: state, MEMORY_DIR: join(state, "m"), MM_GLOBAL_SKILLS_DIR: join(state, "g"),
+      MM_EXACT_FILE_ROOT: work, MM_INSTRUMENT_KEY_FILE: join(keyHome, "mm.key"), MM_ADVANCED: "on",
+    },
+  });
+  const out = JSON.parse(raw.split("RESULT ")[1].trim().split("\n")[0]);
+  rmSync(state, { recursive: true, force: true });
+  rmSync(keyHome, { recursive: true, force: true });
+  expect(out.v, JSON.stringify(out)).toContain("BOUND-VERIFIED");
+  expect(out.saysHelped, JSON.stringify(out)).toBe(true);
+  expect(out.verifiedGood).toBe(1);   // the scoreboard, not just the adapter
+  expect(out.helped).toBe(1);
+}, 60_000);   // packs, extracts, and boots the real runtime

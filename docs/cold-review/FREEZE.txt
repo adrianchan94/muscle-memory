@@ -7,8 +7,8 @@ CANDIDATE
   status             RELEASE CANDIDATE — not published, not tagged, not merged
 
 EXACT BYTES
-  packed tarball     02cd14fe456d109a8758c8b32b656598505e90c19ebda91aba078fa82bd282ac
-  tarball bytes      263738
+  packed tarball     46829794b884e89ee5bcced09ac3bf775c426b70b096bd56d56acbb52caaa5cf
+  tarball bytes      264257
   bundled entry      see PACKAGE-MANIFEST.json -> bundle.committedSha256
                      (derived, never restated by hand; a hand-copied bundle hash
                       already went stale once and was caught in custody review)
@@ -57,13 +57,13 @@ INVALIDATION RULE
   bytes and VOIDS this freeze. A new candidate identity must be minted and both cold
   reviews re-run. This has already happened six times in this cycle:
 
-    cbfcbf6d…  263738 B  VOID — superseded by the canonical-research-record wording
-    f0f63ae5…  263738 B  VOID — superseded by the README product-hierarchy rewrite
-    c68e29d2…  263738 B  VOID — superseded by the research kit and the username-leak fix
-    99b2a80c…  263738 B  VOID — superseded by the changelog entry describing that fix
-    00f094c2…  263738 B  VOID — superseded by the cold-review P1 repair cut
-    1a7b35a0…  263738 B  VOID — superseded by the meshAgentLabel privacy repair
-    f44e71ca…  263738 B  CURRENT
+    cbfcbf6d…  264257 B  VOID — superseded by the canonical-research-record wording
+    f0f63ae5…  264257 B  VOID — superseded by the README product-hierarchy rewrite
+    c68e29d2…  264257 B  VOID — superseded by the research kit and the username-leak fix
+    99b2a80c…  264257 B  VOID — superseded by the changelog entry describing that fix
+    00f094c2…  264257 B  VOID — superseded by the cold-review P1 repair cut
+    1a7b35a0…  264257 B  VOID — superseded by the meshAgentLabel privacy repair
+    f44e71ca…  264257 B  CURRENT
 
   Changes under docs/ do NOT affect the packed bytes; docs/ is excluded from the
   package `files` field, and PACKAGE-MANIFEST.json asserts that no review doc ships.

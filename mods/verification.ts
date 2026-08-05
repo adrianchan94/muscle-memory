@@ -82,6 +82,12 @@ export type InstrumentVerifiedResult = {
   artifact_verified: boolean;
   /** The prescription plausibly caused the change: the baseline was wrong and is now right. */
   procedural_credit: boolean;
+  /**
+   * Everything the signer needs to bind this result to its evidence, derived here rather than
+   * reassembled by the caller. The adapter is the only place that knows all four facts, and a
+   * caller that reassembles them can silently omit one - which is exactly how this broke.
+   */
+  evidence_context: { baselineSha256: string; baselineCapturedAt: number; invocationReceiptId: string; skill: string };
 };
 
 const BINDING_KEYS = new Set(["schema", "adapter_id", "adapter_version", "task_id", "task_class", "manifest_sha256"]);
@@ -371,5 +377,11 @@ export function verifyExactFilePossession(decision: PossessionDecisionEvent): In
     verification,
     artifact_verified: matched,
     procedural_credit: proceduralCredit,
+    evidence_context: {
+      baselineSha256: task.baseline_sha256 ?? "",
+      baselineCapturedAt: task.registered_at,
+      invocationReceiptId: invocation?.invocation_id ?? "",
+      skill: decision.skill ?? "",
+    },
   };
 }

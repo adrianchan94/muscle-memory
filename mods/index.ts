@@ -1320,7 +1320,7 @@ export default function activate(letta: any) {
           ts: stamp,
           type: "outcome",
           ...verified,
-        });
+        }, verified.evidence_context);
         if (verified.result === "helped") {
           const affectedSkill = String(decision.skill || "");
           flashEarnedMinute(affectedSkill || "prescribed skill", affectedSkill);

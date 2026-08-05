@@ -3989,7 +3989,13 @@ function verifyExactFilePossession(decision) {
     evidence_ref: `adapter:${EXACT_FILE_ADAPTER_ID}:${manifestSha256}`,
     verification,
     artifact_verified: matched,
-    procedural_credit: proceduralCredit
+    procedural_credit: proceduralCredit,
+    evidence_context: {
+      baselineSha256: task.baseline_sha256 ?? "",
+      baselineCapturedAt: task.registered_at,
+      invocationReceiptId: invocation?.invocation_id ?? "",
+      skill: decision.skill ?? ""
+    }
   };
 }
 
@@ -4351,6 +4357,9 @@ function recordPossessionEvent(input) {
 function recordInstrumentVerifiedOutcome(input, context) {
   const key = currentInstrumentKey();
   const receipt = input.verification;
+  if (receipt && typeof receipt === "object" && receipt.procedural_credit === true && !String(context?.invocationReceiptId ?? "").trim()) {
+    throw new Error("procedural credit requires an observed invocation receipt id at the signing boundary");
+  }
   if (key && receipt && typeof receipt === "object") {
     const r = receipt;
     const payload = {
@@ -7001,7 +7010,7 @@ EVIDENCE · ${judged} judged · ${verified} verified · ${proven ? "proven" : "s
           ts: stamp,
           type: "outcome",
           ...verified
-        });
+        }, verified.evidence_context);
         if (verified.result === "helped") {
           const affectedSkill = String(decision.skill || "");
           flashEarnedMinute(affectedSkill || "prescribed skill", affectedSkill);

@@ -547,6 +547,13 @@ export function recordPossessionEvent(input: PossessionEvent): PossessionEvent {
 export function recordInstrumentVerifiedOutcome(input: PossessionOutcomeEvent, context?: { baselineSha256?: string; baselineCapturedAt?: number; invocationReceiptId?: string; skill?: string }): PossessionOutcomeEvent {
   const key = currentInstrumentKey();
   const receipt = input.verification;
+  // Never sign a hollow credit. If the receipt claims the prescription caused the change, the
+  // signed payload must name the invocation that proves it. Silence here is how a legitimate
+  // receipt got demoted and how an illegitimate one could have been signed.
+  if (receipt && typeof receipt === "object" && (receipt as Record<string, unknown>).procedural_credit === true
+    && !String(context?.invocationReceiptId ?? "").trim()) {
+    throw new Error("procedural credit requires an observed invocation receipt id at the signing boundary");
+  }
   if (key && receipt && typeof receipt === "object") {
     const r = receipt as Record<string, unknown>;
     const payload = {

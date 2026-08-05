@@ -223,7 +223,7 @@ test("a structurally plausible forged receipt is rejected by the instrument boun
       manifest_sha256: task.manifestSha256,
       artifact_sha256: sha("repaired\n"),
       matched: true,
-      procedural_credit: true,
+      procedural_credit: false,   // this test is about receipt custody, not the credit invariant
       verified_at: 250,
     },
   } as any)).toThrow("instrument-owned receipt");
