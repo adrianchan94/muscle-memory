@@ -192,6 +192,8 @@ of these, you have the wrong bytes and the review does not count:
 | \`9ffda0cf…\` | superseded archive — its README restated a void product sha as current; voided in the edit that supersedes it |
 | \`3809055b…\` | superseded PRODUCT tarball — publish-leak, dir-symlink support escape, read-side load traversal and auto-graduate-under-staged all live in these bytes; do not review them |
 | \`2be903e2…\` | superseded archive — it carries the unsafe 3809055b product; voided in the edit that supersedes it |
+| \`05459e2f…\` | superseded PRODUCT tarball — a skill directory that is itself a symlink escaped every accessor in these bytes (read leak and external overwrite); do not review them |
+| \`643ae262…\` | superseded archive — it carries the skill-dir-symlink-unsafe 05459e2f product; voided in the edit that supersedes it |
 | \`36731473…\`, \`d8eb6788…\`, \`6a2b3536…\` | superseded commits from the claim-honesty cut |
 | \`452e663e…\`, \`bffb648d…\`, \`f64dd50b…\` | superseded commits from the evidence-integrity v2 cut |
 | \`9d5093eb…\`, \`c4186c2a…\`, \`a527e649…\` | superseded commits from the docs-honesty cut |
