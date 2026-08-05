@@ -1,11 +1,11 @@
 // muscle-memory · gate module (split from index.ts — behavior-preserving).
 import { join } from "node:path";
-import { Candidate, GLOBAL_SKILLS, Outcome, hash, listSkillNames, loadExperience, redactFragment, skillDesc, slug } from "./core";
+import { Candidate, globalSkillsDir, Outcome, hash, listSkillNames, loadExperience, redactFragment, skillDesc, slug } from "./core";
 import { RepairChain, detect, detectRepairChains } from "./detect";
 import { reviewAndAuthor } from "./autopilot";
 
 /** Anti-bloat gate: refuse near-duplicate skills (token overlap on description), scanning all dirs. */
-export function dedupCheck(name: string, description: string, dirs: string[] = [GLOBAL_SKILLS]): { dup: boolean; reason: string; name: string; overlap: number } {
+export function dedupCheck(name: string, description: string, dirs: string[] = [globalSkillsDir()]): { dup: boolean; reason: string; name: string; overlap: number } {
   const words = new Set(description.toLowerCase().split(/\W+/).filter((w) => w.length > 3));
   const overlapWith = (desc: string): number => {
     const dw = new Set(desc.toLowerCase().split(/\W+/).filter((w) => w.length > 3));

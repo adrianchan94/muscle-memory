@@ -34,7 +34,7 @@ export type { Defense } from "./engram";
 export { detect, detectRepairChains, isSkillWorthy } from "./detect";
 export { draftWithRepair } from "./gate";
 export { preserveExistingFrontmatterMetadata, isAmbiguousExistingRoute, compareSkillSections } from "./autopilot";
-import { GLOBAL_SKILLS, LOG_PATH, MM, MM_TAG, NEOCORTEX_BLOCK, OUTCOME_PATH, RECEIPTS_DIR, SESSIONS_PATH, STAGED_DIR, STATE_DIR, TELEMETRY_PATH, agentSkillsDir, appendJsonl, appendMeshFeed, appendUiEvent, createDedupeSurface, ensureDir, hash, isManaged, listSkillNames, loadExperience, loadMeshFeed, loadRows, loadUiEvents, readSkill, readUiState, redactFragment, removeSupportFile, renderMeshFeed, scanDirs, scanSkillContent, scanSupportFile, setLivePanel, skillDesc, slug, syncSkillToDesktopCatalog, validateSupportPath, writeSkill, writeSupportFile, writeUiState } from "./core";
+import { globalSkillsDir, LOG_PATH, MM, MM_TAG, NEOCORTEX_BLOCK, OUTCOME_PATH, RECEIPTS_DIR, SESSIONS_PATH, STAGED_DIR, STATE_DIR, TELEMETRY_PATH, agentSkillsDir, appendJsonl, appendMeshFeed, appendUiEvent, createDedupeSurface, ensureDir, hash, isManaged, listSkillNames, loadExperience, loadMeshFeed, loadRows, loadUiEvents, readSkill, readUiState, redactFragment, removeSupportFile, renderMeshFeed, scanDirs, scanSkillContent, scanSupportFile, setLivePanel, skillDesc, slug, syncSkillToDesktopCatalog, validateSupportPath, writeSkill, writeSupportFile, writeUiState } from "./core";
 import { buildCrossConversationEvidence, classifyError, commandTemplate, correlateOutcomes, detect, detectAntiPatterns, detectInvocationGotchas, detectRepairChains, detectSequences, detectTemplates, fingerprint, impactScore, inferOutcomes, isDurableLesson, isValidSkillName, maturityScore, mergeOutcomes, stepSig } from "./detect";
 import { auditSkills, buildDiffFragment, candidateDescription, candidateName, crossShelfDuplicates, dedupCheck, draftSkillFromCandidate, draftWithRepair, effectivenessVerdict, findCandidate, lintSkillDraft, repairForCandidate, sotaQualityGaps } from "./gate";
 import { approveStagedPublish, catalogPrivacyScan, findSimilarSkills, liveSkillVisible, publishHardBlocks, publishMetadata, publishPlan, publishSkillToCatalog, publishTier, publishVisibilityReceipt, publishabilityScore, sanitizeForPublish, stageSanitizedPublish } from "./publish";
@@ -562,7 +562,7 @@ export default function activate(letta: any) {
           // not just mm's own — the gate is a pure function. Flags sub-SOTA skills + their exact gaps.
           const dirs = scanDirs(ctx);
           const entries: Array<{ name: string; shelf: string; body: string; description: string }> = [];
-          for (const d of dirs) { const shelf = d === GLOBAL_SKILLS ? "global" : "agent"; for (const n of listSkillNames(d)) { try { entries.push({ name: n, shelf, body: readSkill(d, n), description: skillDesc(d, n) }); } catch { /* */ } } }
+          for (const d of dirs) { const shelf = d === globalSkillsDir() ? "global" : "agent"; for (const n of listSkillNames(d)) { try { entries.push({ name: n, shelf, body: readSkill(d, n), description: skillDesc(d, n) }); } catch { /* */ } } }
           const seen = new Set<string>(); const skills: Array<{ name: string; description: string; body: string }> = [];
           for (const e of entries) { if (seen.has(e.name)) continue; seen.add(e.name); skills.push({ name: e.name, description: e.description, body: e.body }); }
           const r = auditSkills(skills);
@@ -583,17 +583,17 @@ export default function activate(letta: any) {
           const dirs = scanDirs(ctx); let found: { dir: string; name: string } | null = null;
           for (const d of dirs) for (const n of listSkillNames(d)) if (n.toLowerCase() === target.toLowerCase()) { found = { dir: d, name: n }; break; }
           if (action === "approve") {
-            const res = approveStagedPublish(target, GLOBAL_SKILLS);
+            const res = approveStagedPublish(target, globalSkillsDir());
             if (!res.published) return { type: "output", output: `🚫 not published — ${res.reason}` };
             try { appendUiEvent({ phase: "skill_published", summary: `published '${target}' to Custom Skills`, skill: target, action: "publish" }); appendMeshFeed({ type: "skill_published", skill: target, route: "PUBLISH", signals: 0 }); } catch { /* */ }
-            const vis = publishVisibilityReceipt(target, GLOBAL_SKILLS);
+            const vis = publishVisibilityReceipt(target, globalSkillsDir());
             const live = liveSkillVisible(slug(target), ctx?.agent?.id || ctx?.agentId);
             return { type: "output", output: `✅ published — ${res.path}\n  on disk: ${vis.exists ? "yes ✓" : "NO ❌"}\n  live index: ${live.checked ? (live.visible ? "✓ visible to the agent now" : "not loaded yet") : "not queried"}  ·  ${live.note}` };
           }
           if (!found) return { type: "output", output: `skill "${target}" not found (try /muscle-memory audit to list)` };
           const skill = { name: found.name, description: skillDesc(found.dir, found.name), body: readSkill(found.dir, found.name), shelf: "agent" };
           const plan = publishPlan(skill); const tier = publishTier(plan);
-          const existing = listSkillNames(GLOBAL_SKILLS).filter((n) => n !== found!.name).map((n) => ({ name: n, description: skillDesc(GLOBAL_SKILLS, n) }));
+          const existing = listSkillNames(globalSkillsDir()).filter((n) => n !== found!.name).map((n) => ({ name: n, description: skillDesc(globalSkillsDir(), n) }));
           const dups = findSimilarSkills(found.name, skill.description, existing);
           if (action === "stage") {
             const st = stageSanitizedPublish(skill);
@@ -691,7 +691,7 @@ export default function activate(letta: any) {
             if (!row) return "";
             return ` · outcomes ${row.plus} helped / ${row.minus} missed`;
           };
-          const distribution = (name: string) => existsSync(join(GLOBAL_SKILLS, name, "SKILL.md")) ? " · 📡 catalog" : "";
+          const distribution = (name: string) => existsSync(join(globalSkillsDir(), name, "SKILL.md")) ? " · 📡 catalog" : "";
           const L = ["💾 muscle-memory · skill lifecycle (creation → use → prune)"];
           L.push(`\n🌱 staged · 1-tap to graduate (${staged.length})`); staged.slice(0, 8).forEach((n) => L.push(`   · ${n}`));
           L.push(`\n✅ active · earning context (${used.length})`); used.slice(0, 10).forEach((s) => L.push(`   · ${s.name} — ${s.uses} uses${fieldScore(s.name)}${distribution(s.name)}${s.pinned ? " 📌" : ""}`));

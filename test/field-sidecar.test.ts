@@ -10,7 +10,7 @@ import { test, expect, beforeEach } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { rateSkill, loadPlusMinus, PLUSMINUS_PATH, RATING_REASONS_PATH, modelIdentity } from "../mods/referee";
-import { GLOBAL_SKILLS_DIR, STATE_DIR } from "../mods/core";
+import { globalSkillsDir, STATE_DIR } from "../mods/core";
 import activate from "../mods/index";
 
 function sidecar(): any[] {
@@ -125,7 +125,7 @@ test("referee truth: aggregate write failure is explicit partial with sidecar pr
 });
 
 test("rate_skill takes model attribution from runtime context and ignores spoofed args", async () => {
-  const skillDir = join(GLOBAL_SKILLS_DIR, "sidecar-runtime-model");
+  const skillDir = join(globalSkillsDir(), "sidecar-runtime-model");
   mkdirSync(skillDir, { recursive: true });
   writeFileSync(join(skillDir, "SKILL.md"), "---\nname: sidecar-runtime-model\ndescription: Use when testing runtime model attribution on an installed skill\n---\n\n## Procedure\n1. Rate the installed skill.\n\n## Verification\n- Attribution comes from runtime context.\n");
   const tools = new Map<string, any>();

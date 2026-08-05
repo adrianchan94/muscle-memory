@@ -22,7 +22,17 @@ export const LOG_PATH = join(STATE_DIR, "experience.jsonl");
 
 export const SESSIONS_PATH = join(STATE_DIR, "sessions.jsonl");
 
-export const GLOBAL_SKILLS_DIR = process.env.MM_GLOBAL_SKILLS_DIR || join(homedir(), ".letta", "skills");
+/**
+ * The shared desktop/global skill shelf, resolved on every call.
+ *
+ * Never capture this at module load. A frozen snapshot made the shelf depend on
+ * which file imported `core` first, so a test that set MM_GLOBAL_SKILLS_DIR at
+ * module scope silently redirected the runtime for every file loaded after it —
+ * order-dependent, and therefore platform-dependent.
+ */
+export function globalSkillsDir(): string {
+  return process.env.MM_GLOBAL_SKILLS_DIR || join(homedir(), ".letta", "skills");
+}
 
 
 // ── Redaction ────────────────────────────────────────────────────────────────
@@ -134,8 +144,6 @@ export function loadRows(path = LOG_PATH): Row[] {
 
 
 // ── D3: DISTILL / GRADUATE / HOT-LOAD / REFINE (Hermes-style skill_manage) ────
-export const GLOBAL_SKILLS = GLOBAL_SKILLS_DIR; // unified: respects MM_GLOBAL_SKILLS_DIR (was hardcoded — broke isolation + env override)
-
 export const MM_TAG = "muscle-memory provenance"; // marker that tags a muscle-memory-managed skill
 
 // Synthetic-tape doctrine: ref-skill-* are test/reference fixtures. They may be RECORDED in the
@@ -159,11 +167,11 @@ export function agentSkillsDir(ctx?: any): string {
     const local = join(homedir(), ".letta", "lc-local-backend", "memfs", id, "memory", "skills");
     if (existsSync(join(homedir(), ".letta", "lc-local-backend", "memfs", id))) return local;
   }
-  return GLOBAL_SKILLS;
+  return globalSkillsDir();
 }
 
 /** Dirs to scan for list/dedup/AUDIT: agent-scoped + global (deduped). Read-only visibility across both. */
-export function scanDirs(ctx?: any): string[] { return [...new Set([agentSkillsDir(ctx), GLOBAL_SKILLS])]; }
+export function scanDirs(ctx?: any): string[] { return [...new Set([agentSkillsDir(ctx), globalSkillsDir()])]; }
 
 // ── NATIVE-FIT SHELF RESOLVER (Block N) — name each shelf + its permissions. An autonomous (unattended)
 // loop may READ agent + global (audit/dedup visibility) but may only MUTATE the agent-local shelf: it must
@@ -174,7 +182,7 @@ export function skillShelves(ctx?: any): SkillShelf[] {
   const agent = agentSkillsDir(ctx);
   const shelves: SkillShelf[] = [{ name: "agent", dir: agent, writable: true, autonomous: true, priority: 20 }];
   // global is present for READ (audit/dedup) but is NOT autonomous-writable; only when it's a distinct shelf.
-  if (GLOBAL_SKILLS !== agent) shelves.push({ name: "global", dir: GLOBAL_SKILLS, writable: false, autonomous: false, priority: 10 });
+  if (globalSkillsDir() !== agent) shelves.push({ name: "global", dir: globalSkillsDir(), writable: false, autonomous: false, priority: 10 });
   return shelves;
 }
 /** The only shelves an AUTONOMOUS (unattended) op may MUTATE — agent-local; never the shared global shelf. */
@@ -223,7 +231,7 @@ function sourceAgentId(ctx?: any): string | null {
 
 function readCatalogSyncMeta(skill: string): CatalogSyncMeta | null {
   try {
-    const meta = JSON.parse(readFileSync(join(GLOBAL_SKILLS, skill, CATALOG_SYNC_META), "utf8"));
+    const meta = JSON.parse(readFileSync(join(globalSkillsDir(), skill, CATALOG_SYNC_META), "utf8"));
     return meta && typeof meta === "object" ? meta as CatalogSyncMeta : null;
   } catch { return null; }
 }
@@ -321,9 +329,9 @@ export function syncSkillToDesktopCatalog(name: string, ctx?: any, opts: { dryRu
   const srcRoot = agentSkillsDir(ctx);
   const srcDir = existsSync(join(srcRoot, nm, "SKILL.md"))
     ? join(srcRoot, nm)
-    : scanDirs(ctx).filter((d) => d !== GLOBAL_SKILLS).map((d) => join(d, nm)).find((d) => existsSync(join(d, "SKILL.md")));
+    : scanDirs(ctx).filter((d) => d !== globalSkillsDir()).map((d) => join(d, nm)).find((d) => existsSync(join(d, "SKILL.md")));
   if (!srcDir) return { status: "missing", skill: nm, reason: "no agent skill to sync" };
-  const target = join(GLOBAL_SKILLS, nm);
+  const target = join(globalSkillsDir(), nm);
   const srcSkill = join(srcDir, "SKILL.md");
   const dstSkill = join(target, "SKILL.md");
   const sourceAgent = sourceAgentId(ctx);
@@ -333,19 +341,19 @@ export function syncSkillToDesktopCatalog(name: string, ctx?: any, opts: { dryRu
   if (existsSync(dstSkill) && sameSkillFile(srcSkill, dstSkill) && (!targetAgent || targetAgent === sourceAgent)) {
     return { status: "noop", skill: nm, source: srcDir, target, sourceAgent, targetAgent, reason: "already in sync" };
   }
-  if (existsSync(dstSkill) && !isManaged(GLOBAL_SKILLS, nm) && !opts.force) {
+  if (existsSync(dstSkill) && !isManaged(globalSkillsDir(), nm) && !opts.force) {
     return { status: "blocked_unmanaged", skill: nm, source: srcDir, target, sourceAgent, targetAgent, reason: "target catalog skill is not muscle-memory-managed; pass force to replace" };
   }
   if (existsSync(dstSkill) && targetAgent && sourceAgent && targetAgent !== sourceAgent && !opts.force) {
     return { status: "blocked_different_agent", skill: nm, source: srcDir, target, sourceAgent, targetAgent, reason: `target catalog skill was synced by ${targetAgent}; pass force to replace` };
   }
-  if (existsSync(dstSkill) && isManaged(GLOBAL_SKILLS, nm) && !targetAgent && !opts.force && !sameSkillFile(srcSkill, dstSkill)) {
+  if (existsSync(dstSkill) && isManaged(globalSkillsDir(), nm) && !targetAgent && !opts.force && !sameSkillFile(srcSkill, dstSkill)) {
     return { status: "blocked_different_agent", skill: nm, source: srcDir, target, sourceAgent, targetAgent, reason: "target catalog skill has no source-agent metadata; pass force to replace" };
   }
   if (opts.dryRun) return { status: "dry_run", skill: nm, source: srcDir, target, sourceAgent, targetAgent, backup: existsSync(target) ? "would-back-up-target" : null };
   let backup: string | null = null;
   try {
-    mkdirSync(GLOBAL_SKILLS, { recursive: true });
+    mkdirSync(globalSkillsDir(), { recursive: true });
     if (existsSync(target)) {
       mkdirSync(CATALOG_SYNC_BACKUP_DIR, { recursive: true });
       backup = join(CATALOG_SYNC_BACKUP_DIR, `${nm}-${new Date().toISOString().replace(/[:.]/g, "-")}`);

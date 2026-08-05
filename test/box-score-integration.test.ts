@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import activate from "../mods/index";
-import { GLOBAL_SKILLS_DIR, readUiState, writeUiState } from "../mods/core";
+import { globalSkillsDir, readUiState, writeUiState } from "../mods/core";
 import { POSSESSION_LEDGER_PATH, loadPossessionEvents } from "../mods/possessions";
 import { VERIFICATION_TASK_DIR } from "../mods/verification";
 import { loadPlusMinus } from "../mods/referee";
@@ -21,9 +21,9 @@ beforeEach(() => {
   rmSync(VERIFICATION_TASK_DIR, { recursive: true, force: true });
   delete process.env.MM_EXACT_FILE_ROOT;
   process.env.MM_ADVANCED = "on";
-  rmSync(GLOBAL_SKILLS_DIR, { recursive: true, force: true });
+  rmSync(globalSkillsDir(), { recursive: true, force: true });
   writeUiState({ phase: "idle", last: "", route: "" });
-  const skillDir = join(GLOBAL_SKILLS_DIR, "recovering-failed-exact-match-edits");
+  const skillDir = join(globalSkillsDir(), "recovering-failed-exact-match-edits");
   mkdirSync(skillDir, { recursive: true });
   writeFileSync(join(skillDir, "SKILL.md"), `---
 name: recovering-failed-exact-match-edits
@@ -138,7 +138,10 @@ test("dedicated prescribe tool makes the first task move obvious without weakeni
     expect(roster).toContain("EARLY POSITIVE · NEEDS REPLICATION · recovering-failed-exact-match-edits");
     expect(roster).toContain("possessions 1 helped / 0 harmed / 0 neutral");
     expect(roster).toContain("evidence 1 judged / 0 verified");
-    expect(roster).toMatch(/skills with no possessions or field ratings yet hidden: \d+/);
+    // Zero-signal disclosure is suppressed when nothing is hidden (a "hidden: 0" footer is
+    // noise, not disclosure). When the footer does appear it must carry a real count.
+    const hiddenFooter = roster.match(/skills with no possessions or field ratings yet hidden: (\d+)/);
+    if (hiddenFooter) expect(Number(hiddenFooter[1])).toBeGreaterThan(0);
     const report = String(await read.run({ args: { action: "report" } }));
     expect(report).toContain(`SKILLS · ${baselineActive + 1} active · 0 proven`);
   } finally {
@@ -489,7 +492,7 @@ test("successful skill updates become lifecycle evidence instead of invisible mu
 });
 
 test("retirement becomes an earned roster move in the same append-only ledger", async () => {
-  const retiredDir = join(GLOBAL_SKILLS_DIR, "retire-me");
+  const retiredDir = join(globalSkillsDir(), "retire-me");
   mkdirSync(retiredDir, { recursive: true });
   writeFileSync(join(retiredDir, "SKILL.md"), `---
 name: retire-me

@@ -13,7 +13,9 @@ if (false) {}
 var STATE_DIR = process.env.MM_STATE_DIR || join(homedir(), ".letta", "muscle-memory");
 var LOG_PATH = join(STATE_DIR, "experience.jsonl");
 var SESSIONS_PATH = join(STATE_DIR, "sessions.jsonl");
-var GLOBAL_SKILLS_DIR = process.env.MM_GLOBAL_SKILLS_DIR || join(homedir(), ".letta", "skills");
+function globalSkillsDir() {
+  return process.env.MM_GLOBAL_SKILLS_DIR || join(homedir(), ".letta", "skills");
+}
 var SECRETISH = /(?:key|token|secret|password|passwd|auth|bearer|cookie|api[_-]?key)/i;
 var LONG_OPAQUE = /\b[A-Za-z0-9_\-]{24,}\b/g;
 var HEXID = /\b[0-9a-f]{7,}\b/gi;
@@ -90,7 +92,6 @@ function loadRows(path = LOG_PATH) {
   }
   return rows;
 }
-var GLOBAL_SKILLS = GLOBAL_SKILLS_DIR;
 var MM_TAG = "muscle-memory provenance";
 var FIXTURE_SKILL_RE = /^ref-skill-/;
 function agentSkillsDir(ctx) {
@@ -107,16 +108,16 @@ function agentSkillsDir(ctx) {
     if (existsSync(join(homedir(), ".letta", "lc-local-backend", "memfs", id)))
       return local;
   }
-  return GLOBAL_SKILLS;
+  return globalSkillsDir();
 }
 function scanDirs(ctx) {
-  return [...new Set([agentSkillsDir(ctx), GLOBAL_SKILLS])];
+  return [...new Set([agentSkillsDir(ctx), globalSkillsDir()])];
 }
 function skillShelves(ctx) {
   const agent = agentSkillsDir(ctx);
   const shelves = [{ name: "agent", dir: agent, writable: true, autonomous: true, priority: 20 }];
-  if (GLOBAL_SKILLS !== agent)
-    shelves.push({ name: "global", dir: GLOBAL_SKILLS, writable: false, autonomous: false, priority: 10 });
+  if (globalSkillsDir() !== agent)
+    shelves.push({ name: "global", dir: globalSkillsDir(), writable: false, autonomous: false, priority: 10 });
   return shelves;
 }
 function autonomousShelves(ctx) {
@@ -161,7 +162,7 @@ function sourceAgentId(ctx) {
 }
 function readCatalogSyncMeta(skill) {
   try {
-    const meta = JSON.parse(readFileSync(join(GLOBAL_SKILLS, skill, CATALOG_SYNC_META), "utf8"));
+    const meta = JSON.parse(readFileSync(join(globalSkillsDir(), skill, CATALOG_SYNC_META), "utf8"));
     return meta && typeof meta === "object" ? meta : null;
   } catch {
     return null;
@@ -286,10 +287,10 @@ function syncSkillToDesktopCatalog(name, ctx, opts = {}) {
   if (!nm)
     return { status: "error", skill: nm, reason: "name required" };
   const srcRoot = agentSkillsDir(ctx);
-  const srcDir = existsSync(join(srcRoot, nm, "SKILL.md")) ? join(srcRoot, nm) : scanDirs(ctx).filter((d) => d !== GLOBAL_SKILLS).map((d) => join(d, nm)).find((d) => existsSync(join(d, "SKILL.md")));
+  const srcDir = existsSync(join(srcRoot, nm, "SKILL.md")) ? join(srcRoot, nm) : scanDirs(ctx).filter((d) => d !== globalSkillsDir()).map((d) => join(d, nm)).find((d) => existsSync(join(d, "SKILL.md")));
   if (!srcDir)
     return { status: "missing", skill: nm, reason: "no agent skill to sync" };
-  const target = join(GLOBAL_SKILLS, nm);
+  const target = join(globalSkillsDir(), nm);
   const srcSkill = join(srcDir, "SKILL.md");
   const dstSkill = join(target, "SKILL.md");
   const sourceAgent = sourceAgentId(ctx);
@@ -300,20 +301,20 @@ function syncSkillToDesktopCatalog(name, ctx, opts = {}) {
   if (existsSync(dstSkill) && sameSkillFile(srcSkill, dstSkill) && (!targetAgent || targetAgent === sourceAgent)) {
     return { status: "noop", skill: nm, source: srcDir, target, sourceAgent, targetAgent, reason: "already in sync" };
   }
-  if (existsSync(dstSkill) && !isManaged(GLOBAL_SKILLS, nm) && !opts.force) {
+  if (existsSync(dstSkill) && !isManaged(globalSkillsDir(), nm) && !opts.force) {
     return { status: "blocked_unmanaged", skill: nm, source: srcDir, target, sourceAgent, targetAgent, reason: "target catalog skill is not muscle-memory-managed; pass force to replace" };
   }
   if (existsSync(dstSkill) && targetAgent && sourceAgent && targetAgent !== sourceAgent && !opts.force) {
     return { status: "blocked_different_agent", skill: nm, source: srcDir, target, sourceAgent, targetAgent, reason: `target catalog skill was synced by ${targetAgent}; pass force to replace` };
   }
-  if (existsSync(dstSkill) && isManaged(GLOBAL_SKILLS, nm) && !targetAgent && !opts.force && !sameSkillFile(srcSkill, dstSkill)) {
+  if (existsSync(dstSkill) && isManaged(globalSkillsDir(), nm) && !targetAgent && !opts.force && !sameSkillFile(srcSkill, dstSkill)) {
     return { status: "blocked_different_agent", skill: nm, source: srcDir, target, sourceAgent, targetAgent, reason: "target catalog skill has no source-agent metadata; pass force to replace" };
   }
   if (opts.dryRun)
     return { status: "dry_run", skill: nm, source: srcDir, target, sourceAgent, targetAgent, backup: existsSync(target) ? "would-back-up-target" : null };
   let backup = null;
   try {
-    mkdirSync(GLOBAL_SKILLS, { recursive: true });
+    mkdirSync(globalSkillsDir(), { recursive: true });
     if (existsSync(target)) {
       mkdirSync(CATALOG_SYNC_BACKUP_DIR, { recursive: true });
       backup = join(CATALOG_SYNC_BACKUP_DIR, `${nm}-${new Date().toISOString().replace(/[:.]/g, "-")}`);
@@ -1138,7 +1139,7 @@ function buildCrossConversationEvidence(rows) {
 }
 // mods/gate.ts
 import { join as join2 } from "node:path";
-function dedupCheck(name, description, dirs = [GLOBAL_SKILLS]) {
+function dedupCheck(name, description, dirs = [globalSkillsDir()]) {
   const words = new Set(description.toLowerCase().split(/\W+/).filter((w) => w.length > 3));
   const overlapWith = (desc) => {
     const dw = new Set(desc.toLowerCase().split(/\W+/).filter((w) => w.length > 3));
@@ -1710,7 +1711,7 @@ function publishSkillToCatalog(name, ctx) {
   const priv = catalogPrivacyScan(content);
   if (!priv.ok)
     throw new Error(`privacy blocked: ${priv.issues.join("; ")}`);
-  const dstDir = join3(GLOBAL_SKILLS_DIR, nm);
+  const dstDir = join3(globalSkillsDir(), nm);
   mkdirSync2(dstDir, { recursive: true });
   const published = content.includes(MM_TAG) ? content : content + `
 <!-- ${MM_TAG}: published ${new Date().toISOString().slice(0, 10)}; catalog=global -->
@@ -5757,7 +5758,7 @@ ${renderPlusMinus(loadPlusMinus())}` };
           const dirs = scanDirs(ctx);
           const entries = [];
           for (const d of dirs) {
-            const shelf = d === GLOBAL_SKILLS ? "global" : "agent";
+            const shelf = d === globalSkillsDir() ? "global" : "agent";
             for (const n of listSkillNames(d)) {
               try {
                 entries.push({ name: n, shelf, body: readSkill(d, n), description: skillDesc(d, n) });
@@ -5800,14 +5801,14 @@ ${top}${r.flagged.length > 20 ? `
                 break;
               }
           if (action === "approve") {
-            const res = approveStagedPublish(target, GLOBAL_SKILLS);
+            const res = approveStagedPublish(target, globalSkillsDir());
             if (!res.published)
               return { type: "output", output: `\uD83D\uDEAB not published — ${res.reason}` };
             try {
               appendUiEvent({ phase: "skill_published", summary: `published '${target}' to Custom Skills`, skill: target, action: "publish" });
               appendMeshFeed({ type: "skill_published", skill: target, route: "PUBLISH", signals: 0 });
             } catch {}
-            const vis = publishVisibilityReceipt(target, GLOBAL_SKILLS);
+            const vis = publishVisibilityReceipt(target, globalSkillsDir());
             const live = liveSkillVisible(slug(target), ctx?.agent?.id || ctx?.agentId);
             return { type: "output", output: `✅ published — ${res.path}
   on disk: ${vis.exists ? "yes ✓" : "NO ❌"}
@@ -5818,7 +5819,7 @@ ${top}${r.flagged.length > 20 ? `
           const skill = { name: found.name, description: skillDesc(found.dir, found.name), body: readSkill(found.dir, found.name), shelf: "agent" };
           const plan = publishPlan(skill);
           const tier = publishTier(plan);
-          const existing = listSkillNames(GLOBAL_SKILLS).filter((n) => n !== found.name).map((n) => ({ name: n, description: skillDesc(GLOBAL_SKILLS, n) }));
+          const existing = listSkillNames(globalSkillsDir()).filter((n) => n !== found.name).map((n) => ({ name: n, description: skillDesc(globalSkillsDir(), n) }));
           const dups = findSimilarSkills(found.name, skill.description, existing);
           if (action === "stage") {
             const st = stageSanitizedPublish(skill);
@@ -5943,7 +5944,7 @@ ${plan.digest}` };
               return "";
             return ` · outcomes ${row.plus} helped / ${row.minus} missed`;
           };
-          const distribution = (name) => existsSync10(join12(GLOBAL_SKILLS, name, "SKILL.md")) ? " · \uD83D\uDCE1 catalog" : "";
+          const distribution = (name) => existsSync10(join12(globalSkillsDir(), name, "SKILL.md")) ? " · \uD83D\uDCE1 catalog" : "";
           const L = ["\uD83D\uDCBE muscle-memory · skill lifecycle (creation → use → prune)"];
           L.push(`
 \uD83C\uDF31 staged · 1-tap to graduate (${staged2.length})`);

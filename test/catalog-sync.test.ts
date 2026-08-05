@@ -5,19 +5,24 @@ import { test, expect } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { __mm } from "../mods/index";
-
-const TAG = __mm.MM_TAG;
 const GLOBAL = process.env.MM_GLOBAL_SKILLS_DIR || mkdtempSync(join(tmpdir(), "mm-global-fallback-"));
+process.env.MM_GLOBAL_SKILLS_DIR = GLOBAL;
+
+const { __mm } = await import("../mods/index");
+const TAG = __mm.MM_TAG;
 
 function withMemory<T>(fn: (memoryDir: string) => T): T {
-  const old = process.env.MEMORY_DIR;
+  const oldMemory = process.env.MEMORY_DIR;
+  const oldAgentSkills = process.env.MM_AGENT_SKILLS_DIR;
   const memoryDir = mkdtempSync(join(tmpdir(), "mm-memory-"));
   process.env.MEMORY_DIR = memoryDir;
+  delete process.env.MM_AGENT_SKILLS_DIR;
   try { return fn(memoryDir); }
   finally {
-    if (old === undefined) delete process.env.MEMORY_DIR;
-    else process.env.MEMORY_DIR = old;
+    if (oldMemory === undefined) delete process.env.MEMORY_DIR;
+    else process.env.MEMORY_DIR = oldMemory;
+    if (oldAgentSkills === undefined) delete process.env.MM_AGENT_SKILLS_DIR;
+    else process.env.MM_AGENT_SKILLS_DIR = oldAgentSkills;
   }
 }
 

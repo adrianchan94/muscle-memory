@@ -1,7 +1,18 @@
-import { expect, test } from "bun:test";
+import { afterAll, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+// This file must set its sandbox before importing the mods, but bun shares one process
+// across test files: leaving these set redirects every file loaded afterwards. Capture the
+// inherited values first, then restore them once this file's tests are done.
+const inheritedEnv = { MM_STATE_DIR: process.env.MM_STATE_DIR, MM_GLOBAL_SKILLS_DIR: process.env.MM_GLOBAL_SKILLS_DIR, MEMORY_DIR: process.env.MEMORY_DIR };
+afterAll(() => {
+  for (const [key, value] of Object.entries(inheritedEnv)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+});
 
 process.env.MM_STATE_DIR = mkdtempSync(join(tmpdir(), "mm-grad-state-"));
 process.env.MM_GLOBAL_SKILLS_DIR = join(process.env.MM_STATE_DIR, "global");

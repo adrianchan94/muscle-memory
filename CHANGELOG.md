@@ -1,13 +1,29 @@
 # Changelog
 
-All notable changes to `@adrianchan94/muscle-memory`. Format loosely follows [Keep a Changelog](https://keepachangelog.com/). The `1.0.0-rc.2` candidate remains reviewable and reversible until the final `1.0.0` release.
+All notable changes to `@adrianchan94/muscle-memory`. Format loosely follows [Keep a Changelog](https://keepachangelog.com/). Release candidates remain reviewable and reversible until the final `1.0.0` release.
 
 ## [Unreleased]
+
+- Final `1.0.0` tag, GitHub release, `main` merge, and npm publication remain separately gated.
+
+## [1.0.0-rc.3] — 2026-08-05
+
+### Release-candidate purpose
+- Establishes the author-owned V1 release candidate under `@adrianchan94/muscle-memory` and `github.com/adrianchan94/muscle-memory`.
+- Reframes the public surface around the shipped causal loop: one-skill-or-abstain prescription, resumable possessions, honest closeout, evidence-aware roster review, narrow instrument-owned verification, update-first learning, staged/reversible lifecycle, history mining, compaction reflection, sanitized squad transfer, and Desktop catalog sync.
+- Keeps research claims bounded and points readers to the canonical [Muscle Memory V1 Research](https://muscle-memory-v1-research.vercel.app/) ledger.
+- This RC is a new candidate. It does not overwrite the historical `e2b9c4a1…` / cold-review v6 baseline and cannot inherit that baseline's seal.
+
+### Fixed — clean-Linux CI
+- Resolves the shared global skill shelf on every call instead of freezing it at module load. The captured constant made the shelf depend on which file imported `mods/core` first, so a test that set `MM_GLOBAL_SKILLS_DIR` at module scope silently redirected the runtime for every file loaded afterwards — order-dependent, and therefore green on macOS and red on clean Linux.
+- Stops `test/graduation-truth.test.ts` leaking its sandbox env into every test file that loads after it.
+- Binds the packed-artifact test to the shipped `package.json` version instead of a hard-coded literal that rots on each candidate bump.
+- Corrects a stale roster assertion that demanded the zero-signal disclosure footer even when nothing was hidden; the shipped behaviour deliberately suppresses `hidden: 0` as noise.
 
 ### Research surface alias remap
 - Canonical live research URL is now `https://muscle-memory-v1-research.vercel.app/` (report title: *Knowing Is Not Doing…*; product name unchanged). `muscle-memory-story.vercel.app` remains a temporary alias to the same production deploy. July (H) history stays on the superseded deployment URL.
 
-### Owner-route masterpiece prep
+### Owner-route release prep
 - Migrates package identity from `@letta-ai/muscle-memory` to author-owned `@adrianchan94/muscle-memory` (npm publish still separately gated / not authorized by this branch).
 - Points repository / homepage / bugs metadata at `adrianchan94/muscle-memory`.
 - Fixes the canonical `muscle_memory_prescribe` onboarding example to the dedicated two-field contract (`task` + `gap_observed` only).

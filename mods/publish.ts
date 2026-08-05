@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { userInfo } from "node:os";
-import { GLOBAL_SKILLS_DIR, MM_TAG, PUBLISH_STAGED_DIR, appendMeshFeed, appendUiEvent, scanDirs, scanSkillContent, slug, writeUiState } from "./core";
+import { globalSkillsDir, MM_TAG, PUBLISH_STAGED_DIR, appendMeshFeed, appendUiEvent, scanDirs, scanSkillContent, slug, writeUiState } from "./core";
 import { lintSkillDraft, sotaQualityGaps } from "./gate";
 import { SEARCH_STOP } from "./autopilot";
 
@@ -221,7 +221,7 @@ export function publishSkillToCatalog(name: string, ctx?: any): string {
   if (!lint.ok) throw new Error(`linter blocked: ${lint.issues.join("; ")}`);
   const priv = catalogPrivacyScan(content);
   if (!priv.ok) throw new Error(`privacy blocked: ${priv.issues.join("; ")}`);
-  const dstDir = join(GLOBAL_SKILLS_DIR, nm);
+  const dstDir = join(globalSkillsDir(), nm);
   mkdirSync(dstDir, { recursive: true });
   const published = content.includes(MM_TAG) ? content : content + `\n<!-- ${MM_TAG}: published ${new Date().toISOString().slice(0, 10)}; catalog=global -->\n`;
   writeFileSync(join(dstDir, "SKILL.md"), published);

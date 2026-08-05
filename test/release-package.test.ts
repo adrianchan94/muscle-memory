@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
+const shippedVersion = require(join(root, "package.json")).version as string;
 
 test("packed artifact installs in isolation and exposes the v1 runtime surface", async () => {
   const proc = Bun.spawnSync(["node", "scripts/package-smoke.mjs", "--json"], {
@@ -22,7 +23,9 @@ test("packed artifact installs in isolation and exposes the v1 runtime surface",
   expect(proc.exitCode, stderr || stdout).toBe(0);
   const receipt = JSON.parse(stdout.trim().split("\n").at(-1) || "{}");
   expect(receipt.pass).toBe(true);
-  expect(receipt.packageVersion).toBe("1.0.0-rc.2");
+  // The packed artifact must report the version we actually ship, not a literal that
+  // rots on every candidate bump.
+  expect(receipt.packageVersion).toBe(shippedVersion);
   expect(receipt.installedBundleExists).toBe(true);
   expect(receipt.tarballSha256).toMatch(/^[a-f0-9]{64}$/);
   expect(receipt.tarballBytes).toBeGreaterThan(0);
