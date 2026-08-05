@@ -10,23 +10,23 @@
   ],
   "tarball": {
     "name": "adrianchan94-muscle-memory-1.0.0-rc.3.tgz",
-    "sha256": "1a7b35a0947f16aeb547aa1598932bfdac27ef20cc663f76d1e4c79875050a13",
-    "bytes": 250335,
-    "npmReportedSize": 250335,
-    "npmReportedUnpackedSize": 867737,
+    "sha256": "f44e71caffde1c402bd952caa1d2bfe0e7933716569538e7d85a2f7b415d6f7c",
+    "bytes": 250936,
+    "npmReportedSize": 250936,
+    "npmReportedUnpackedSize": 869408,
     "fileCount": 21
   },
   "bundle": {
     "path": "mods/index.bundled.mjs",
-    "committedSha256": "a9e4ef52a12a4b530637d2ece586c8270371f57adafc5406bb6a3fb7dfb54576",
-    "rebuiltFromSourceSha256": "a9e4ef52a12a4b530637d2ece586c8270371f57adafc5406bb6a3fb7dfb54576",
+    "committedSha256": "92e9c61d5f1d42b9b5c82ba9d2556c323db79f16ee9ff4a80a3883eccaee5216",
+    "rebuiltFromSourceSha256": "92e9c61d5f1d42b9b5c82ba9d2556c323db79f16ee9ff4a80a3883eccaee5216",
     "parity": true
   },
   "shippedFiles": [
     {
       "path": "CHANGELOG.md",
-      "bytes": 26832,
-      "sha256": "8930e603004629db45f32d0f25cc0c3f6c4d57f321161946751c452c5038778d"
+      "bytes": 28082,
+      "sha256": "35cfd2f75d2df0fdf1f7dd68d5f4ed314bdcce7c552f1dd61e1194f4a68f0df0"
     },
     {
       "path": "LICENSE",
@@ -40,8 +40,8 @@
     },
     {
       "path": "README.md",
-      "bytes": 43095,
-      "sha256": "08a526c11ec42ae53d6b42bb1070774f4e383fbacdbc59b6f892e7fcb603f699"
+      "bytes": 43090,
+      "sha256": "13a6eb72b8dd88ff0491957bfa12db3f66ff31e6117be907a5b239201385a274"
     },
     {
       "path": "mods/autopilot.ts",
@@ -50,8 +50,8 @@
     },
     {
       "path": "mods/core.ts",
-      "bytes": 37201,
-      "sha256": "1302f8caaf814c55ba278f006084e170482029016f9fd02a1700a60dd6c4d396"
+      "bytes": 37376,
+      "sha256": "cad38a669fce0ba082cac1629821a683231f0e395cae12d0d76aabc5f2f0c7d0"
     },
     {
       "path": "mods/detect.ts",
@@ -75,13 +75,13 @@
     },
     {
       "path": "mods/index.bundled.mjs",
-      "bytes": 332086,
-      "sha256": "a9e4ef52a12a4b530637d2ece586c8270371f57adafc5406bb6a3fb7dfb54576"
+      "bytes": 332071,
+      "sha256": "92e9c61d5f1d42b9b5c82ba9d2556c323db79f16ee9ff4a80a3883eccaee5216"
     },
     {
       "path": "mods/index.ts",
-      "bytes": 106580,
-      "sha256": "437b42def663287c941a43c2e0e3f8e89674add2a4c59058bdec19a9bb653792"
+      "bytes": 106612,
+      "sha256": "23189f39f8f77580130af6707d267fc08d21f8ab8b749aaea4ed38a011e2bc91"
     },
     {
       "path": "mods/lifecycle.ts",
@@ -95,8 +95,8 @@
     },
     {
       "path": "mods/publish.ts",
-      "bytes": 17211,
-      "sha256": "4b56417a8de11132a6ad5eebe0e9ad4f48d611cb46f6ea1404821048b17a839b"
+      "bytes": 17445,
+      "sha256": "81faf8c542fb42f35b1fd6de91aa47513c2867094c35c558af147a33e9b4a6fb"
     },
     {
       "path": "mods/referee.ts",

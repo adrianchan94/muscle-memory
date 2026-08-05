@@ -568,7 +568,10 @@ export function loadUiEvents(n = 8): UiEvent[] { if (!existsSync(UI_EVENTS)) ret
 export const MESH_FEED = process.env.MM_MESH_FEED
   || (process.env.MM_STATE_DIR ? join(STATE_DIR, "mesh-skill-feed.jsonl") : join(homedir(), ".local", "state", "mesh-skill-feed.jsonl"));
 
-export function meshAgentLabel(): string { return process.env.MM_AGENT || (String(process.env.MEMORY_DIR || "").includes("be7d4413") ? "mack" : "agent"); }
+// Label this agent in the shared feed. Explicit opt-in only: inferring identity from
+// filesystem paths meant shipping one machine's agent id, and one person's name, to
+// every consumer. Set MM_AGENT to choose a label; otherwise stay generic.
+export function meshAgentLabel(): string { return process.env.MM_AGENT || "agent"; }
 
 export function appendMeshFeed(e: { type: string; skill?: string; route?: string; signals?: number }) { try { mkdirSync(dirname(MESH_FEED), { recursive: true }); appendFileSync(MESH_FEED, JSON.stringify({ agent: meshAgentLabel(), ts: Date.now(), source: "muscle-memory", ...e }) + "\n"); } catch { /* */ } }
 

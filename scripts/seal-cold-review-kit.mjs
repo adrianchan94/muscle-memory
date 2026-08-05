@@ -151,7 +151,11 @@ of these, you have the wrong bytes and the review does not count:
 | \`c68e29d2…\` | superseded by the research kit and the username-leak fix |
 | \`99b2a80c…\` | superseded by the changelog entry describing that fix |
 | \`6a3ab912…\` | **stale bundle hash** — restated by hand, went stale, caught in custody review |
-| \`a768377…\`, \`784523072…\`, \`6db054cb…\` | superseded commits |
+| \`00f094c2…\` | superseded by the meshAgentLabel privacy repair (the bytes the first Grok GO was bound to) |
+| \`1a7b35a0…\` | superseded by the meshAgentLabel privacy repair (the bytes the Fable GO was bound to) |
+| \`cc76f41c…\`, \`a9e4ef52…\` | superseded bundles |
+| \`12f9ab7e…\`, \`0ed5d89f…\` | superseded archives |
+| \`a768377…\`, \`784523072…\`, \`6db054cb…\`, \`adb98946…\`, \`5da4528c…\`, \`02eaf733…\` | superseded commits |
 | \`e2b9c4a1…\`, \`cb951cbe…\`, \`d97875fa…\` | historical artifacts; no seal transfers to this candidate |
 
 ## How to attach and review

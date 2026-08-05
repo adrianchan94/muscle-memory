@@ -511,7 +511,7 @@ function loadUiEvents(n = 8) {
 }
 var MESH_FEED = process.env.MM_MESH_FEED || (process.env.MM_STATE_DIR ? join(STATE_DIR, "mesh-skill-feed.jsonl") : join(homedir(), ".local", "state", "mesh-skill-feed.jsonl"));
 function meshAgentLabel() {
-  return process.env.MM_AGENT || (String(process.env.MEMORY_DIR || "").includes("be7d4413") ? "mack" : "agent");
+  return process.env.MM_AGENT || "agent";
 }
 function appendMeshFeed(e) {
   try {
@@ -1686,7 +1686,7 @@ function catalogPrivacyScan(content) {
     issues.push("private absolute user path");
   if (/lc-local-backend/.test(content) || /~\/\.letta\/agents\//.test(content) || /~\/\.agents\/agents\//.test(content))
     issues.push("local harness path");
-  if (/\b(?:private-store\.myshopify\.com|examplecorp|example-host|agent-71b0883e|localuser|private-user)\b/i.test(content))
+  if (/\b(?:private-store\.myshopify\.com|examplecorp|example-host|localuser|private-user)\b/i.test(content) || /\bagent-(?:local-)?[0-9a-f]{8}\b/i.test(content))
     issues.push("private org/user/agent identifier");
   if (/references\/evidence|receipt json|final-gate-result\.json/i.test(body) && /\/Users\//.test(content))
     issues.push("private evidence reference");
@@ -5108,6 +5108,7 @@ async function pullShelfSkill(client, agentId, skillName) {
 
 // mods/index.ts
 var __mm = {
+  meshAgentLabel,
   commandTemplate: commandTemplate2,
   fingerprint: fingerprint2,
   redactFragment,

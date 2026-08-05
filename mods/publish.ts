@@ -204,7 +204,10 @@ export function catalogPrivacyScan(content: string): { ok: boolean; issues: stri
   const sec = scanSkillContent(content); if (!sec.ok) issues.push(...sec.issues.map((i) => `security: ${i}`));
   if (/\/Users\/[A-Za-z0-9._-]+\//.test(content) || /\/home\/[A-Za-z0-9._-]+\//.test(content)) issues.push("private absolute user path");
   if (/lc-local-backend/.test(content) || /~\/\.letta\/agents\//.test(content) || /~\/\.agents\/agents\//.test(content)) issues.push("local harness path");
-  if (/\b(?:private-store\.myshopify\.com|examplecorp|example-host|agent-71b0883e|localuser|private-user)\b/i.test(content)) issues.push("private org/user/agent identifier");
+  // Match the SHAPE of a private agent id rather than hardcoding a real one: shipping a real
+  // identifier in order to detect it leaks it to every consumer, and only ever caught one agent.
+  if (/\b(?:private-store\.myshopify\.com|examplecorp|example-host|localuser|private-user)\b/i.test(content)
+    || /\bagent-(?:local-)?[0-9a-f]{8}\b/i.test(content)) issues.push("private org/user/agent identifier");
   if (/references\/evidence|receipt json|final-gate-result\.json/i.test(body) && /\/Users\//.test(content)) issues.push("private evidence reference");
   return { ok: issues.length === 0, issues: [...new Set(issues)] };
 }

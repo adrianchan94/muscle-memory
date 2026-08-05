@@ -7,8 +7,8 @@ CANDIDATE
   status             RELEASE CANDIDATE — not published, not tagged, not merged
 
 EXACT BYTES
-  packed tarball     1a7b35a0947f16aeb547aa1598932bfdac27ef20cc663f76d1e4c79875050a13
-  tarball bytes      250335
+  packed tarball     f44e71caffde1c402bd952caa1d2bfe0e7933716569538e7d85a2f7b415d6f7c
+  tarball bytes      250936
   bundled entry      see PACKAGE-MANIFEST.json -> bundle.committedSha256
                      (derived, never restated by hand; a hand-copied bundle hash
                       already went stale once and was caught in custody review)
@@ -54,14 +54,15 @@ GENERATED EVIDENCE (regenerate and diff)
 INVALIDATION RULE
   Any change to MOD.md, CHANGELOG.md, README.md, LICENSE, or mods/ changes the packed
   bytes and VOIDS this freeze. A new candidate identity must be minted and both cold
-  reviews re-run. This has already happened five times in this cycle:
+  reviews re-run. This has already happened six times in this cycle:
 
     cbfcbf6d…  248199 B  VOID — superseded by the canonical-research-record wording
     f0f63ae5…  248204 B  VOID — superseded by the README product-hierarchy rewrite
     c68e29d2…  249342 B  VOID — superseded by the research kit and the username-leak fix
     99b2a80c…  249413 B  VOID — superseded by the changelog entry describing that fix
     00f094c2…  249888 B  VOID — superseded by the cold-review P1 repair cut
-    1a7b35a0…  250335 B  CURRENT
+    1a7b35a0…  250335 B  VOID — superseded by the meshAgentLabel privacy repair
+    f44e71ca…  250936 B  CURRENT
 
   Changes under docs/ do NOT affect the packed bytes; docs/ is excluded from the
   package `files` field, and PACKAGE-MANIFEST.json asserts that no review doc ships.

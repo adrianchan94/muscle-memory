@@ -412,7 +412,7 @@ The point is practical: real execution traces become better reusable procedures 
 
 ## From local scar tissue to Custom Skill
 
-A local skill often contains fingerprints — `/Users/adrian/project`, `agent-71b0883e...`, `ZAI_API_KEY`, private project names. A shared Custom Skill needs to keep the lesson but lose the residue.
+A local skill often contains fingerprints — `/Users/<you>/project`, `agent-<id>...`, `ZAI_API_KEY`, private project names. A shared Custom Skill needs to keep the lesson but lose the residue.
 
 `muscle-memory` adds a gated publish flow:
 
@@ -423,8 +423,8 @@ graduate → auto-preflight → stage sanitized copy → approve publish → vis
 Example sanitization:
 
 ```txt
-/Users/adrian/project      → <local path>
-agent-71b0883e...          → <agent id>
+/Users/<you>/project       → <local path>
+agent-<id>...              → <agent id>
 ZAI_API_KEY                → PROVIDER_API_KEY
 private project names      → <project>
 ```
