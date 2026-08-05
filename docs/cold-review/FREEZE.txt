@@ -26,10 +26,15 @@ EXACT BYTES
 
 FROZEN COMMIT
   branch             release/muscle-memory-v1
-  frozen commit      c4186c2a199e09a04bf9ef8f2f2c709e549b15e7
 
-  To confirm you are on it:
-    git rev-parse HEAD          # must equal the frozen commit above
+  The frozen commit SHA is NOT restated here. A committed file cannot contain its own
+  commit hash: writing it changes the head, so the value would always name the previous
+  commit. It is recorded authoritatively in the sealed archive's MANIFEST (frozenCommit),
+  which is written outside the snapshot. Keeping it out also makes this file deterministic,
+  so sealing twice leaves the tree clean.
+
+  To confirm you are on the frozen commit:
+    git rev-parse HEAD          # compare against the archive MANIFEST frozenCommit
     git status --porcelain      # must be empty
     git diff --check            # must be empty
 

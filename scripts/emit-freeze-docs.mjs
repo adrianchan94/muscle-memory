@@ -95,10 +95,15 @@ EXACT BYTES
 
 FROZEN COMMIT
   branch             ${git("rev-parse", "--abbrev-ref", "HEAD")}
-  frozen commit      ${frozenCommit}
 
-  To confirm you are on it:
-    git rev-parse HEAD          # must equal the frozen commit above
+  The frozen commit SHA is NOT restated here. A committed file cannot contain its own
+  commit hash: writing it changes the head, so the value would always name the previous
+  commit. It is recorded authoritatively in the sealed archive's MANIFEST (frozenCommit),
+  which is written outside the snapshot. Keeping it out also makes this file deterministic,
+  so sealing twice leaves the tree clean.
+
+  To confirm you are on the frozen commit:
+    git rev-parse HEAD          # compare against the archive MANIFEST frozenCommit
     git status --porcelain      # must be empty
     git diff --check            # must be empty
 
