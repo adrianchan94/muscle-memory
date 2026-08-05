@@ -182,6 +182,7 @@ of these, you have the wrong bytes and the review does not count:
 | \`d0293f72…\` | superseded commit — the head before the evidence-integrity v2 cut |
 | \`66c0522c…\` | **superseded product tarball — attribution could be moved by a ledger edit. Do not review it.** |
 | \`ad573568…\` | superseded archive built on those bytes |
+| \`3bdaff3e…\` | superseded archive from the attribution cut, voided in the edit that supersedes it |
 | \`452e663e…\`, \`bffb648d…\`, \`f64dd50b…\` | superseded commits from the evidence-integrity v2 cut |
 | \`9d5093eb…\`, \`c4186c2a…\`, \`a527e649…\` | superseded commits from the docs-honesty cut |
 
