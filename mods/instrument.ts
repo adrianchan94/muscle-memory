@@ -68,6 +68,9 @@ export function loadInstrumentKey(opts: { keyPath?: string; stateDir: string; en
 }
 
 export function initInstrumentKey(opts: { keyPath?: string; stateDir: string; env?: Record<string, string | undefined> }): { created: boolean; keyId: string; keyPath: string } {
+  // A key that has just been created must be usable immediately, including by a process
+  // that already looked and found nothing.
+  onKeyChanged();
   const keyPath = opts.keyPath ?? resolveInstrumentKeyPath({ env: opts.env });
   if (isInsideStateDir(keyPath, opts.stateDir)) {
     throw new Error("refusing to create the instrument key inside the state directory; it must live outside the directory whose contents it authenticates");
@@ -102,6 +105,10 @@ export function instrumentStatusLine(loaded: LoadedInstrumentKey): string | null
  * work exactly as designed without a key, and nagging them would train people to ignore it.
  */
 let noticeShown = false;
+/** Invalidate anything derived from "there is no key" the moment a key appears. */
+const keyChangeListeners: Array<() => void> = [];
+export function onInstrumentKeyChange(fn: () => void): void { keyChangeListeners.push(fn); }
+function onKeyChanged(): void { noticeShown = false; for (const fn of keyChangeListeners) { try { fn(); } catch { /* a listener must not break init */ } } }
 export function instrumentSessionNotice(stateDir: string): string | null {
   if (noticeShown) return null;
   const line = instrumentStatusLine(loadInstrumentKey({ stateDir }));

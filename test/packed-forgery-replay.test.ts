@@ -258,3 +258,70 @@ console.log("RESULT " + JSON.stringify({ verifiedGood: s.verifiedGoodDecisions, 
   expect(out.verifiedGood).toBe(1);   // the scoreboard, not just the adapter
   expect(out.helped).toBe(1);
 }, 60_000);   // packs, extracts, and boots the real runtime
+
+test("stale key cache · a report before instrument init must not starve the scoreboard", () => {
+  // Mack's G1 regression, same process: summarize with a verified-tier row FIRST (which used to
+  // pin keyCache = null forever), then init the key, then run the causal path. The row must sign.
+  const pkg = packedPackage();
+  const state = mkdtempSync(join(tmpdir(), "mm-stale-"));
+  const keyHome = mkdtempSync(join(tmpdir(), "mm-stale-key-"));
+  const work = join(state, "workspace");
+  mkdirSync(work, { recursive: true });
+  writeFileSync(join(work, "target.txt"), "broken\n");
+  const shelf = join(state, "g", "recovering-failed-exact-match-edits");
+  mkdirSync(shelf, { recursive: true });
+  writeFileSync(join(shelf, "SKILL.md"), "---\nname: recovering-failed-exact-match-edits\ndescription: Use when an exact-match file edit fails because target text is stale and must be re-anchored\n---\n## Procedure\n1. Read.\n2. Re-anchor.\n3. Verify.\n");
+  const probe = join(state, "stale.mjs");
+  writeFileSync(probe, `
+import { pathToFileURL } from "node:url";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { createHash } from "node:crypto";
+const mod = await import(pathToFileURL(${JSON.stringify(join(pkg, "mods", "index.bundled.mjs"))}).href);
+const mm = mod.__mm;
+// 1. a report BEFORE any key exists, over a ledger that CONTAINS a verified-tier row.
+//    Summarizing an empty ledger never consults the key, so it would poison nothing - the
+//    poison needs a row that actually asks "is this signature authentic?".
+const NL = String.fromCharCode(10);
+writeFileSync(join(process.env.MM_STATE_DIR, "possessions.jsonl"), [
+  JSON.stringify({ schema: "mm.possession.v1", event_id: "d-seed", possession_id: "p-seed", ts: 1785900000000, type: "decision", agent: "a", model: "m", action: "prescribe", task_class: "seed", difficulty: "standard", gap_observed: true, route: "matched", skill: "recovering-failed-exact-match-edits" }),
+  JSON.stringify({ schema: "mm.possession.v1", event_id: "o-seed", possession_id: "p-seed", ts: 1785900000001, type: "outcome", result: "helped", evidence_tier: "verified", reason: "a pre-existing verified-tier row forces a key lookup" }),
+  "",
+].join(NL));
+const pre = mm.summarizePossessionLedger();
+// 2. the user runs instrument init
+mm.initInstrumentKey({ keyPath: process.env.MM_INSTRUMENT_KEY_FILE, stateDir: process.env.MM_STATE_DIR });
+// 3. the full causal path, same process
+const tools = new Map(); const handlers = {};
+const fire = (n, e) => { for (const f of handlers[n] || []) { try { f(e); } catch {} } };
+await mod.default({
+  capabilities: { tools: true, commands: true, permissions: true, ui: { panels: true }, events: { tools: true } },
+  events: { on(n, f) { (handlers[n] ||= []).push(f); return () => {}; } },
+  tools: { register(d) { tools.set(d.name, d); return () => {}; } },
+  commands: { register: () => () => {} }, permissions: { register: () => () => {} },
+  ui: { panels: { register: () => () => {} } },
+});
+const expected = createHash("sha256").update("repaired\\n").digest("hex");
+await tools.get("register_exact_file_verification").run({ args: { task_id: "t1", task_class: "exact-file-repair", target_rel: "target.txt", expected_sha256: expected } });
+const pres = String(await tools.get("muscle_memory_skill_read").run({ args: { action: "prescribe", gap_observed: true, task: "exact-match file edit failed because target text was stale", task_class: "exact-file-repair", difficulty: "standard", verification_task_id: "t1" }, model: { id: "p", provider: "t" }, agent: { name: "p" } }));
+const pid = pres.match(/possession: ([a-z0-9._:-]+)/i)?.[1] || "";
+fire("tool_start", { toolName: "Skill", toolCallId: "c1", args: { skill: "recovering-failed-exact-match-edits" } });
+writeFileSync(join(process.env.MM_EXACT_FILE_ROOT, "target.txt"), "repaired\\n");
+fire("tool_end", { toolName: "Skill", toolCallId: "c1", status: "success", output: "applied" });
+await tools.get("verify_agent_possession").run({ args: { possession_id: pid } });
+const s = mm.summarizePossessionLedger();
+console.log("RESULT " + JSON.stringify({ preVerified: pre.verifiedDecisions, verifiedGood: s.verifiedGoodDecisions, helped: s.helpfulInterventions, downgraded: s.unboundVerifiedDowngraded }));
+`);
+  const raw = execFileSync("node", [probe], {
+    cwd: state, encoding: "utf8",
+    env: {
+      ...process.env, MM_STATE_DIR: state, MEMORY_DIR: join(state, "m"), MM_GLOBAL_SKILLS_DIR: join(state, "g"),
+      MM_EXACT_FILE_ROOT: work, MM_INSTRUMENT_KEY_FILE: join(keyHome, "mm.key"), MM_ADVANCED: "on",
+    },
+  });
+  const out = JSON.parse(raw.split("RESULT ")[1].trim().split("\n")[0]);
+  rmSync(state, { recursive: true, force: true });
+  rmSync(keyHome, { recursive: true, force: true });
+  expect(out.verifiedGood, JSON.stringify(out)).toBe(1);   // the causal row signed despite the earlier miss
+  expect(out.downgraded).toBe(1);                           // and the seeded unsigned row is still refused
+}, 60_000);

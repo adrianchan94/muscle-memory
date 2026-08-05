@@ -3587,6 +3587,7 @@ function loadInstrumentKey(opts) {
   return { available: true, keyId, secret: Buffer.from(material, "base64url"), keyPath };
 }
 function initInstrumentKey(opts) {
+  onKeyChanged();
   const keyPath = opts.keyPath ?? resolveInstrumentKeyPath({ env: opts.env });
   if (isInsideStateDir(keyPath, opts.stateDir)) {
     throw new Error("refusing to create the instrument key inside the state directory; it must live outside the directory whose contents it authenticates");
@@ -3613,6 +3614,18 @@ function instrumentStatusLine(loaded) {
   return `INSTRUMENT KEY REFUSED · ${loaded.reason.replace(/_/g, " ")} · verified disabled (judged still works)`;
 }
 var noticeShown = false;
+var keyChangeListeners = [];
+function onInstrumentKeyChange(fn) {
+  keyChangeListeners.push(fn);
+}
+function onKeyChanged() {
+  noticeShown = false;
+  for (const fn of keyChangeListeners) {
+    try {
+      fn();
+    } catch {}
+  }
+}
 function instrumentSessionNotice(stateDir) {
   if (noticeShown)
     return null;
@@ -4022,12 +4035,15 @@ function verifyExactFilePossession(decision) {
 var POSSESSION_LEDGER_PATH = join9(STATE_DIR, "possessions.jsonl");
 var keyCache;
 function currentInstrumentKey() {
-  if (keyCache !== undefined)
+  if (keyCache)
     return keyCache;
   const loaded = loadInstrumentKey({ stateDir: STATE_DIR });
   keyCache = loaded.available ? { keyId: loaded.keyId, secret: loaded.secret } : null;
   return keyCache;
 }
+onInstrumentKeyChange(() => {
+  keyCache = undefined;
+});
 var POSSESSION_SCHEMA = "mm.possession.v1";
 function authenticateStoredEvidence(input) {
   const deny = (reason) => ({ authenticated: false, reason, artifactVerified: false, proceduralCredit: false, resultClass: "neutral" });

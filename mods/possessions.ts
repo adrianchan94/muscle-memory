@@ -12,17 +12,24 @@ import {
 } from "./verification";
 
 export const POSSESSION_LEDGER_PATH = join(STATE_DIR, "possessions.jsonl");
-import { loadInstrumentKey, signEvidencePayload, verifyEvidenceSignature } from "./instrument";
+import { loadInstrumentKey, signEvidencePayload, verifyEvidenceSignature, onInstrumentKeyChange } from "./instrument";
 
 let keyCache: { keyId: string; secret: Buffer } | null | undefined;
 /** Resolved once per process; absence is a normal state that disables `verified`, not an error. */
 function currentInstrumentKey(): { keyId: string; secret: Buffer } | null {
-  if (keyCache !== undefined) return keyCache;
+  // Only a SUCCESSFUL lookup is cached. Caching absence is a trap: a summarize that runs before
+  // `instrument init` would pin `null` for the life of the process, and every later signature
+  // would be skipped silently - the key exists on disk, the rows land unsigned, and the
+  // scoreboard reads zero for no visible reason. Re-resolving a miss costs one stat per
+  // verified append, which is nothing next to lying about evidence.
+  if (keyCache) return keyCache;
   const loaded = loadInstrumentKey({ stateDir: STATE_DIR });
   keyCache = loaded.available ? { keyId: loaded.keyId, secret: loaded.secret } : null;
   return keyCache;
 }
 export function __resetInstrumentKeyCache(): void { keyCache = undefined; }
+// Belt and braces: a key created mid-process drops any cached miss immediately.
+onInstrumentKeyChange(() => { keyCache = undefined; });
 
 export const POSSESSION_SCHEMA = "mm.possession.v1" as const;
 
