@@ -157,6 +157,9 @@ of these, you have the wrong bytes and the review does not count:
 | \`12f9ab7e…\`, \`0ed5d89f…\` | superseded archives |
 | \`a768377…\`, \`784523072…\`, \`6db054cb…\`, \`adb98946…\`, \`5da4528c…\`, \`02eaf733…\` | superseded commits |
 | \`e2b9c4a1…\`, \`cb951cbe…\`, \`d97875fa…\` | historical artifacts; no seal transfers to this candidate |
+| \`f44e71ca…\`, \`02cd14fe…\`, \`4fced9f8…\`, \`46829794…\`, \`6a6fcdf8…\` | superseded product tarballs from the evidence-integrity cycle |
+| \`0ed5d89f…\`, \`9b774dbd…\`, \`40de32c3…\`, \`3cd6e645…\`, \`58262ab8…\` | superseded cold-review archives |
+| \`c7fda030…\`, \`24f4eb3f…\`, \`390c3bdc…\`, \`17e7aee3…\`, \`9d533974…\` | superseded commits from the evidence-integrity cycle |
 
 ## How to attach and review
 
