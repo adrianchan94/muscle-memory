@@ -35,11 +35,25 @@ wc -c  < adrianchan94-muscle-memory-1.0.0-rc.3.tgz
 Expected:
 
 ```
-f44e71caffde1c402bd952caa1d2bfe0e7933716569538e7d85a2f7b415d6f7c
-250936
+385e648e4e82d51f4bb4ada2e3239951ab77b2e2daff0c62fca43958e52ba56b
+255570
 ```
 
-> `npm pack` is byte-stable for a fixed file set and fixed contents. If your bytes differ, check `npm --version` first, then report the delta.
+> **Two different claims, kept apart.** The published `.tgz` sha256 identifies the release
+> object and is exact for the bytes we publish. It is **not** a cross-toolchain guarantee: gzip
+> framing is packer-dependent, so a different npm can wrap byte-identical content in a different
+> envelope. Measured here: re-gzipping the same tar at levels 1/6/9 gives three different
+> envelope hashes and one identical inner tar.
+>
+> The portable invariant is the **decompressed tar stream**, plus the per-file manifest and the
+> bundle hash:
+>
+> ```bash
+> gunzip -c adrianchan94-muscle-memory-1.0.0-rc.3.tgz | shasum -a 256
+> ```
+>
+> A differing `.tgz` hash with an identical tar stream is **not** a defect. A differing tar
+> stream or file manifest **is**.
 >
 > If `npm pack` fails with `EACCES` / `EEXIST` under `~/.npm/_cacache`, your local npm cache is damaged — that is your machine, not the candidate. Re-run with an isolated cache: `npm_config_cache=$(mktemp -d) npm pack`.
 
@@ -88,7 +102,7 @@ Our recorded results on the frozen commit — all exit code `0`:
 
 | Gate | Result |
 |---|---|
-| `npm test` | 241 pass / 0 fail · 880 expect() calls · 33 files |
+| `npm test` | all pass, 0 fail - exact counts in the sealed `MANIFEST.json` (`testCounts`), never restated by hand |
 | `npm run verify` | all stages green · `PACKAGE SMOKE: PASS` · `privatePathHits: []` |
 | `node scripts/final-gate.mjs` | `"verdict": "PASS_RELEASE_CANDIDATE"` · checked-in bundle sha == independent rebuild sha |
 

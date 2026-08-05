@@ -205,7 +205,7 @@ export default function activate(letta: any) {
   };
   const renderPendingPossessions = () => {
     const rows = pendingPossessionViews(loadPossessionEvents());
-    if (!rows.length) return "(no pending possessions)";
+    if (!rows.length) return "NONE OPEN · continue work, or run /muscle-memory for the report";
     return rows.slice(0, 10).map((row) => {
       const ageMinutes = Math.max(0, Math.floor((Date.now() - row.openedAt) / 60_000));
       const skill = row.skill ? `\nSKILL · ${row.skill}` : "";
@@ -251,7 +251,7 @@ export default function activate(letta: any) {
     const hidden = allNames.length - names.length;
     if (!names.length) return compact
       ? `(no observed skill outcomes yet · ${hidden} skill${hidden === 1 ? "" : "s"} with no possessions or field ratings hidden)`
-      : "(no installed or observed skills yet)";
+      : "NONE YET · skills appear here once work is observed";
     const lines = names.map((name) => {
       const managedRow = managed.get(name);
       const possession = stats.get(name) || { helped: 0, harmed: 0, neutral: 0, judged: 0, verified: 0 };
@@ -527,7 +527,7 @@ export default function activate(letta: any) {
           const n = Math.max(1, Math.min(50, Number(argv?.[1] || 8) || 8));
           const events = loadUiEvents(n);
           const lines = events.map((e) => `💾 muscle-memory review: ${e.summary}`);
-          return { type: "output", output: lines.join("\n") || "(no muscle-memory review events yet)" };
+          return { type: "output", output: lines.join("\n") || "NONE YET · review events appear after a possession closes" };
         }
         if (sub === "wins") {
           // The dopamine surface: receipt-backed value ledger (deterministic; no model, no new state).
@@ -555,7 +555,7 @@ export default function activate(letta: any) {
         if (sub === "coverage") {
           const cov = coverageMap(loadExperience(), scanDirs(ctx));
           const icon = (st: string) => st === "covered" ? "✓" : st === "uncovered" ? "＋" : st === "over-covered" ? "⧉" : "✗";
-          return { type: "output", output: cov.length ? cov.map((c) => `${icon(c.status)} [${c.status}] ${c.domain}${c.skill ? ` → ${c.skill}` : ""}`).join("\n") : "(no durable task-classes yet)" };
+          return { type: "output", output: cov.length ? cov.map((c) => `${icon(c.status)} [${c.status}] ${c.domain}${c.skill ? ` → ${c.skill}` : ""}`).join("\n") : "NONE YET · task-classes appear once a pattern repeats" };
         }
         if (sub === "audit") {
           // LIBRARY-WIDE SOTA AUDIT (read-only): score EVERY skill (installed/hand-authored/distilled),
@@ -721,7 +721,7 @@ export default function activate(letta: any) {
         // Explicit filmroom only: reflect mode + review summary + library/tape (not the default home).
         const mode = process.env.MM_REFLECT === "auto" ? "auto" : process.env.MM_REFLECT === "staged" ? "staged" : "off (set MM_REFLECT=staged to enable)";
         const events = loadUiEvents(8);
-        const lastReview = events.length ? summarizeReflectActions(events) : "(no review yet)";
+        const lastReview = events.length ? summarizeReflectActions(events) : "NONE YET · review appears once a skill has rated possessions";
         let managed = 0, staged = 0;
         try { for (const d of scanDirs(ctx)) for (const n of listSkillNames(d)) if (isManaged(d, n)) managed++; } catch { /* */ }
         try { staged = existsSync(STAGED_DIR) ? readdirSync(STAGED_DIR).filter((n) => existsSync(join(STAGED_DIR, n, "SKILL.md"))).length : 0; } catch { /* */ }
@@ -838,22 +838,22 @@ export default function activate(letta: any) {
         }
         if (a.action === "repairs") {
           const rs = detectRepairChains(loadExperience());
-          return rs.slice(0, 10).map((r) => `×${r.count}/${r.convs}conv  FAIL[${r.trigger}] (${r.errClass}) → ${r.fixStep} → PASS`).join("\n") || "(no repair chains observed yet)";
+          return rs.slice(0, 10).map((r) => `×${r.count}/${r.convs}conv  FAIL[${r.trigger}] (${r.errClass}) → ${r.fixStep} → PASS`).join("\n") || "NONE YET · repair chains appear once a failure recurs";
         }
         if (a.action === "antipatterns") {
           const aps = detectAntiPatterns(loadExperience());
-          return aps.slice(0, 10).map((p) => `×${p.fails}fails/${p.convs}conv  AVOID[${p.step}] — ${p.errClass}`).join("\n") || "(no recurring unrecovered failures observed)";
+          return aps.slice(0, 10).map((p) => `×${p.fails}fails/${p.convs}conv  AVOID[${p.step}] — ${p.errClass}`).join("\n") || "NONE OBSERVED · no repeated unrecovered failures in the tape";
         }
         if (a.action === "defenses") {
           // The failure-defense set Hermes lacks: [trigger → error → consequence → defense].
           const ds = buildDefenses(loadExperience());
-          return ds.slice(0, 12).map((d) => `[sev${d.severity} ${d.kind}] ${d.trigger} → ${d.errClass} ⇒ ${d.defense}`).join("\n") || "(no defenses learned yet)";
+          return ds.slice(0, 12).map((d) => `[sev${d.severity} ${d.kind}] ${d.trigger} → ${d.errClass} ⇒ ${d.defense}`).join("\n") || "NONE YET · defenses appear once a failure repeats and is recovered";
         }
         if (a.action === "defense_hits") {
           // Advisory pre-action defense receipts recorded at tool_start (read-only; no enforcement).
           const hits: any[] = [];
           if (existsSync(DEFENSE_HITS)) for (const l of readFileSync(DEFENSE_HITS, "utf8").trim().split("\n").slice(-20)) { if (l) try { hits.push(JSON.parse(l)); } catch { /* */ } }
-          return hits.length ? hits.map((h) => `[sev${h.severity} ${h.kind}] ${h.step} → ${h.errClass} ⇒ ${h.defense}`).join("\n") : "(no pre-action defense hits recorded)";
+          return hits.length ? hits.map((h) => `[sev${h.severity} ${h.kind}] ${h.step} → ${h.errClass} ⇒ ${h.defense}`).join("\n") : "NONE YET · hits appear when a learned defense fires before an action";
         }
         if (a.action === "registry") {
           const reg = buildRegistry(dirs);
@@ -884,7 +884,7 @@ export default function activate(letta: any) {
         if (a.action === "coverage") {
           // SKILL COVERAGE MAP: which task-classes have a defender, which are uncovered, which are over-covered.
           const cov = coverageMap(loadExperience(), dirs);
-          if (!cov.length) return "(no durable task-classes observed yet)";
+          if (!cov.length) return "NONE YET · task-classes appear once a pattern repeats";
           const icon = (s: string) => s === "covered" ? "✓" : s === "uncovered" ? "＋" : s === "over-covered" ? "⧉" : "✗";
           return cov.map((c) => `${icon(c.status)} [${c.status}] ${c.domain}${c.skill ? ` → ${c.skill}` : ""} (${c.signals} signals)`).join("\n");
         }

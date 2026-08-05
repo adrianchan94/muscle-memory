@@ -2474,7 +2474,8 @@ $1`);
 }
 function executeAutopilotPlan(plan, opts) {
   const author = opts.author || ((c, r) => draftWithRepair(c, r));
-  const graduated = [], staged = [], refined = [], retired = [];
+  const graduated = [], staged = [], refined = [], retired = [], recommendedRetire = [];
+  const retirePolicy = opts.retirePolicy ?? "recommend";
   const receipts = [];
   for (const d of plan.decisions) {
     try {
@@ -2507,15 +2508,20 @@ ${draft.body}${provenanceBlock(d.candidate)}
           receipts.push({ op: "refine", name: d.skill, reason: d.reason, ts: Date.now() });
         }
       } else if (d.op === "retire") {
-        const target = retireManagedSkill(d.skill, d.reason, opts.ctx, d.absorbedInto);
-        retired.push(d.skill);
-        receipts.push({ op: "retire", name: d.skill, reason: d.reason, target, ts: Date.now() });
+        if (retirePolicy !== "enabled") {
+          recommendedRetire.push(d.skill);
+          receipts.push({ op: "retire", name: d.skill, reason: d.reason, executed: false, reasonWithheld: "retire_requires_explicit_policy", ts: Date.now() });
+        } else {
+          const target = retireManagedSkill(d.skill, d.reason, opts.ctx, d.absorbedInto);
+          retired.push(d.skill);
+          receipts.push({ op: "retire", name: d.skill, reason: d.reason, target, executed: true, ts: Date.now() });
+        }
       }
     } catch (e) {
       receipts.push({ op: d.op, error: String(e?.message ?? e) });
     }
   }
-  return { graduated, staged, refined, retired, receipts };
+  return { graduated, staged, refined, retired, recommendedRetire, receipts };
 }
 function loadAutopilotState() {
   try {
@@ -3374,7 +3380,8 @@ function renderAgentBoxScore(summary, options) {
   } else {
     const evidence = summary.verifiedDecisions > 0 && summary.judgedDecisions > 0 ? "early mixed evidence" : summary.verifiedDecisions > 0 ? "early verified evidence" : summary.judgedDecisions > 0 ? "early judged evidence" : "no evaluated evidence";
     const capped = summary.repeatCappedDecisions > 0 ? ` · ${summary.repeatCappedDecisions} repeat-capped` : "";
-    lines.push(`STATUS · ${evidence} · ${summary.verifiedDecisions} verified${capped} · not claim-bearing`);
+    const gloss = summary.verifiedDecisions === 0 ? " · integrity gate · normal until instrument verify earns one · judged path is enough" : "";
+    lines.push(`STATUS · ${evidence} · ${summary.verifiedDecisions} verified${capped} · not claim-bearing${gloss}`);
   }
   return lines.join(`
 `);
@@ -5384,7 +5391,7 @@ Next: continue unaided, or inspect one candidate without loading the full shelf.
   const renderPendingPossessions = () => {
     const rows = pendingPossessionViews(loadPossessionEvents());
     if (!rows.length)
-      return "(no pending possessions)";
+      return "NONE OPEN · continue work, or run /muscle-memory for the report";
     return rows.slice(0, 10).map((row) => {
       const ageMinutes = Math.max(0, Math.floor((Date.now() - row.openedAt) / 60000));
       const skill = row.skill ? `
@@ -5440,7 +5447,7 @@ CLOSE · muscle_memory_close possession_id="${row.possessionId}"`;
     const names = compact ? allNames.filter(hasSignal) : allNames;
     const hidden = allNames.length - names.length;
     if (!names.length)
-      return compact ? `(no observed skill outcomes yet · ${hidden} skill${hidden === 1 ? "" : "s"} with no possessions or field ratings hidden)` : "(no installed or observed skills yet)";
+      return compact ? `(no observed skill outcomes yet · ${hidden} skill${hidden === 1 ? "" : "s"} with no possessions or field ratings hidden)` : "NONE YET · skills appear here once work is observed";
     const lines = names.map((name) => {
       const managedRow = managed.get(name);
       const possession = stats.get(name) || { helped: 0, harmed: 0, neutral: 0, judged: 0, verified: 0 };
@@ -5717,7 +5724,7 @@ STATUS · ${res.reason}`;
           const events2 = loadUiEvents(n);
           const lines = events2.map((e) => `\uD83D\uDCBE muscle-memory review: ${e.summary}`);
           return { type: "output", output: lines.join(`
-`) || "(no muscle-memory review events yet)" };
+`) || "NONE YET · review events appear after a possession closes" };
         }
         if (sub === "wins") {
           return { type: "output", output: renderWins(collectWins()) };
@@ -5753,7 +5760,7 @@ ${renderPlusMinus(loadPlusMinus())}` };
           const cov2 = coverageMap(loadExperience(), scanDirs(ctx));
           const icon = (st) => st === "covered" ? "✓" : st === "uncovered" ? "＋" : st === "over-covered" ? "⧉" : "✗";
           return { type: "output", output: cov2.length ? cov2.map((c) => `${icon(c.status)} [${c.status}] ${c.domain}${c.skill ? ` → ${c.skill}` : ""}`).join(`
-`) : "(no durable task-classes yet)" };
+`) : "NONE YET · task-classes appear once a pattern repeats" };
         }
         if (sub === "audit") {
           const dirs = scanDirs(ctx);
@@ -5988,7 +5995,7 @@ ${plan.digest}` };
 `);
         const mode = process.env.MM_REFLECT === "auto" ? "auto" : process.env.MM_REFLECT === "staged" ? "staged" : "off (set MM_REFLECT=staged to enable)";
         const events = loadUiEvents(8);
-        const lastReview = events.length ? summarizeReflectActions(events) : "(no review yet)";
+        const lastReview = events.length ? summarizeReflectActions(events) : "NONE YET · review appears once a skill has rated possessions";
         let managed = 0, staged = 0;
         try {
           for (const d of scanDirs(ctx))
@@ -6123,17 +6130,17 @@ ${plan.digest}` };
         if (a.action === "repairs") {
           const rs = detectRepairChains(loadExperience());
           return rs.slice(0, 10).map((r) => `×${r.count}/${r.convs}conv  FAIL[${r.trigger}] (${r.errClass}) → ${r.fixStep} → PASS`).join(`
-`) || "(no repair chains observed yet)";
+`) || "NONE YET · repair chains appear once a failure recurs";
         }
         if (a.action === "antipatterns") {
           const aps = detectAntiPatterns(loadExperience());
           return aps.slice(0, 10).map((p) => `×${p.fails}fails/${p.convs}conv  AVOID[${p.step}] — ${p.errClass}`).join(`
-`) || "(no recurring unrecovered failures observed)";
+`) || "NONE OBSERVED · no repeated unrecovered failures in the tape";
         }
         if (a.action === "defenses") {
           const ds = buildDefenses(loadExperience());
           return ds.slice(0, 12).map((d) => `[sev${d.severity} ${d.kind}] ${d.trigger} → ${d.errClass} ⇒ ${d.defense}`).join(`
-`) || "(no defenses learned yet)";
+`) || "NONE YET · defenses appear once a failure repeats and is recovered";
         }
         if (a.action === "defense_hits") {
           const hits = [];
@@ -6146,7 +6153,7 @@ ${plan.digest}` };
                 } catch {}
             }
           return hits.length ? hits.map((h) => `[sev${h.severity} ${h.kind}] ${h.step} → ${h.errClass} ⇒ ${h.defense}`).join(`
-`) : "(no pre-action defense hits recorded)";
+`) : "NONE YET · hits appear when a learned defense fires before an action";
         }
         if (a.action === "registry") {
           const reg = buildRegistry(dirs);
@@ -6178,7 +6185,7 @@ ${ev.digest.slice(0, 700)}`;
         if (a.action === "coverage") {
           const cov = coverageMap(loadExperience(), dirs);
           if (!cov.length)
-            return "(no durable task-classes observed yet)";
+            return "NONE YET · task-classes appear once a pattern repeats";
           const icon = (s) => s === "covered" ? "✓" : s === "uncovered" ? "＋" : s === "over-covered" ? "⧉" : "✗";
           return cov.map((c) => `${icon(c.status)} [${c.status}] ${c.domain}${c.skill ? ` → ${c.skill}` : ""} (${c.signals} signals)`).join(`
 `);

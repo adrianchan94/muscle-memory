@@ -5,11 +5,11 @@ description: "Verifier-gated procedural memory for Letta agents: prescribe exact
 
 # Muscle Memory — agent guide
 
-**Every session becomes practice film. Skills earn their minutes.**
+**Skills earn their minutes.** Use a learned procedure only when it is the smallest thing that closes an observed gap.
 
-> **Skill Plus-Minus ceiling (canonical):** SPM ships as an associative tape plus conservative review recommendations — **no automatic bench or retire** — and verified efficacy remains a separate instrument.
+> **Rating ceiling:** `rate_skill` keeps an associative tape and produces conservative review recommendations — **never an automatic retirement** — and verified efficacy stays a separate instrument.
 
-Muscle Memory helps you use learned procedures only when they earn context. The hardwood language is the product identity; the execution contract stays precise. The Decision Report is your box score, `rate_skill` maintains associative plus-minus tape, and neither is causal proof.
+Muscle Memory helps you use learned procedures only when they earn context. **A possession is one decision and its outcome:** it opens when you prescribe or abstain, and closes when you report what happened. The Decision Report summarises those possessions; `rate_skill` keeps a separate associative tape. Neither is causal proof.
 
 It is not a shelf browser and it does not preload every skill. After a real procedural miss—or when you know you lack the procedure—ask for one intervention. Muscle Memory returns exactly one installed skill or `ABSTAIN`, opens a private possession, and waits for an honest outcome.
 

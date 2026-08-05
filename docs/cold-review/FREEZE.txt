@@ -7,8 +7,8 @@ CANDIDATE
   status             RELEASE CANDIDATE — not published, not tagged, not merged
 
 EXACT BYTES
-  packed tarball     f44e71caffde1c402bd952caa1d2bfe0e7933716569538e7d85a2f7b415d6f7c
-  tarball bytes      250936
+  packed tarball     385e648e4e82d51f4bb4ada2e3239951ab77b2e2daff0c62fca43958e52ba56b
+  tarball bytes      255570
   bundled entry      see PACKAGE-MANIFEST.json -> bundle.committedSha256
                      (derived, never restated by hand; a hand-copied bundle hash
                       already went stale once and was caught in custody review)
@@ -31,7 +31,8 @@ FROZEN COMMIT
     git diff --check            # must be empty
 
 GATES ON THE FROZEN TREE
-  npm test                      241 pass / 0 fail        exit 0
+  npm test                      counts are NOT restated here - see MANIFEST.json
+                                testCounts (machine-owned; hand-copied numbers went stale twice)
   npm run verify                all stages green         exit 0
   node scripts/final-gate.mjs   PASS_RELEASE_CANDIDATE   exit 0
   package smoke                 PASS, privatePathHits []
@@ -61,8 +62,8 @@ INVALIDATION RULE
     c68e29d2…  249342 B  VOID — superseded by the research kit and the username-leak fix
     99b2a80c…  249413 B  VOID — superseded by the changelog entry describing that fix
     00f094c2…  249888 B  VOID — superseded by the cold-review P1 repair cut
-    1a7b35a0…  250335 B  VOID — superseded by the meshAgentLabel privacy repair
-    f44e71ca…  250936 B  CURRENT
+    1a7b35a0…  255570 B  VOID — superseded by the meshAgentLabel privacy repair
+    f44e71ca…  255570 B  CURRENT
 
   Changes under docs/ do NOT affect the packed bytes; docs/ is excluded from the
   package `files` field, and PACKAGE-MANIFEST.json asserts that no review doc ships.

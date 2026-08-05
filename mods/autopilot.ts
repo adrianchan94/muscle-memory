@@ -117,9 +117,20 @@ export function appendRecurrenceNote(dir: string, name: string, note: string): b
 
 
 /** Execute a plan with explicit deps (testable). author defaults to the deterministic drafter. */
-export function executeAutopilotPlan(plan: AutopilotPlan, opts: { skillsDir: string; rows: Row[]; author?: (c: Candidate, r?: RepairChain) => { name: string; description: string; body: string }; ctx?: any }): { graduated: string[]; staged: string[]; refined: string[]; retired: string[]; receipts: any[] } {
+/**
+ * Retirement is a RECOMMENDATION unless explicitly enabled.
+ *
+ * The docs promise "lifecycle changes are never automatic" and "nothing is auto-retired".
+ * This used to call retireManagedSkill unconditionally, so the promise was false. The
+ * conservative claim is the one worth keeping: silently removing a skill someone relies on is
+ * far worse than leaving a stale one on the shelf with a recommendation attached.
+ */
+export type RetirePolicy = "recommend" | "enabled";
+
+export function executeAutopilotPlan(plan: AutopilotPlan, opts: { skillsDir: string; rows: Row[]; author?: (c: Candidate, r?: RepairChain) => { name: string; description: string; body: string }; ctx?: any; retirePolicy?: RetirePolicy }): { graduated: string[]; staged: string[]; refined: string[]; retired: string[]; recommendedRetire: string[]; receipts: any[] } {
   const author = opts.author || ((c, r) => draftWithRepair(c, r));
-  const graduated: string[] = [], staged: string[] = [], refined: string[] = [], retired: string[] = [];
+  const graduated: string[] = [], staged: string[] = [], refined: string[] = [], retired: string[] = [], recommendedRetire: string[] = [];
+  const retirePolicy: RetirePolicy = opts.retirePolicy ?? "recommend";
   const receipts: any[] = [];
   for (const d of plan.decisions) {
     try {
@@ -134,12 +145,18 @@ export function executeAutopilotPlan(plan: AutopilotPlan, opts: { skillsDir: str
       } else if (d.op === "refine") {
         if (appendRecurrenceNote(opts.skillsDir, d.skill, d.reason)) { refined.push(d.skill); receipts.push({ op: "refine", name: d.skill, reason: d.reason, ts: Date.now() }); }
       } else if (d.op === "retire") {
-        const target = retireManagedSkill(d.skill, d.reason, opts.ctx, d.absorbedInto);
-        retired.push(d.skill); receipts.push({ op: "retire", name: d.skill, reason: d.reason, target, ts: Date.now() });
+        if (retirePolicy !== "enabled") {
+          // Surface it as advice and leave the shelf alone.
+          recommendedRetire.push(d.skill);
+          receipts.push({ op: "retire", name: d.skill, reason: d.reason, executed: false, reasonWithheld: "retire_requires_explicit_policy", ts: Date.now() });
+        } else {
+          const target = retireManagedSkill(d.skill, d.reason, opts.ctx, d.absorbedInto);
+          retired.push(d.skill); receipts.push({ op: "retire", name: d.skill, reason: d.reason, target, executed: true, ts: Date.now() });
+        }
       }
     } catch (e: any) { receipts.push({ op: d.op, error: String(e?.message ?? e) }); }
   }
-  return { graduated, staged, refined, retired, receipts };
+  return { graduated, staged, refined, retired, recommendedRetire, receipts };
 }
 
 

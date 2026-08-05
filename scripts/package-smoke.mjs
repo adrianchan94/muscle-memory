@@ -148,8 +148,12 @@ const workspace = process.env.MM_EXACT_FILE_ROOT;
 mkdirSync(join(globalDir, "recovering-failed-exact-match-edits"), { recursive: true });
 writeFileSync(join(globalDir, "recovering-failed-exact-match-edits", "SKILL.md"), "---\\nname: recovering-failed-exact-match-edits\\ndescription: Use when an exact-match file edit fails because target text is stale and must be re-anchored\\n---\\n## Procedure\\n1. Read current content.\\n2. Re-anchor.\\n3. Verify.\\n");
 mkdirSync(workspace, { recursive: true });
-writeFileSync(join(workspace, "target.txt"), "repaired\\n");
+// CAUSAL smoke: the target starts WRONG. A smoke test that writes the correct file and then
+// "verifies" it proves only that hashing works - it would pass even if the skill never ran.
+writeFileSync(join(workspace, "target.txt"), "stale\\n");
+const baseline = createHash("sha256").update("stale\\n").digest("hex");
 const expected = createHash("sha256").update("repaired\\n").digest("hex");
+if (baseline === expected) throw new Error("smoke misconfigured: baseline must differ from expected");
 const dispose = activate(letta);
 const registeredVerification = await toolDefs.get("register_exact_file_verification").run({
   args: { task_id: "package-verified-repair", task_class: "package-exact-repair", target_rel: "target.txt", expected_sha256: expected },
@@ -164,6 +168,9 @@ const prescribed = await toolDefs.get("muscle_memory_skill_read").run({
   agent: { name: "release-smoke" },
 });
 const possessionId = String(prescribed).match(/possession: ([a-z0-9._:-]+)/i)?.[1] || "";
+// the transition happens HERE - after the prescription, before verification - so the
+// verified outcome reflects an actual change rather than a file that was already correct
+writeFileSync(join(workspace, "target.txt"), "repaired\\n");
 const verification = possessionId ? await toolDefs.get("verify_agent_possession").run({ args: { possession_id: possessionId } }) : "missing possession";
 const lightweight = await toolDefs.get("muscle_memory_prescribe").run({
   args: { gap_observed: true, task: "exact-match file edit failed because target text was stale" },

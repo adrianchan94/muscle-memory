@@ -12,7 +12,73 @@ import {
 } from "./verification";
 
 export const POSSESSION_LEDGER_PATH = join(STATE_DIR, "possessions.jsonl");
+import { verifyEvidenceSignature } from "./instrument";
+
 export const POSSESSION_SCHEMA = "mm.possession.v1" as const;
+
+/** Why a stored `verified` row did not authenticate. Each is counted separately so a downgrade
+ *  is visible in the Decision Report rather than silently reclassified. */
+export type EvidenceDowngradeReason =
+  | "legacy_unsigned" | "missing_signature" | "bad_signature" | "key_unavailable" | "unknown_key";
+
+/** Why an authenticated row still earned no procedural credit. Artifact truth and causation are
+ *  separate questions: a target that was already correct proves nothing about the skill. */
+export type ProceduralDenialReason =
+  | "no_gap_to_close" | "no_observed_invocation" | "invocation_precedes_baseline" | "artifact_mismatch";
+
+export type StoredEvidenceVerdict = {
+  authenticated: boolean;
+  reason?: EvidenceDowngradeReason;
+  artifactVerified: boolean;
+  proceduralCredit: boolean;
+  proceduralReason?: ProceduralDenialReason;
+  resultClass: string;
+};
+
+/**
+ * Decide what a persisted evidence row is actually worth.
+ *
+ * Authenticity first: an unsigned or badly signed row is not `verified`, no matter how well
+ * formed it is. Then causation, which is a strictly separate test — a pre-existing correct
+ * target or an absent invocation yields artifact truth only.
+ */
+export function authenticateStoredEvidence(input: {
+  evidence?: { payload?: Record<string, unknown>; signature?: unknown };
+  key: { keyId: string; secret: Buffer } | null;
+  invocationObservedAt?: number;
+}): StoredEvidenceVerdict {
+  const deny = (reason: EvidenceDowngradeReason): StoredEvidenceVerdict =>
+    ({ authenticated: false, reason, artifactVerified: false, proceduralCredit: false, resultClass: "neutral" });
+
+  const payload = input.evidence?.payload;
+  if (!input.evidence || !payload) return deny("legacy_unsigned");
+  if (!input.key) return deny("key_unavailable");
+  if (payload.key_id !== input.key.keyId) return deny("unknown_key");
+  if (input.evidence.signature === undefined) return deny("missing_signature");
+  if (!verifyEvidenceSignature(payload, input.evidence.signature, input.key).ok) return deny("bad_signature");
+
+  const artifactVerified = payload.final_sha256 === payload.expected_sha256;
+  const hadGap = payload.baseline_sha256 !== payload.expected_sha256;
+  const invoked = !!String(payload.invocation_receipt_id || "").trim();
+  const invocationAfterBaseline = input.invocationObservedAt === undefined
+    || input.invocationObservedAt >= Number(payload.baseline_captured_at);
+
+  let proceduralReason: ProceduralDenialReason | undefined;
+  if (!hadGap) proceduralReason = "no_gap_to_close";
+  else if (!invoked) proceduralReason = "no_observed_invocation";
+  else if (!invocationAfterBaseline) proceduralReason = "invocation_precedes_baseline";
+  else if (!artifactVerified) proceduralReason = "artifact_mismatch";
+
+  const proceduralCredit = proceduralReason === undefined;
+  // A mismatch only counts as harm when an invocation was actually observed; otherwise the
+  // instrument saw a wrong file, not a skill that broke something.
+  const resultClass = artifactVerified
+    ? (proceduralCredit ? String(payload.result_class) : "neutral")
+    : (invoked ? "harmed" : "neutral");
+
+  return { authenticated: true, artifactVerified, proceduralCredit, proceduralReason, resultClass };
+}
+
 export const EFFICIENCY_CONTRACT = Object.freeze({
   id: "mm.efficiency.v2" as const,
   numerator: "same_tier_helped_prescriptions + same_tier_successful_abstentions",

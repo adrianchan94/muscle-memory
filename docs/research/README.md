@@ -43,7 +43,7 @@ Stated separately because they are genuinely different, and blurring them would 
 
 | Level | Status |
 |---|---|
-| Package reproducible | **Yes** — rebuild the exact shipped bytes from the public commit; verified byte-identical across repeated mints |
+| Package reproducible | **Yes** — rebuild the shipped bytes from the public commit; byte-identical across repeated mints on the same packer, and the decompressed tar stream matches across toolchains |
 | Minimal fixture reproducible | **Yes** — the fixture above |
 | Full program publicly reproducible | **No** — auditable, but the frozen inputs, raw traces, and custody chains are controlled artifacts held outside this repository |
 

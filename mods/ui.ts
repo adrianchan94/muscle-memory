@@ -67,7 +67,10 @@ export function renderAgentBoxScore(summary: PossessionSummary, options: { agent
         : summary.judgedDecisions > 0 ? "early judged evidence"
           : "no evaluated evidence";
     const capped = summary.repeatCappedDecisions > 0 ? ` · ${summary.repeatCappedDecisions} repeat-capped` : "";
-    lines.push(`STATUS · ${evidence} · ${summary.verifiedDecisions} verified${capped} · not claim-bearing`);
+    // `0 proven` is the normal state for judged work, not a shortfall: say so in the same
+    // render so an agent never reads the scoreline as a failure it must fix.
+    const gloss = summary.verifiedDecisions === 0 ? " · integrity gate · normal until instrument verify earns one · judged path is enough" : "";
+    lines.push(`STATUS · ${evidence} · ${summary.verifiedDecisions} verified${capped} · not claim-bearing${gloss}`);
   }
   return lines.join("\n");
 }

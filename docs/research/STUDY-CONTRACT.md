@@ -30,7 +30,7 @@ Reproducibility is not one property. This program claims exactly three levels an
 
 | Level | What it means | Status |
 |---|---|---|
-| **1 · Package reproducible** | Anyone can rebuild the exact shipped bytes from the public commit and verify every hash. | **Yes, now.** `npm ci && npm run build && npm pack` reproduces the published sha256. Verified byte-identical across repeated mints. |
+| **1 · Package reproducible** | Anyone can rebuild the exact shipped bytes from the public commit and verify every hash. | **Yes, now.** `npm ci && npm run build && npm pack` reproduces the published sha256 on the same packer, verified byte-identical across repeated mints. Across toolchains the portable invariant is the decompressed tar stream plus the file manifest and bundle hash - gzip framing is packer-dependent. |
 | **2 · Minimal fixture reproducible** | Anyone can run a small deterministic fixture that demonstrates the instrument's core separations, with no provider calls. | **Yes, now.** See `fixtures/four-events/`. |
 | **3 · Full program auditable but not yet publicly reproducible** | The complete experimental program — frozen inputs, raw traces, invocation records, custody chains — can be audited, but is not publicly re-runnable. | **Auditable, not reproducible.** Controlled artifacts are held outside this repository. This is a limitation, stated as one. |
 

@@ -75,11 +75,19 @@ The design comes from a bounded research program. **Muscle Memory V1 is the prod
 ## Install (30 seconds)
 
 ```bash
-letta install git:github.com/adrianchan94/muscle-memory
+letta install npm:@adrianchan94/muscle-memory@1.0.0-rc.3
 /reload
 ```
 
 That is the whole install. A fresh agent then sees **three tools** — `muscle_memory_prescribe`, `muscle_memory_close`, and a bounded read — and an idle status line, `💾 muscle-memory · N skills · H helped`. Mutation, lifecycle, ratings, verification, and diagnostics stay hidden until you set `MM_ADVANCED=on`. The memory system should not eat the context it is trying to improve.
+
+**Reviewers / pre-publish.** `1.0.0-rc.3` is not on npm yet, so the command above will not resolve until it is published. To install the exact reviewed bytes today, extract the sealed tarball and install the extracted directory — verifying the tree against `PACKAGE-MANIFEST.json` first:
+
+```bash
+tar -xzf adrianchan94-muscle-memory-1.0.0-rc.3.tgz -C /tmp/mm
+node scripts/dump-package-manifest.mjs --stdout   # compare per-file hashes
+letta install /tmp/mm/package
+```
 
 The npm identity is **`@adrianchan94/muscle-memory`**, but it is **not published**; this is a release candidate. See the [RC3 release notes](https://github.com/adrianchan94/muscle-memory/blob/v1.0.0-rc.3/docs/RELEASE-NOTES-v1.0.0-rc.3.md) and [cold-review kit](https://github.com/adrianchan94/muscle-memory/blob/v1.0.0-rc.3/docs/cold-review/README.md) for the gates.
 
@@ -95,7 +103,7 @@ The npm identity is **`@adrianchan94/muscle-memory`**, but it is **not published
 |---|---|---|
 | **One skill or abstain** | `muscle_memory_prescribe(task, gap_observed)` returns one installed procedure or `ABSTAIN`; it never dumps the shelf. | Research found that skill value depends on model × task × knowledge gap. Broad injection is not a neutral default. |
 | **Possessions and honest closeout** | Every decision opens a resumable possession; closeout records `helped`, `harmed`, `neutral`, `succeeded_unaided`, or `failed_unaided`. | Retrieval is not application. The unit of learning is the next observed action, not a citation. |
-| **Evidence-aware roster** | Judged outcomes, field ratings, and verified evidence stay separate; advice requires repeated minutes and lifecycle changes are never automatic. | A skill can sound right, be followed faithfully, and still hurt. The referee must be allowed to call red. |
+| **Evidence-aware roster** | Judged outcomes, field ratings, and verified evidence stay separate; advice requires repeated minutes; retirement is recommended, never performed silently, unless you explicitly enable it. | A skill can sound right, be followed faithfully, and still hurt. The referee must be allowed to call red. |
 | **Instrument-owned verification** | The first adapter binds a pre-work manifest to one regular file and derives the exact SHA-256 outcome itself. | Callers cannot self-award `verified`; proof must match the claim's shape. |
 | **Update-first learning** | Existing and staged skills are searched before a new sibling can be created; n=1 and retired-clone gates resist shelf bloat. | A learning system that only appends becomes a markdown junk drawer. |
 | **Staged, reversible lifecycle** | Draft → quality gate → graduate → review → retire/restore; pinned skills are protected and sharing is explicit. | Learning needs rollback, refusal, and custody—not irreversible accumulation. |
