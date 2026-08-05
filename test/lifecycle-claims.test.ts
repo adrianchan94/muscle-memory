@@ -137,3 +137,50 @@ test("claim: every reflect hook routes prune through the gate, not directly", ()
     expect(block).toContain("autoPruneIfEnabled");
   }
 });
+
+// ── Class map extension (fix v5) ───────────────────────────────────────────────
+// Three more headline promises, each broken in the shipped bytes and each now mechanical.
+// The behavioural proofs live in test/publish-containment-graduation.test.ts; these rows keep
+// the claims table itself honest, so a doc edit cannot quietly re-open a class.
+
+test("class: no auto-graduate under staged — the mirror of no-auto-retire", () => {
+  const src = readFileSync(new URL("../mods/autopilot.ts", import.meta.url), "utf8");
+  const line = src.match(/const graduate = .*/)?.[0] ?? "";
+  expect(line).toBeTruthy();
+  expect(line).not.toMatch(/isHighConfidenceCreate|res\.action === "update"/);
+});
+
+test("class: publish is sanitized AND approved", () => {
+  const pub = readFileSync(new URL("../mods/publish.ts", import.meta.url), "utf8");
+  const fn = pub.slice(pub.indexOf("export function publishSkillToCatalog"));
+  const body = fn.slice(0, fn.indexOf("\n}"));
+  expect(body).toMatch(/sanitizeForPublish/);
+  // The bytes that reach disk must be the sanitized ones, not the source content.
+  // Match the argument, not a paren-free prefix — the call nests join(...), so [^)]* never
+  // reached the second argument and this assertion passed on any writeFileSync at all.
+  expect(body).toMatch(/writeFileSync\(.*,\s*published\)/);
+  expect(body).not.toMatch(/writeFileSync\(.*,\s*content\)/);
+
+  const idx = readFileSync(new URL("../mods/index.ts", import.meta.url), "utf8");
+  const start = idx.indexOf('a.action === "publish"');
+  const code = idx.slice(start, start + 1200).split("\n").filter((l) => !l.trim().startsWith("//")).join("\n");
+  expect(code.indexOf("a.approve")).toBeGreaterThan(-1);
+  expect(code.indexOf("a.approve")).toBeLessThan(code.indexOf("publishSkillToCatalog"));
+});
+
+test("class: support-file containment refuses symlink escape on every write path", () => {
+  const src = readFileSync(new URL("../mods/core.ts", import.meta.url), "utf8");
+  expect(src).toMatch(/export function assertContained/);
+  expect(src).toMatch(/lstatSync/);
+  expect(src).toMatch(/realpathSync/);
+  // Both mutators, not just the one a reviewer happened to test.
+  const guarded = [...src.matchAll(/export function (writeSupportFile|removeSupportFile)[\s\S]{0,700}?\n}/g)];
+  expect(guarded.length).toBe(2);
+  for (const g of guarded) expect(g[0]).toMatch(/assertContained/);
+});
+
+test("class: the lifecycle schema does not advertise the bug it used to have", () => {
+  const idx = readFileSync(new URL("../mods/index.ts", import.meta.url), "utf8");
+  // It literally read "staged still auto-graduates trusted updates/high-confidence creates".
+  expect(idx).not.toMatch(/staged still auto-graduates/);
+});

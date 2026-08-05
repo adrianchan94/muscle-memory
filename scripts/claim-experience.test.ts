@@ -170,10 +170,18 @@ test("claim experience · repeated real repairs visibly update the right existin
     args: { action: "reflect_plan" },
     agent: { id: "claim-dogfood-agent" },
   });
-  const authored = `---\nname: repairing-failing-script-runs\ndescription: Use when a script run fails and source changes must be proven by rerunning the same script until it passes\n---\n\n## When to use\nUse after a test, build, or package verifier fails.\n\n## Procedure\n1. Preserve the original failure output.\n2. Trace the defect to source code before changing expectations.\n3. Apply the narrowest source repair.\n4. Rerun the exact command that failed.\n\n## Pitfalls\n### Switching verifiers\nTELL: the original command remains red. Return to the same verifier.\n\n## Verification\n- The exact original verifier exits successfully.\n- Adjacent checks remain green.\n`;
+  const authored = `---\nname: repairing-failing-script-runs\ndescription: Use when a script run fails and source changes must be proven by rerunning the same script until it passes\n---\n\n## When to use\nUse after a test, build, or package verifier fails.\n\n## Procedure\n1. Preserve the original failure output.\n2. Trace the defect to source code before changing expectations.\n3. Apply the narrowest source repair.\n4. Rerun the exact command that failed.\n\n## Pitfalls\n### Switching verifiers\nTELL: the original command remains red. Return to the same verifier.\n\n## Verification\n\n\u0060\u0060\u0060bash\nnpm test -- src/auth.test.ts\n\u0060\u0060\u0060\n\n- The exact original verifier exits successfully.\n- Adjacent checks remain green.\n`;
   const ctx: any = reviewerContext(authored);
   ctx.args = { action: "reflect", mode: "staged" };
   const result = await runtime.tools.get("muscle_memory_lifecycle_run").run(ctx);
+  // `staged` now means staged for updates too, so the live shelf is untouched until someone
+  // graduates. This test used to assert the live file changed on a staged run, which is
+  // precisely the promise the docs made and the code broke.
+  const staged = await runtime.tools.get("muscle_memory_lifecycle_run").run({
+    args: { action: "graduate", name: "repairing-failing-script-runs" },
+    agent: { id: "claim-dogfood-agent" },
+  });
+  expect(JSON.stringify(staged)).toMatch(/graduat/i);
   const updated = readFileSync(join(skillDir, "SKILL.md"), "utf8");
   const siblingSkills = readdirSync(join(runtime.root, "memory", "skills"));
   const events = await runtime.commands.get("muscle-memory").run({ argv: ["events", "20"] });
@@ -216,7 +224,9 @@ test("claim experience · a novel repeated workflow survives the whole reversibl
   expect(existsSync(join(runtime.root, "memory", "skills", name, "SKILL.md"))).toBe(true);
 
   const published = await runtime.tools.get("muscle_memory_lifecycle_run").run({
-    args: { action: "publish", name },
+    // Publishing to the shared catalog is the one irreversible lifecycle action, so it now
+    // takes an explicit opt-in. A consumer that wants it must say so.
+    args: { action: "publish", name, approve: true },
     agent: { id: "claim-dogfood-agent" },
   });
   expect(String(published)).toContain("Published");

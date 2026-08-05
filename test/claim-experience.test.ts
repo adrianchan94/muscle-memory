@@ -30,7 +30,7 @@ test("claim-to-experience gate passes in a fully isolated agent runtime", async 
     if (exitCode !== 0) throw new Error(`claim scenario failed (${exitCode})\n${output}`);
     expect(output).toContain("16 pass");
     expect(output).toContain("0 fail");
-    expect(output).toContain("107 expect() calls");
+    expect(output).toContain("108 expect() calls");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

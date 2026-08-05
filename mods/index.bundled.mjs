@@ -4,8 +4,8 @@ import { join as join14 } from "node:path";
 import { randomBytes as randomBytes2 } from "node:crypto";
 
 // mods/core.ts
-import { appendFileSync, copyFileSync, lstatSync, mkdirSync, readFileSync, existsSync, writeFileSync, readdirSync, renameSync, rmSync } from "node:fs";
-import { join, dirname, relative } from "node:path";
+import { appendFileSync, copyFileSync, lstatSync, mkdirSync, readFileSync, existsSync, writeFileSync, readdirSync, renameSync, rmSync, realpathSync } from "node:fs";
+import { join, dirname, relative, isAbsolute, sep } from "node:path";
 import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 if (false) {}
@@ -133,7 +133,22 @@ function listSkillNames(dir) {
     return [];
   }
 }
+function assertSafeSkillName(name) {
+  const n = String(name ?? "").trim();
+  if (!n)
+    throw new Error("skill name required");
+  if (n === "." || n === "..")
+    throw new Error(`unsafe skill name '${n}': dot segment`);
+  if (/[\\/]/.test(n))
+    throw new Error(`unsafe skill name '${n}': path separators are not allowed in a skill name`);
+  if (isAbsolute(n) || /^[A-Za-z]:/.test(n) || n.startsWith("~"))
+    throw new Error(`unsafe skill name '${n}': absolute paths are not allowed`);
+  if (n.includes("\x00"))
+    throw new Error(`unsafe skill name: null byte`);
+  return n;
+}
 function readSkill(dir, name) {
+  assertSafeSkillName(name);
   try {
     return readFileSync(join(dir, name, "SKILL.md"), "utf8");
   } catch {
@@ -420,6 +435,33 @@ function validateSupportPath(filePath) {
 function skillDirOf(name, ctx) {
   return scanDirs(ctx).find((d) => existsSync(join(d, name, "SKILL.md"))) || null;
 }
+function assertContained(root, full) {
+  const base = realpathSync(root);
+  const rel = relative(base, full);
+  if (!rel || rel.startsWith("..") || isAbsolute(rel))
+    throw new Error(`containment: '${rel || full}' escapes the skill root`);
+  let cur = base;
+  for (const seg of rel.split(sep)) {
+    cur = join(cur, seg);
+    let st;
+    try {
+      st = lstatSync(cur);
+    } catch {
+      return;
+    }
+    if (st.isSymbolicLink()) {
+      let target = "";
+      try {
+        target = realpathSync(cur);
+      } catch {
+        throw new Error(`containment: '${seg}' is a broken symlink — refusing`);
+      }
+      const tRel = relative(base, target);
+      const outside = tRel.startsWith("..") || isAbsolute(tRel);
+      throw new Error(`containment: '${seg}' is a symlink${outside ? ` pointing outside the skill root (${target})` : ""} — refusing`);
+    }
+  }
+}
 function writeSupportFile(name, filePath, content, ctx) {
   const v = validateSupportPath(filePath);
   if (!v.ok)
@@ -431,7 +473,9 @@ function writeSupportFile(name, filePath, content, ctx) {
   if (!d)
     throw new Error(`no skill '${name}'`);
   const full = join(d, name, filePath);
+  assertContained(join(d, name), full);
   mkdirSync(dirname(full), { recursive: true });
+  assertContained(join(d, name), full);
   const tmp = full + ".mmtmp";
   writeFileSync(tmp, content);
   renameSync(tmp, full);
@@ -445,6 +489,7 @@ function removeSupportFile(name, filePath, ctx) {
   if (!d)
     throw new Error(`no skill '${name}'`);
   const full = join(d, name, filePath);
+  assertContained(join(d, name), full);
   if (!existsSync(full))
     throw new Error(`no such support file`);
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -1711,13 +1756,15 @@ function publishSkillToCatalog(name, ctx) {
   const priv = catalogPrivacyScan(content);
   if (!priv.ok)
     throw new Error(`privacy blocked: ${priv.issues.join("; ")}`);
+  const san = sanitizeForPublish(content);
   const dstDir = join3(globalSkillsDir(), nm);
   mkdirSync2(dstDir, { recursive: true });
-  const published = content.includes(MM_TAG) ? content : content + `
+  const published = san.sanitized.includes(MM_TAG) ? san.sanitized : san.sanitized + `
 <!-- ${MM_TAG}: published ${new Date().toISOString().slice(0, 10)}; catalog=global -->
 `;
   writeFileSync2(join3(dstDir, "SKILL.md"), published);
-  appendUiEvent({ phase: "skill_published", summary: `published '${nm}' to custom skill catalog`, skill: nm, action: "publish", route: "global-catalog" });
+  const redacted = san.replacements.length ? ` (redacted: ${san.replacements.map((r) => r.kind).join(", ")})` : "";
+  appendUiEvent({ phase: "skill_published", summary: `published '${nm}' to custom skill catalog${redacted}`, skill: nm, action: "publish", route: "global-catalog" });
   appendMeshFeed({ type: "skill_published", skill: nm, route: "PUBLISH", signals: 0 });
   writeUiState({ phase: "rotation", skill: nm, last: `published '${nm}' to catalog`, route: "PUBLISH · catalog" });
   return join3(dstDir, "SKILL.md");
@@ -3245,7 +3292,7 @@ ${prefs.map((p) => `- ${p}`).join(`
   }
   if ((res.action === "create" || res.action === "update") && res.name && res.content) {
     const live = config.mode === "auto";
-    const graduate = live || res.action === "update" || isHighConfidenceCreate(res, ev);
+    const graduate = live;
     const dir = graduate ? agentSkillsDir(ctx) : stagedShelf;
     const tagged = res.content.includes(MM_TAG) ? res.content : res.content + `
 <!-- ${MM_TAG}: reflective ${new Date().toISOString().slice(0, 10)}; action=${res.action}; convs=${ev.convs}; ${graduate ? "graduated=true" : "staged=true"} -->
@@ -3469,9 +3516,9 @@ import { dirname as dirname3, join as join7 } from "node:path";
 
 // mods/instrument.ts
 import { createHash as createHash2, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { chmodSync, existsSync as existsSync5, mkdirSync as mkdirSync5, readFileSync as readFileSync5, realpathSync, statSync, writeFileSync as writeFileSync5 } from "node:fs";
+import { chmodSync, existsSync as existsSync5, mkdirSync as mkdirSync5, readFileSync as readFileSync5, realpathSync as realpathSync2, statSync, writeFileSync as writeFileSync5 } from "node:fs";
 import { homedir as homedir2 } from "node:os";
-import { dirname as dirname2, join as join6, resolve, sep } from "node:path";
+import { dirname as dirname2, join as join6, resolve, sep as sep2 } from "node:path";
 function defaultInstrumentKeyPath(home = homedir2()) {
   return join6(home, ".letta", "instrument", "muscle-memory.key");
 }
@@ -3483,7 +3530,7 @@ function resolveInstrumentKeyPath(opts = {}) {
 function isInsideStateDir(candidate, stateDir) {
   const real = (p) => {
     try {
-      return realpathSync(p);
+      return realpathSync2(p);
     } catch {
       return resolve(p);
     }
@@ -3491,7 +3538,7 @@ function isInsideStateDir(candidate, stateDir) {
   const key = real(candidate);
   const keyDir = real(dirname2(candidate));
   const state = real(stateDir);
-  const under = (p) => p === state || p.startsWith(state + sep);
+  const under = (p) => p === state || p.startsWith(state + sep2);
   return under(key) || under(keyDir);
 }
 function loadInstrumentKey(opts) {
@@ -3742,12 +3789,12 @@ import {
   mkdirSync as mkdirSync7,
   openSync,
   readFileSync as readFileSync7,
-  realpathSync as realpathSync2,
+  realpathSync as realpathSync3,
   statSync as statSync2,
   writeFileSync as writeFileSync6
 } from "node:fs";
 import { createHash as createHash3, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
-import { isAbsolute, join as join8, relative as relative2, resolve as resolve2, sep as sep2 } from "node:path";
+import { isAbsolute as isAbsolute2, join as join8, relative as relative2, resolve as resolve2, sep as sep3 } from "node:path";
 var EXACT_FILE_ADAPTER_ID = "mm.exact-file-sha256.v1";
 var VERIFICATION_TASK_SCHEMA = "mm.verification-task.exact-file.v1";
 var VERIFICATION_BINDING_SCHEMA = "mm.verification-binding.v1";
@@ -3822,7 +3869,7 @@ function assertSha(label, value) {
 function assertTargetRel(value) {
   if (typeof value !== "string" || !value || value.length > 240)
     throw new Error("target_rel must be a bounded relative path");
-  if (value.includes("\x00") || value.includes("\\") || isAbsolute(value) || value.startsWith("./") || value.includes("//")) {
+  if (value.includes("\x00") || value.includes("\\") || isAbsolute2(value) || value.startsWith("./") || value.includes("//")) {
     throw new Error("target_rel must be a canonical POSIX-style relative path");
   }
   const parts = value.split("/");
@@ -3831,9 +3878,9 @@ function assertTargetRel(value) {
 }
 function configuredRoot() {
   const raw = String(process.env.MM_EXACT_FILE_ROOT || "").trim();
-  if (!raw || !isAbsolute(raw))
+  if (!raw || !isAbsolute2(raw))
     throw new Error("MM_EXACT_FILE_ROOT must be configured as an absolute trusted root");
-  const root = realpathSync2(raw);
+  const root = realpathSync3(raw);
   if (!statSync2(root).isDirectory())
     throw new Error("MM_EXACT_FILE_ROOT must resolve to a directory");
   return root;
@@ -3842,7 +3889,7 @@ function resolveTarget(root, targetRel, requireFile) {
   assertTargetRel(targetRel);
   const lexical = resolve2(root, targetRel);
   const lexicalRel = relative2(root, lexical);
-  if (!lexicalRel || lexicalRel.startsWith("..") || isAbsolute(lexicalRel))
+  if (!lexicalRel || lexicalRel.startsWith("..") || isAbsolute2(lexicalRel))
     throw new Error("target_rel escapes the trusted root");
   if (!existsSync7(lexical)) {
     if (requireFile)
@@ -3852,8 +3899,8 @@ function resolveTarget(root, targetRel, requireFile) {
   const lst = lstatSync2(lexical);
   if (lst.isSymbolicLink())
     throw new Error("verification target cannot be a symlink");
-  const target = realpathSync2(lexical);
-  if (target !== root && !target.startsWith(`${root}${sep2}`))
+  const target = realpathSync3(lexical);
+  if (target !== root && !target.startsWith(`${root}${sep3}`))
     throw new Error("verification target resolves outside the trusted root");
   if (!statSync2(target).isFile())
     throw new Error("verification target must be a regular file");
@@ -4013,15 +4060,15 @@ function verifyExactFilePossession(decision) {
     const before = fstatSync(fd);
     if (!before.isFile())
       throw new Error("verification target must remain a regular file");
-    const openedReal = realpathSync2(target);
-    if (openedReal !== root && !openedReal.startsWith(`${root}${sep2}`))
+    const openedReal = realpathSync3(target);
+    if (openedReal !== root && !openedReal.startsWith(`${root}${sep3}`))
       throw new Error("verification target escaped the trusted root while opening");
     const openedPathStat = statSync2(openedReal);
     if (openedPathStat.dev !== before.dev || openedPathStat.ino !== before.ino)
       throw new Error("verification target changed before hashing");
     bytes = readFileSync7(fd);
     const after = fstatSync(fd);
-    const afterReal = realpathSync2(target);
+    const afterReal = realpathSync3(target);
     const afterPathStat = statSync2(afterReal);
     if (afterReal !== openedReal || afterPathStat.dev !== after.dev || afterPathStat.ino !== after.ino || before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size || before.mtimeMs !== after.mtimeMs) {
       throw new Error("verification target changed while hashing");
@@ -6568,7 +6615,10 @@ ${plan.digest}` };
     const readRun = async (ctx) => {
       const a = ctx?.args || {};
       const dirs = scanDirs(ctx);
-      const findSkillDir = (name) => dirs.find((d) => existsSync12(join14(d, name, "SKILL.md")));
+      const findSkillDir = (name) => {
+        assertSafeSkillName(name);
+        return dirs.find((d) => existsSync12(join14(d, name, "SKILL.md")));
+      };
       try {
         if (a.action === "report" || a.action === "boxscore") {
           const summary = summarizePossessionLedger();
@@ -6699,7 +6749,10 @@ ${d.body}` };
       const a = ctx?.args || {};
       const dir = agentSkillsDir(ctx);
       const dirs = scanDirs(ctx);
-      const findSkillDir = (name) => dirs.find((d) => existsSync12(join14(d, name, "SKILL.md")));
+      const findSkillDir = (name) => {
+        assertSafeSkillName(name);
+        return dirs.find((d) => existsSync12(join14(d, name, "SKILL.md")));
+      };
       try {
         if (a.action === "autopilot_run") {
           const cfg = { ...AUTOPILOT_DEFAULT, mode: a.mode === "auto" ? "auto" : "staged" };
@@ -6887,11 +6940,13 @@ Load with muscle_memory_skill_read action:load, then invoke the normal Skill too
     const lifecycleParams = {
       type: "object",
       properties: {
-        action: { type: "string", enum: ["reflect", "graduate", "publish", "prune"], description: "Safe no-approval lifecycle action" },
-        mode: { type: "string", enum: ["staged", "auto"], description: "reflect mode; staged still auto-graduates trusted updates/high-confidence creates" },
-        name: { type: "string", description: "staged skill name — for graduate" }
+        action: { type: "string", enum: ["reflect", "graduate", "publish", "prune"], description: "Lifecycle action. All are reversible except publish, which writes to the shared catalog and needs approve: true" },
+        mode: { type: "string", enum: ["staged", "auto"], description: "reflect mode; staged writes every result to the staging shelf and promotes nothing — graduate explicitly. auto promotes." },
+        name: { type: "string", description: "staged skill name — for graduate" },
+        approve: { type: "boolean", description: "required for publish: confirms the sanitized skill may be written to the shared catalog" }
       },
-      required: ["action"]
+      required: ["action"],
+      additionalProperties: false
     };
     const lifecycleRun = async (ctx) => {
       const a = ctx?.args || {};
@@ -6921,6 +6976,12 @@ Load with muscle_memory_skill_read action:load, then invoke the normal Skill too
         if (a.action === "publish") {
           if (!a.name)
             return { status: "error", content: "name required" };
+          if (a.approve !== true) {
+            return {
+              status: "error",
+              content: `publish to the shared catalog needs explicit approval — re-run with approve: true to publish '${slug(String(a.name))}'`
+            };
+          }
           const p = publishSkillToCatalog(String(a.name), ctx);
           return `Published '${slug(a.name)}' to the shared Custom Skills catalog → ${p}`;
         }

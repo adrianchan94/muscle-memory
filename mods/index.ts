@@ -34,7 +34,7 @@ export type { Defense } from "./engram";
 export { detect, detectRepairChains, isSkillWorthy } from "./detect";
 export { draftWithRepair } from "./gate";
 export { preserveExistingFrontmatterMetadata, isAmbiguousExistingRoute, compareSkillSections } from "./autopilot";
-import { globalSkillsDir, LOG_PATH, MM, MM_TAG, NEOCORTEX_BLOCK, OUTCOME_PATH, RECEIPTS_DIR, SESSIONS_PATH, STAGED_DIR, STATE_DIR, TELEMETRY_PATH, agentSkillsDir, appendJsonl, appendMeshFeed, appendUiEvent, createDedupeSurface, ensureDir, hash, isManaged, listSkillNames, loadExperience, loadMeshFeed, meshAgentLabel, loadRows, loadUiEvents, readSkill, readUiState, redactFragment, removeSupportFile, renderMeshFeed, scanDirs, scanSkillContent, scanSupportFile, setLivePanel, skillDesc, slug, syncSkillToDesktopCatalog, validateSupportPath, writeSkill, writeSupportFile, writeUiState } from "./core";
+import { assertSafeSkillName, globalSkillsDir, LOG_PATH, MM, MM_TAG, NEOCORTEX_BLOCK, OUTCOME_PATH, RECEIPTS_DIR, SESSIONS_PATH, STAGED_DIR, STATE_DIR, TELEMETRY_PATH, agentSkillsDir, appendJsonl, appendMeshFeed, appendUiEvent, createDedupeSurface, ensureDir, hash, isManaged, listSkillNames, loadExperience, loadMeshFeed, meshAgentLabel, loadRows, loadUiEvents, readSkill, readUiState, redactFragment, removeSupportFile, renderMeshFeed, scanDirs, scanSkillContent, scanSupportFile, setLivePanel, skillDesc, slug, syncSkillToDesktopCatalog, validateSupportPath, writeSkill, writeSupportFile, writeUiState } from "./core";
 import { buildCrossConversationEvidence, classifyError, commandTemplate, correlateOutcomes, detect, detectAntiPatterns, detectInvocationGotchas, detectRepairChains, detectSequences, detectTemplates, fingerprint, impactScore, inferOutcomes, isDurableLesson, isValidSkillName, maturityScore, mergeOutcomes, stepSig } from "./detect";
 import { auditSkills, buildDiffFragment, candidateDescription, candidateName, crossShelfDuplicates, dedupCheck, draftSkillFromCandidate, draftWithRepair, effectivenessVerdict, findCandidate, lintSkillDraft, repairForCandidate, sotaQualityGaps } from "./gate";
 import { approveStagedPublish, catalogPrivacyScan, findSimilarSkills, liveSkillVisible, publishHardBlocks, publishMetadata, publishPlan, publishSkillToCatalog, publishTier, publishVisibilityReceipt, publishabilityScore, sanitizeForPublish, stageSanitizedPublish } from "./publish";
@@ -859,7 +859,9 @@ export default function activate(letta: any) {
     const readRun = async (ctx: any) => {
       const a = ctx?.args || {};
       const dirs = scanDirs(ctx);
-      const findSkillDir = (name: string) => dirs.find((d) => existsSync(join(d, name, "SKILL.md")));
+      // A skill name is one directory segment. Joining an unvalidated name onto each shelf dir
+      // let `../` walk out of the shelf entirely, and load is a default no-approval action.
+      const findSkillDir = (name: string) => { assertSafeSkillName(name); return dirs.find((d) => existsSync(join(d, name, "SKILL.md"))); };
       try {
         if (a.action === "report" || a.action === "boxscore") {
           const summary = summarizePossessionLedger();
@@ -968,7 +970,9 @@ export default function activate(letta: any) {
       const a = ctx?.args || {};
       const dir = agentSkillsDir(ctx);
       const dirs = scanDirs(ctx);
-      const findSkillDir = (name: string) => dirs.find((d) => existsSync(join(d, name, "SKILL.md")));
+      // A skill name is one directory segment. Joining an unvalidated name onto each shelf dir
+      // let `../` walk out of the shelf entirely, and load is a default no-approval action.
+      const findSkillDir = (name: string) => { assertSafeSkillName(name); return dirs.find((d) => existsSync(join(d, name, "SKILL.md"))); };
       try {
         if (a.action === "autopilot_run") {
           const cfg = { ...AUTOPILOT_DEFAULT, mode: (a.mode === "auto" ? "auto" : "staged") as AutopilotMode };
@@ -1109,11 +1113,13 @@ export default function activate(letta: any) {
     const lifecycleParams = {
       type: "object",
       properties: {
-        action: { type: "string", enum: ["reflect", "graduate", "publish", "prune"], description: "Safe no-approval lifecycle action" },
-        mode: { type: "string", enum: ["staged", "auto"], description: "reflect mode; staged still auto-graduates trusted updates/high-confidence creates" },
-        name: { type: "string", description: "staged skill name — for graduate" }
+        action: { type: "string", enum: ["reflect", "graduate", "publish", "prune"], description: "Lifecycle action. All are reversible except publish, which writes to the shared catalog and needs approve: true" },
+        mode: { type: "string", enum: ["staged", "auto"], description: "reflect mode; staged writes every result to the staging shelf and promotes nothing — graduate explicitly. auto promotes." },
+        name: { type: "string", description: "staged skill name — for graduate" },
+        approve: { type: "boolean", description: "required for publish: confirms the sanitized skill may be written to the shared catalog" }
       },
-      required: ["action"]
+      required: ["action"],
+      additionalProperties: false
     };
 
     const lifecycleRun = async (ctx: any) => {
@@ -1141,6 +1147,16 @@ export default function activate(letta: any) {
         }
         if (a.action === "publish") {
           if (!a.name) return { status: "error", content: "name required" };
+          // Global mutation is explicit-only — the shelf resolver has documented that since
+          // Block N, but this branch published on a single unconfirmed call. A skill written
+          // to the shared catalog is visible to every other agent, so it takes the same
+          // deliberate second step as any other irreversible act.
+          if (a.approve !== true) {
+            return {
+              status: "error",
+              content: `publish to the shared catalog needs explicit approval — re-run with approve: true to publish '${slug(String(a.name))}'`,
+            };
+          }
           const p = publishSkillToCatalog(String(a.name), ctx);
           return `Published '${slug(a.name)}' to the shared Custom Skills catalog → ${p}`;
         }

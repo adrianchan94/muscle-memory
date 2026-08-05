@@ -1,6 +1,6 @@
 // muscle-memory · core module (split from index.ts — behavior-preserving).
-import { appendFileSync, copyFileSync, lstatSync, mkdirSync, readFileSync, existsSync, writeFileSync, readdirSync, renameSync, rmSync } from "node:fs";
-import { join, dirname, relative } from "node:path";
+import { appendFileSync, copyFileSync, lstatSync, mkdirSync, readFileSync, existsSync, writeFileSync, readdirSync, renameSync, rmSync, realpathSync } from "node:fs";
+import { join, dirname, relative, isAbsolute, sep } from "node:path";
 import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 import { commandTemplate, correlateOutcomes, fingerprint, inferOutcomes } from "./detect";
@@ -193,7 +193,23 @@ export function slug(s: string): string { return s.toLowerCase().replace(/[^a-z0
 
 export function listSkillNames(dir: string): string[] { try { return readdirSync(dir).filter((n) => existsSync(join(dir, n, "SKILL.md"))); } catch { return []; } }
 
-export function readSkill(dir: string, name: string): string { try { return readFileSync(join(dir, name, "SKILL.md"), "utf8"); } catch { return ""; } }
+/**
+ * Read-side mirror of `assertContained`. A skill NAME is a single directory segment, always.
+ * The load path joined it straight onto each shelf dir, so `../../../etc` walked out and read a
+ * SKILL.md the agent was never granted — the read-side twin of the support-file symlink escape,
+ * and it needed no symlink at all. Rejecting the shape is enough here: a name is not a path.
+ */
+export function assertSafeSkillName(name: unknown): string {
+  const n = String(name ?? "").trim();
+  if (!n) throw new Error("skill name required");
+  if (n === "." || n === "..") throw new Error(`unsafe skill name '${n}': dot segment`);
+  if (/[\\/]/.test(n)) throw new Error(`unsafe skill name '${n}': path separators are not allowed in a skill name`);
+  if (isAbsolute(n) || /^[A-Za-z]:/.test(n) || n.startsWith("~")) throw new Error(`unsafe skill name '${n}': absolute paths are not allowed`);
+  if (n.includes("\0")) throw new Error(`unsafe skill name: null byte`);
+  return n;
+}
+
+export function readSkill(dir: string, name: string): string { assertSafeSkillName(name); try { return readFileSync(join(dir, name, "SKILL.md"), "utf8"); } catch { return ""; } }
 
 export function skillDesc(dir: string, name: string): string { return (readSkill(dir, name).match(/description:\s*(.+)/)?.[1] || "").trim(); }
 
@@ -489,12 +505,44 @@ export function validateSupportPath(filePath: string): { ok: boolean; reason?: s
 
 export function skillDirOf(name: string, ctx?: any): string | null { return scanDirs(ctx).find((d) => existsSync(join(d, name, "SKILL.md"))) || null; }
 
+/**
+ * Containment for every support-file write. `validateSupportPath` reasons about the path as a
+ * STRING, which cannot see a directory that is itself a symlink out of the skill root: a
+ * `references` symlink to $HOME/evil_dir passes '..'-blocking, absolute-blocking, dotfile-blocking
+ * and subdir-allowlisting, and the write lands outside. The remove path was worse — it would
+ * happily quarantine a file the agent never owned.
+ *
+ * So resolve for real. Every segment from the skill root down is lstat'd, and any symlink whose
+ * target leaves the root aborts. Symlinks INSIDE the root are still refused: a support file is
+ * plain content, and there is no legitimate reason for one to be a link.
+ */
+export function assertContained(root: string, full: string): void {
+  const base = realpathSync(root);
+  const rel = relative(base, full);
+  if (!rel || rel.startsWith("..") || isAbsolute(rel)) throw new Error(`containment: '${rel || full}' escapes the skill root`);
+  let cur = base;
+  for (const seg of rel.split(sep)) {
+    cur = join(cur, seg);
+    let st;
+    try { st = lstatSync(cur); } catch { return; } // not created yet — nothing to escape through
+    if (st.isSymbolicLink()) {
+      let target = "";
+      try { target = realpathSync(cur); } catch { throw new Error(`containment: '${seg}' is a broken symlink — refusing`); }
+      const tRel = relative(base, target);
+      const outside = tRel.startsWith("..") || isAbsolute(tRel);
+      throw new Error(`containment: '${seg}' is a symlink${outside ? ` pointing outside the skill root (${target})` : ""} — refusing`);
+    }
+  }
+}
+
 export function writeSupportFile(name: string, filePath: string, content: string, ctx?: any): string {
   const v = validateSupportPath(filePath); if (!v.ok) throw new Error(v.reason);
   const sc = scanSupportFile(filePath, content); if (!sc.ok) throw new Error(`security: ${sc.issues.join("; ")}`);
   const d = skillDirOf(name, ctx); if (!d) throw new Error(`no skill '${name}'`);
   const full = join(d, name, filePath);
+  assertContained(join(d, name), full);
   mkdirSync(dirname(full), { recursive: true });
+  assertContained(join(d, name), full); // mkdir may have followed a link created mid-call
   const tmp = full + ".mmtmp"; writeFileSync(tmp, content); renameSync(tmp, full); // atomic, no partial write
   return full;
 }
@@ -502,7 +550,9 @@ export function writeSupportFile(name: string, filePath: string, content: string
 export function removeSupportFile(name: string, filePath: string, ctx?: any): string {
   const v = validateSupportPath(filePath); if (!v.ok) throw new Error(v.reason);
   const d = skillDirOf(name, ctx); if (!d) throw new Error(`no skill '${name}'`);
-  const full = join(d, name, filePath); if (!existsSync(full)) throw new Error(`no such support file`);
+  const full = join(d, name, filePath);
+  assertContained(join(d, name), full);
+  if (!existsSync(full)) throw new Error(`no such support file`);
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const grave = join(STATE_DIR, "removed-files", name, `${filePath.replace(/\//g, "__")}-${stamp}`);
   mkdirSync(dirname(grave), { recursive: true }); renameSync(full, grave); // reversible quarantine, not delete

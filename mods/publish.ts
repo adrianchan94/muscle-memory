@@ -227,11 +227,18 @@ export function publishSkillToCatalog(name: string, ctx?: any): string {
   if (!lint.ok) throw new Error(`linter blocked: ${lint.issues.join("; ")}`);
   const priv = catalogPrivacyScan(content);
   if (!priv.ok) throw new Error(`privacy blocked: ${priv.issues.join("; ")}`);
+  // The scan is a REFUSAL gate, not a redactor: it blocks what it recognises as unmistakably
+  // private and passes everything else through. A colleague's bare name and work address are
+  // not absolute paths, so they cleared the scan and were written to the shared catalog
+  // verbatim. sanitizeForPublish already existed for exactly this and was never on the write
+  // path — so publish now emits the sanitized bytes, and says what it changed.
+  const san = sanitizeForPublish(content);
   const dstDir = join(globalSkillsDir(), nm);
   mkdirSync(dstDir, { recursive: true });
-  const published = content.includes(MM_TAG) ? content : content + `\n<!-- ${MM_TAG}: published ${new Date().toISOString().slice(0, 10)}; catalog=global -->\n`;
+  const published = san.sanitized.includes(MM_TAG) ? san.sanitized : san.sanitized + `\n<!-- ${MM_TAG}: published ${new Date().toISOString().slice(0, 10)}; catalog=global -->\n`;
   writeFileSync(join(dstDir, "SKILL.md"), published);
-  appendUiEvent({ phase: "skill_published", summary: `published '${nm}' to custom skill catalog`, skill: nm, action: "publish", route: "global-catalog" });
+  const redacted = san.replacements.length ? ` (redacted: ${san.replacements.map((r) => r.kind).join(", ")})` : "";
+  appendUiEvent({ phase: "skill_published", summary: `published '${nm}' to custom skill catalog${redacted}`, skill: nm, action: "publish", route: "global-catalog" });
   appendMeshFeed({ type: "skill_published", skill: nm, route: "PUBLISH", signals: 0 });
   writeUiState({ phase: "rotation", skill: nm, last: `published '${nm}' to catalog`, route: "PUBLISH · catalog" });
   return join(dstDir, "SKILL.md");

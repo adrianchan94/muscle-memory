@@ -1,0 +1,199 @@
+// Three P0s from the cold-review lane, each a promise the code did not keep.
+//
+// 1. PUBLISH said it was privacy-gated. It ran a lint and a scan, then wrote the ORIGINAL
+//    bytes to the shared catalog — sanitizeForPublish existed and was never called on the
+//    write path. A body naming a real person left the machine unchanged.
+// 2. SUPPORT FILES validated the path as a STRING. Every check passed for a `references`
+//    directory that was itself a symlink to somewhere outside the skill root, so the write
+//    landed outside and the "reversible quarantine" moved a file the agent never owned.
+// 3. GRADUATION under MM_REFLECT=staged promoted updates and high-confidence creates
+//    straight to the live shelf. `staged` meant staged only for ordinary creates.
+//
+// Each test below is written to fail on the shipped bytes first.
+import { afterEach, expect, test } from "bun:test";
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, symlinkSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { writeSupportFile, removeSupportFile, readSkill } from "../mods/core";
+import { publishSkillToCatalog } from "../mods/publish";
+
+// These tests must own their shelf, and must hand it back. Setting MM_AGENT_SKILLS_DIR without
+// restoring it overrode the shelf resolver for every OTHER test file in the run — six unrelated
+// failures, none of them a product defect. Third time this cycle a shared mutable in MY tests
+// has faked a red.
+const ENV_KEYS = ["MM_AGENT_SKILLS_DIR", "MM_GLOBAL_SKILLS_DIR", "MM_TEST_USERINFO_USERNAME"] as const;
+const saved = new Map<string, string | undefined>();
+for (const k of ENV_KEYS) saved.set(k, process.env[k]);
+afterEach(() => {
+  for (const k of ENV_KEYS) {
+    const v = saved.get(k);
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  }
+});
+
+let seq = 0;
+const uniq = (p: string) => `${p}-${++seq}-${process.pid}`;
+
+/** A real skill on an agent-local shelf, with the frontmatter the linter demands. */
+function seedSkill(name: string, body: string) {
+  const root = mkdtempSync(join(tmpdir(), "mm-pcg-"));
+  const shelf = join(root, "skills");
+  mkdirSync(join(shelf, name), { recursive: true });
+  writeFileSync(
+    join(shelf, name, "SKILL.md"),
+    `---\nname: ${name}\ndescription: Use when a scripted run fails and the fix must be re-anchored to source.\n---\n\n## When to use\n\nWhen a scripted run fails.\n\n## Procedure\n\n1. Read the error.\n2. Fix the source.\n3. Re-run the command.\n\n## Verification\n\nThe command exits zero.\n\n${body}\n`,
+  );
+  // The shelf resolver reads MM_AGENT_SKILLS_DIR, not ctx.skillsDir. Getting this wrong made
+  // every one of these tests pass against a "no skill" error while proving nothing.
+  process.env.MM_AGENT_SKILLS_DIR = shelf;
+  return { root, shelf, ctx: { agentId: "pcg-agent" } as any };
+}
+
+// ── 1 · publish is sanitized and approved ──────────────────────────────────────
+
+test("claim: publish sanitizes the body — the operator's own identity never reaches the catalog", () => {
+  const name = uniq("publish-sanitize");
+  // The load-bearing difference between the two functions. catalogPrivacyScan refuses a fixed
+  // set of shapes it recognises as private; sanitizeForPublish additionally redacts the REAL
+  // operator identity, derived at runtime, which covers every user rather than a hardcoded few.
+  // Publish ran the scan and then wrote the ORIGINAL bytes, so the one class of leak that is
+  // personal to whoever is running the machine was the class that got through.
+  const secret = "jsmith";
+  process.env.MM_TEST_USERINFO_USERNAME = secret;
+  const { shelf, ctx } = seedSkill(name, `## Pitfalls\n\n- Ask ${secret} on the platform team before rotating the deploy key.`);
+  const global = mkdtempSync(join(tmpdir(), "mm-cat-"));
+  process.env.MM_GLOBAL_SKILLS_DIR = global;
+
+  let published = "";
+  try {
+    published = readFileSync(publishSkillToCatalog(name, ctx), "utf8");
+  } catch (e) {
+    // Refusing outright also satisfies the claim. What must never happen is a clean publish of
+    // the raw bytes.
+    expect(String(e)).toMatch(/privacy|sanit|approval|blocked/i);
+    return;
+  } finally {
+    delete process.env.MM_TEST_USERINFO_USERNAME;
+  }
+  expect(published).not.toContain(secret);
+  expect(published).toContain("<user>");
+});
+
+test("claim: publish requires explicit approval — it is never a silent side effect", () => {
+  const src = readFileSync(new URL("../mods/index.ts", import.meta.url), "utf8");
+  const start = src.indexOf('a.action === "publish"');
+  const block = src.slice(start, start + 1200);
+  // Match CODE, never prose. My first version of this grepped the block for /approve|confirm/i
+  // and stayed green when the gate was deleted, because the surrounding comment said
+  // "unconfirmed". A test that reads its own documentation proves nothing.
+  const code = block.split("\n").filter((l) => !l.trim().startsWith("//")).join("\n");
+  const gate = code.indexOf("a.approve");
+  const call = code.indexOf("publishSkillToCatalog");
+  expect(gate).toBeGreaterThan(-1);
+  // and it must be checked BEFORE the catalog write, not after.
+  expect(gate).toBeLessThan(call);
+});
+
+// ── 2 · support-file containment ───────────────────────────────────────────────
+
+test("claim: a directory symlink out of the skill root refuses the WRITE, with a visible reason", () => {
+  const name = uniq("containment-write");
+  const { root, shelf, ctx } = seedSkill(name, "");
+  const evil = join(root, "evil_dir");
+  mkdirSync(evil, { recursive: true });
+  // The exact attack: the support subdir itself is a symlink pointing outside the skill root.
+  symlinkSync(evil, join(shelf, name, "references"));
+
+  let reason = "";
+  try {
+    writeSupportFile(name, "references/notes.md", "payload", ctx);
+  } catch (e) {
+    reason = String(e);
+  }
+  expect(reason).toMatch(/symlink|escape|outside|contain/i);
+  expect(existsSync(join(evil, "notes.md"))).toBe(false);
+});
+
+test("claim: the same escape refuses the REMOVE — quarantine never moves a file we do not own", () => {
+  const name = uniq("containment-remove");
+  const { root, shelf, ctx } = seedSkill(name, "");
+  const evil = join(root, "evil_dir");
+  mkdirSync(evil, { recursive: true });
+  const victim = join(evil, "notes.md");
+  writeFileSync(victim, "not ours");
+  symlinkSync(evil, join(shelf, name, "references"));
+
+  let reason = "";
+  try {
+    removeSupportFile(name, "references/notes.md", ctx);
+  } catch (e) {
+    reason = String(e);
+  }
+  expect(reason).toMatch(/symlink|escape|outside|contain/i);
+  // The external file must still be there, untouched.
+  expect(existsSync(victim)).toBe(true);
+  expect(readFileSync(victim, "utf8")).toBe("not ours");
+});
+
+test("containment covers ALL skill file writes, not only the verification target", () => {
+  const src = readFileSync(new URL("../mods/core.ts", import.meta.url), "utf8");
+  // A string-only validator cannot see a symlinked segment. The real check must stat the
+  // resolved path, and it must be reached by both the write and the remove path.
+  expect(src).toMatch(/realpathSync|lstatSync/);
+  const guarded = [...src.matchAll(/export function (writeSupportFile|removeSupportFile)[\s\S]{0,700}?\n}/g)];
+  expect(guarded.length).toBe(2);
+  for (const g of guarded) expect(g[0]).toMatch(/assertContained|realpathSync|lstatSync/);
+});
+
+// ── 3 · no auto-graduate under staged ──────────────────────────────────────────
+
+test("claim: under MM_REFLECT=staged nothing auto-promotes — updates and high-confidence creates included", () => {
+  const src = readFileSync(new URL("../mods/autopilot.ts", import.meta.url), "utf8");
+  const line = src.match(/const graduate = .*/)?.[0] ?? "";
+  expect(line).toBeTruthy();
+  // `live` is the only thing that may open the live shelf on the autonomous path. An update or
+  // a confident create must not smuggle itself past a staged operator.
+  expect(line).not.toMatch(/res\.action === "update"/);
+  expect(line).not.toMatch(/isHighConfidenceCreate/);
+});
+
+// ── 4 · read-side traversal ────────────────────────────────────────────────────
+// Rocky's fourth P0, and the one that needed no symlink at all. `load` is a default
+// no-approval action; it joined an unvalidated skill name onto each shelf directory, so a name
+// of `../../..` walked straight out and returned a SKILL.md the agent was never granted. The
+// write side had a containment story and the read side had none.
+
+test("claim: a '../' skill name refuses the LOAD — read-side containment", () => {
+  const root = mkdtempSync(join(tmpdir(), "mm-trav-"));
+  const shelf = join(root, "skills");
+  mkdirSync(join(shelf, "innocent"), { recursive: true });
+  writeFileSync(join(shelf, "innocent", "SKILL.md"), "---\nname: innocent\n---\nfine");
+  // A secret one level above the shelf, reachable only by walking out of it.
+  mkdirSync(join(root, "secrets"), { recursive: true });
+  writeFileSync(join(root, "secrets", "SKILL.md"), "TOP SECRET");
+
+  for (const evil of ["../secrets", "../../etc", "/etc/passwd", "a/b"]) {
+    let reason = "";
+    try {
+      readSkill(shelf, evil);
+    } catch (e) {
+      reason = String(e);
+    }
+    expect(reason).toMatch(/unsafe skill name|separator|absolute|dot segment/i);
+  }
+  // The legitimate name still reads.
+  expect(readSkill(shelf, "innocent")).toContain("fine");
+});
+
+test("containment covers the READ path as well as the write path", () => {
+  const core = readFileSync(new URL("../mods/core.ts", import.meta.url), "utf8");
+  expect(core).toMatch(/export function assertSafeSkillName/);
+  const rs = core.match(/export function readSkill[^\n]*/)?.[0] ?? "";
+  expect(rs).toMatch(/assertSafeSkillName/);
+  // Every load entry point in the tool surface, not just the one that was reported.
+  const idx = readFileSync(new URL("../mods/index.ts", import.meta.url), "utf8");
+  const finders = [...idx.matchAll(/const findSkillDir = [^\n]*/g)];
+  expect(finders.length).toBeGreaterThan(0);
+  for (const f of finders) expect(f[0]).toMatch(/assertSafeSkillName/);
+});

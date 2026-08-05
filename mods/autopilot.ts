@@ -822,7 +822,11 @@ export async function runReflectiveReview(ctx: any, config: { mode?: "staged" | 
   }
   if ((res.action === "create" || res.action === "update") && res.name && res.content) {
     const live = config.mode === "auto";
-    const graduate = live || res.action === "update" || isHighConfidenceCreate(res, ev);
+    // `staged` must mean staged. This read `live || update || high-confidence create`, so the
+    // two routes an operator most wants to inspect — a rewrite of an existing skill, and a
+    // create the model felt sure about — were the two that bypassed the shelf. Confidence is
+    // not consent. Only the live mode opens the live shelf on the autonomous path.
+    const graduate = live;
     const dir = graduate ? agentSkillsDir(ctx) : stagedShelf;
     const tagged = res.content.includes(MM_TAG) ? res.content : res.content + `\n<!-- ${MM_TAG}: reflective ${new Date().toISOString().slice(0, 10)}; action=${res.action}; convs=${ev.convs}; ${graduate ? "graduated=true" : "staged=true"} -->\n`;
     try {
