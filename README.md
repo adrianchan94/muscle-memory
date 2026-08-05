@@ -68,7 +68,7 @@ keep · revise · bench · retire
 
 **Knowing is not doing.** The V1 research program demonstrates, in bounded tool-use tasks, that authored or retrieved procedural knowledge can fail to govern execution; that bad shelf guidance can also be followed; and that act-time governance can change measured behavior. It does **not** establish a universal law of model cognition or externally reproduced efficacy.
 
-The canonical research account is [**Knowing Is Not Doing: Measuring Execution-Time Governance of Learned Skills in LLM Agents**](https://muscle-memory-v1-research.vercel.app/). Human, agent-readable, structured, and paper surfaces reconcile to one public presentation manifest; that proves presentation integrity, not independent reproduction of the underlying experiments.
+**Muscle Memory V1 is the product. [Knowing Is Not Doing: Measuring Execution-Time Governance of Learned Skills in LLM Agents](https://muscle-memory-v1-research.vercel.app/) is the canonical research record behind its design.** Human, agent-readable, structured, and paper surfaces reconcile to one public presentation manifest; that proves presentation integrity, not independent reproduction of the underlying experiments.
 
 `1.0.0-rc.2` remains the qualified historical reference candidate. The current owner candidate changes package identity, documentation, verification, and release plumbing, so it requires a fresh exact-byte seal, cold review, and custody before it can become final `1.0.0`.
 
@@ -126,7 +126,7 @@ V1 is accompanied by a dual-audience research experience generated from the same
 - [Knowing Is Not Doing — live V1 research ledger](https://muscle-memory-v1-research.vercel.app/) — claims + receipts; product name remains Muscle Memory (`sendAuthorized: false`)
 - [Legacy alias (temporary)](https://muscle-memory-story.vercel.app/) — same current production deploy; keep bookmarks working while the research alias is canonical
 - [July historical research site](https://muscle-memory-story-5bueq8t1n-adrianchan94s-projects.vercel.app/) — Phase-0 / (H) precursor substrate; not the live claim ceiling
-- [Public research paper](https://muscle-memory-v1-research.vercel.app/muscle-memory-public-research-edition.pdf) — a dedicated report generated from the canonical research account, not a printout of the website
+- [Public research paper](https://muscle-memory-v1-research.vercel.app/muscle-memory-public-research-edition.pdf) — a dedicated report generated from the canonical research record, not a printout of the website
 
 **Agent-readable surfaces**
 
