@@ -9,11 +9,11 @@ CANDIDATE
   status             RELEASE CANDIDATE — not published, not tagged, not merged
 
 EXACT BYTES
-  packed tarball     05459e2ff4d1c19f85581af38702a9d909f736ca143a71d2a5f239c0b0283db0          <- CURRENT
-  tarball bytes      271736
+  packed tarball     f7f8d8d2b0237cabc2390bd9278765db81c6e7349be19fb4d0d8aa5156aa3133          <- CURRENT
+  tarball bytes      272477
   packed file count  23
-  bundled entry      aa5c7113a3cf71302831e2f2f3e5a154aaa68bb7bc5697dc7119d83b70a07d71
-  tar-stream sha256  c75208fa44fcf1b58f4392dddf832083c8128f35cfedccb4b7ec014449d244f6
+  bundled entry      febe3bbb1aa6939916d96812cf18ef29da00e3fb2a4aaeec6f47e196c1ae7249
+  tar-stream sha256  95e6b231dfa829e46694bd3b5f430e178418a8ebcfb09bd7f67cab6f50526d38
 
   REPRODUCTION CONTRACT: the decompressed tar stream, not the gzip envelope.
   `npm pack` output is gzip-wrapped, and the envelope varies with packer and
@@ -25,7 +25,7 @@ EXACT BYTES
     gunzip -c <your>.tgz | shasum -a 256  # must equal tar-stream sha256 above
 
 FROZEN COMMIT
-  branch             release/muscle-memory-v1
+  branch             HEAD
 
   The frozen commit SHA is NOT restated here. A committed file cannot contain its own
   commit hash: writing it changes the head, so the value would always name the previous
@@ -39,7 +39,7 @@ FROZEN COMMIT
     git diff --check            # must be empty
 
 GATES ON THE FROZEN TREE
-  npm test                      333 pass, 0 fail across 44 files
+  npm test                      338 pass, 0 fail across 44 files
                                 (counted from a real run at seal time, not prose)
   npm run verify                all stages green         exit 0
   node scripts/final-gate.mjs   PASS_RELEASE_CANDIDATE   exit 0

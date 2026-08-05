@@ -11,9 +11,9 @@ stream:
 
 | Artifact | sha256 |
 |---|---|
-| packed tarball (outer envelope, this machine) | `05459e2ff4d1c19f85581af38702a9d909f736ca143a71d2a5f239c0b0283db0` |
-| **decompressed tar stream (the contract)** | `c75208fa44fcf1b58f4392dddf832083c8128f35cfedccb4b7ec014449d244f6` |
-| bundled entry `mods/index.bundled.mjs` | `aa5c7113a3cf71302831e2f2f3e5a154aaa68bb7bc5697dc7119d83b70a07d71` |
+| packed tarball (outer envelope, this machine) | `f7f8d8d2b0237cabc2390bd9278765db81c6e7349be19fb4d0d8aa5156aa3133` |
+| **decompressed tar stream (the contract)** | `95e6b231dfa829e46694bd3b5f430e178418a8ebcfb09bd7f67cab6f50526d38` |
+| bundled entry `mods/index.bundled.mjs` | `febe3bbb1aa6939916d96812cf18ef29da00e3fb2a4aaeec6f47e196c1ae7249` |
 | packed file count | 23 |
 
 ```sh
@@ -30,7 +30,7 @@ a defect to report.
 
 | Command | Expected |
 |---|---|
-| `npm test` | 333 pass, 0 fail, 44 files — counted from a real run at seal time |
+| `npm test` | 338 pass, 0 fail, 44 files — counted from a real run at seal time |
 | `npm run verify` | all stages green, exit 0 |
 | `node scripts/final-gate.mjs` | `PASS_RELEASE_CANDIDATE` |
 | `node scripts/package-smoke.mjs` | `PASS`, `privatePathHits: []` |
