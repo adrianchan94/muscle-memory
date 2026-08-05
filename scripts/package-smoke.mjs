@@ -132,7 +132,6 @@ const mod = await import(pathToFileURL(bundlePath).href + "?smoke=" + Date.now()
 const activate = mod.default;
 // Verified evidence requires an instrument key, and a fresh consumer machine has none.
 // Mint one explicitly so the smoke proves the real signed path instead of silently degrading.
-try { mod.__mm.initInstrumentKey({ keyPath: process.env.MM_INSTRUMENT_KEY_FILE, stateDir: process.env.MM_STATE_DIR }); } catch (error) { console.error("instrument init failed:", error?.message); }
 const registered = { tools: [], commands: [], permissions: [], events: [] };
 const handlers = {};
 const fire = (name, event) => { for (const fn of handlers[name] || []) { try { fn(event); } catch { /* observation must never break the stream */ } } };
@@ -162,6 +161,15 @@ const baseline = createHash("sha256").update("stale\\n").digest("hex");
 const expected = createHash("sha256").update("repaired\\n").digest("hex");
 if (baseline === expected) throw new Error("smoke misconfigured: baseline must differ from expected");
 const dispose = activate(letta);
+
+// K4: arm the key through the DOCUMENTED command, exactly as a consumer would, not through the
+// test surface. A smoke that hand-mints the key proves the happy path works for us and says
+// nothing about whether the path we published to users actually functions.
+const mmCommand = commandDefs.get("muscle-memory");
+const instrumentOut = mmCommand ? String((await mmCommand.run({ argv: ["instrument", "init"] }))?.output ?? "") : "no muscle-memory command registered";
+if (!/instrument key (created|already present)/.test(instrumentOut)) {
+  console.error("documented instrument init did not arm the key:", instrumentOut.slice(0, 140));
+}
 const registeredVerification = await toolDefs.get("register_exact_file_verification").run({
   args: { task_id: "package-verified-repair", task_class: "package-exact-repair", target_rel: "target.txt", expected_sha256: expected },
 });
@@ -193,7 +201,7 @@ const closeout = lightweightId ? await toolDefs.get("muscle_memory_close").run({
   model: { id: "release-smoke", provider: "test" },
 }) : "missing lightweight possession";
 if (typeof dispose === "function") dispose();
-console.log(JSON.stringify({ ...registered, rating: String(rating), registeredVerification: String(registeredVerification), prescribed: String(prescribed), verification: String(verification), lightweight: String(lightweight), closeout: String(closeout) }));
+console.log(JSON.stringify({ ...registered, instrumentInit: String(instrumentOut).slice(0, 140), rating: String(rating), registeredVerification: String(registeredVerification), prescribed: String(prescribed), verification: String(verification), lightweight: String(lightweight), closeout: String(closeout) }));
 `);
 
   const runtimeRoot = mkdtempSync(join(tmpdir(), "mm-package-runtime-"));
