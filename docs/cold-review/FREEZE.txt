@@ -25,7 +25,7 @@ EXACT BYTES
     gunzip -c <your>.tgz | shasum -a 256  # must equal tar-stream sha256 above
 
 FROZEN COMMIT
-  branch             HEAD
+  branch             release/muscle-memory-v1
 
   The frozen commit SHA is NOT restated here. A committed file cannot contain its own
   commit hash: writing it changes the head, so the value would always name the previous
