@@ -35,8 +35,8 @@ wc -c  < adrianchan94-muscle-memory-1.0.0-rc.3.tgz
 Expected:
 
 ```
-385e648e4e82d51f4bb4ada2e3239951ab77b2e2daff0c62fca43958e52ba56b
-255570
+2df43f754706f8201c0e958b1c3a19cb985f89a1c5d1a6e66064c148ec5ff468
+259095
 ```
 
 > **Two different claims, kept apart.** The published `.tgz` sha256 identifies the release

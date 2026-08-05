@@ -12,7 +12,17 @@ import {
 } from "./verification";
 
 export const POSSESSION_LEDGER_PATH = join(STATE_DIR, "possessions.jsonl");
-import { verifyEvidenceSignature } from "./instrument";
+import { loadInstrumentKey, signEvidencePayload, verifyEvidenceSignature } from "./instrument";
+
+let keyCache: { keyId: string; secret: Buffer } | null | undefined;
+/** Resolved once per process; absence is a normal state that disables `verified`, not an error. */
+function currentInstrumentKey(): { keyId: string; secret: Buffer } | null {
+  if (keyCache !== undefined) return keyCache;
+  const loaded = loadInstrumentKey({ stateDir: STATE_DIR });
+  keyCache = loaded.available ? { keyId: loaded.keyId, secret: loaded.secret } : null;
+  return keyCache;
+}
+export function __resetInstrumentKeyCache(): void { keyCache = undefined; }
 
 export const POSSESSION_SCHEMA = "mm.possession.v1" as const;
 
@@ -153,6 +163,7 @@ export type PossessionOutcomeEvent = EventBase & {
   evidence_ref?: string;
   supersedes_event_id?: string;
   verification?: InstrumentVerificationReceipt;
+  evidence?: { payload?: Record<string, unknown>; signature?: unknown };
 };
 
 export type PossessionLifecycleEvent = EventBase & {
@@ -237,6 +248,7 @@ export type PossessionSummary = {
   judgedDecisions: number;
   judgedGoodDecisions: number;
   unboundVerifiedDowngraded: number;
+  verifiedNeutralDecisions: number;
   decisionEfficiencyPct: number | null;
   verifiedEfficiencyPct: number | null;
   judgedEfficiencyPct: number | null;
@@ -334,6 +346,7 @@ function normalizeEvent(input: unknown, mode: "read" | "caller" | "instrument"):
       reason: redactFragment(String(event.reason), 4, 320),
       ...(event.evidence_ref ? { evidence_ref: redactFragment(String(event.evidence_ref), 2, 180) } : {}),
       ...(event.supersedes_event_id ? { supersedes_event_id: event.supersedes_event_id } : {}),
+      ...(event.evidence ? { evidence: event.evidence } : {}),
       ...(verification ? { verification } : {}),
     };
   }
@@ -521,7 +534,42 @@ export function recordPossessionEvent(input: PossessionEvent): PossessionEvent {
   return appendPossessionEvent(input, "caller");
 }
 
-export function recordInstrumentVerifiedOutcome(input: PossessionOutcomeEvent): PossessionOutcomeEvent {
+/**
+ * The instrument signs what it derived, so the row can still be trusted after a restart.
+ *
+ * Without this the WeakSet custody check dies at the process boundary and a reader has no way to
+ * tell an instrument-derived row from a hand-written one — which is exactly how the forgery
+ * worked. If no key is available the row is still appended, and simply scores as judged.
+ */
+export function recordInstrumentVerifiedOutcome(input: PossessionOutcomeEvent, context?: { baselineSha256?: string; baselineCapturedAt?: number; invocationReceiptId?: string; skill?: string }): PossessionOutcomeEvent {
+  const key = currentInstrumentKey();
+  const receipt = input.verification;
+  if (key && receipt && typeof receipt === "object") {
+    const r = receipt as Record<string, unknown>;
+    const payload = {
+      schema_version: "mm.evidence.v1",
+      key_id: key.keyId,
+      nonce: `${input.possession_id}:${input.event_id}`,
+      timestamp: input.ts,
+      possession_id: input.possession_id,
+      decision_event_id: String(r.decision_event_id ?? ""),
+      skill: String(context?.skill ?? ""),
+      task_id: String(r.task_id ?? ""),
+      task_class: String(r.task_class ?? ""),
+      manifest_sha256: String(r.manifest_sha256 ?? ""),
+      baseline_sha256: String(context?.baselineSha256 ?? ""),
+      baseline_captured_at: Number(context?.baselineCapturedAt ?? 0),
+      expected_sha256: String(r.artifact_sha256 ?? ""),
+      final_sha256: r.matched ? String(r.artifact_sha256 ?? "") : "",
+      invocation_receipt_id: String(context?.invocationReceiptId ?? ""),
+      verifier_id: String(r.adapter_id ?? ""),
+      verifier_version: String(r.adapter_version ?? ""),
+      target_rel: String(r.target_rel ?? ""),
+      result_class: input.result,
+    };
+    const signed = { ...input, evidence: { payload, signature: signEvidencePayload(payload, key) } } as PossessionOutcomeEvent;
+    return appendPossessionEvent(signed, "instrument") as PossessionOutcomeEvent;
+  }
   return appendPossessionEvent(input, "instrument") as PossessionOutcomeEvent;
 }
 
@@ -554,7 +602,7 @@ const safePossessionView = (decision: PossessionDecisionEvent, outcome?: Possess
   openedAt: decision.ts,
   ...(outcome ? {
     result: outcome.result,
-    evidence: outcome.evidence_tier === "verified" && decision.verification && outcome.verification && isStoredVerificationReceiptBound(decision.verification, outcome.verification, decision.possession_id, decision.event_id)
+    evidence: claimBearingVerdict(decision, outcome).verified
       ? "bound_verified" as const
       : "judged" as const,
   } : { evidence: "none" as const }),
@@ -566,6 +614,35 @@ export function pendingPossessionViews(events: PossessionEvent[]): SafePossessio
     .filter((event): event is PossessionDecisionEvent => event.type === "decision" && !outcomes.has(event.possession_id))
     .sort((a, b) => b.ts - a.ts)
     .map((decision) => safePossessionView(decision));
+}
+
+/**
+ * THE claim authority. Every path that can award `verified`, `proven` or a verified `helped`
+ * must go through this and nothing else.
+ *
+ * A previous cut added an HMAC authenticator and left the scoring path on the old structural
+ * binder, so a shaped forgery still scored while the unit tests stayed green. Structural
+ * binding is therefore diagnostic only from here on — it can never be the proof.
+ */
+export function claimBearingVerdict(
+  decision: { verification?: unknown; possession_id: string; event_id: string },
+  outcome: { evidence_tier?: string; verification?: unknown; evidence?: { payload?: Record<string, unknown>; signature?: unknown } },
+): { verified: boolean; proceduralCredit: boolean; downgrade?: EvidenceDowngradeReason; proceduralReason?: ProceduralDenialReason } {
+  if (outcome.evidence_tier !== "verified") return { verified: false, proceduralCredit: false };
+
+  const key = currentInstrumentKey();
+  const verdict = authenticateStoredEvidence({ evidence: outcome.evidence, key });
+  if (!verdict.authenticated) return { verified: false, proceduralCredit: false, downgrade: verdict.reason };
+
+  // Structural binding still has to hold, but only as a second gate behind authenticity.
+  const structurallyBound = !!decision.verification && !!outcome.verification
+    && isStoredVerificationReceiptBound(decision.verification, outcome.verification, decision.possession_id, decision.event_id);
+  if (!structurallyBound) return { verified: false, proceduralCredit: false, downgrade: "bad_signature" };
+
+  // `verified` is about PROVENANCE, not about whether the artifact matched. A verified negative
+  // is still instrument-derived evidence and must count as verified; whether it matched decides
+  // the result class, not the tier. Conflating the two suppressed genuine negatives.
+  return { verified: true, proceduralCredit: verdict.proceduralCredit, proceduralReason: verdict.proceduralReason };
 }
 
 /** Derive score from explicit exposures and closed outcomes. Usage and pending rows never become wins. */
@@ -603,6 +680,7 @@ export function summarizePossessions(events: PossessionEvent[], integrity: Ledge
   let verifiedGood = 0;
   let judgedGood = 0;
   let unboundVerifiedDowngraded = 0;
+  let verifiedNeutralDecisions = 0;
   let prescribedEvaluated = 0;
 
   for (const decision of decisions) {
@@ -632,16 +710,18 @@ export function summarizePossessions(events: PossessionEvent[], integrity: Ledge
     }
     scoredDecisions++;
 
-    const boundVerified = outcome.evidence_tier === "verified"
-      && !!decision.verification
-      && !!outcome.verification
-      && isStoredVerificationReceiptBound(decision.verification, outcome.verification, decision.possession_id, decision.event_id);
+    const verdict = claimBearingVerdict(decision, outcome);
+    const boundVerified = verdict.verified;
     if (outcome.evidence_tier === "verified" && !boundVerified) unboundVerifiedDowngraded++;
     let good = false;
 
     if (decision.action === "prescribe") {
       prescribedEvaluated++;
-      if (outcome.result === "helped") { helpfulInterventions++; good = true; }
+      // A verified row only earns `helped` when causation was observed; a pre-existing correct
+      // target proves the artifact, not the skill.
+      const creditable = !boundVerified || verdict.proceduralCredit;
+      if (outcome.result === "helped" && creditable) { helpfulInterventions++; good = true; }
+      else if (outcome.result === "helped") { neutralInterventions++; if (boundVerified) verifiedNeutralDecisions++; }
       if (outcome.result === "harmed") harmfulInterventions++;
       if (outcome.result === "neutral") neutralInterventions++;
     } else {
@@ -745,6 +825,7 @@ export function summarizePossessions(events: PossessionEvent[], integrity: Ledge
     judgedDecisions,
     judgedGoodDecisions: judgedGood,
     unboundVerifiedDowngraded,
+    verifiedNeutralDecisions,
     decisionEfficiencyPct: pct(goodDecisions, scoredDecisions),
     verifiedEfficiencyPct: pct(verifiedGood, verifiedDecisions),
     judgedEfficiencyPct: pct(judgedGood, judgedDecisions),
@@ -782,6 +863,7 @@ export type ShareCardPayloadV1 = {
   unique_task_classes: number;
   difficulty_strata: Record<DifficultyTier, number>;
   verified_good_decisions: number;
+  verified_neutral_decisions?: number;
   verified_evaluated_decisions: number;
   judged_good_decisions: number;
   judged_evaluated_decisions: number;
@@ -803,7 +885,7 @@ const SHARE_KEYS = new Set([
   "schema", "metric_contract", "score_status", "percentage_display_threshold", "period", "statement",
   "opened_decisions", "closed_decisions", "pending_decisions", "excluded_decisions", "closure_rate_pct",
   "eligible_exposures", "scored_exposures", "repeat_capped_exposures", "unique_task_classes", "difficulty_strata",
-  "verified_good_decisions", "verified_evaluated_decisions", "judged_good_decisions", "judged_evaluated_decisions",
+  "verified_good_decisions", "verified_neutral_decisions", "verified_evaluated_decisions", "judged_good_decisions", "judged_evaluated_decisions",
   "verified_successful_abstentions", "verified_evaluated_abstentions", "judged_successful_abstentions", "judged_failed_abstentions", "judged_only_abstentions",
   "helpful_interventions", "harmful_interventions", "neutral_interventions", "ledger_integrity", "exclusions", "decision_efficiency_pct",
 ]);
@@ -873,11 +955,17 @@ export function validateShareCardPayload(input: unknown): ShareCardPayloadV1 {
   // The exact-file adapter intentionally verifies prescriptions only. Any verified abstention would require a different bound instrument.
   if (raw.verified_evaluated_abstentions !== 0 || raw.verified_successful_abstentions !== 0) throw new Error("exact-file verification cannot claim verified abstentions");
   const verifiedHelpful = raw.verified_good_decisions;
-  const verifiedHarmful = raw.verified_evaluated_decisions - raw.verified_good_decisions;
+  // A verified decision is good, harmful, OR verified-with-no-procedural-credit. The third
+  // state exists because artifact truth and causation are separate questions.
+  const verifiedHarmful = Math.max(0, raw.verified_evaluated_decisions - raw.verified_good_decisions - (raw.verified_neutral_decisions ?? 0));
   const judgedHelpful = raw.helpful_interventions - verifiedHelpful;
   const judgedHarmful = raw.harmful_interventions - verifiedHarmful;
   if (judgedHelpful < 0 || judgedHarmful < 0) throw new Error("custody arithmetic mismatch: verified intervention counts exceed totals");
-  if (judgedHelpful + judgedHarmful + raw.neutral_interventions + raw.judged_only_abstentions !== raw.judged_evaluated_decisions) throw new Error("custody arithmetic mismatch: judged intervention and abstention outcomes must equal judged evaluated decisions");
+  // Neutral splits by tier too: a verified decision that earned no procedural credit is recorded
+  // neutral, but it belongs to the verified side of the ledger, not the judged side.
+  const judgedNeutral = raw.neutral_interventions - (raw.verified_neutral_decisions ?? 0);
+  if (judgedNeutral < 0) throw new Error("custody arithmetic mismatch: verified neutral exceeds neutral total");
+  if (judgedHelpful + judgedHarmful + judgedNeutral + raw.judged_only_abstentions !== raw.judged_evaluated_decisions) throw new Error("custody arithmetic mismatch: judged intervention and abstention outcomes must equal judged evaluated decisions");
   if (raw.judged_good_decisions !== judgedHelpful + raw.judged_successful_abstentions) throw new Error("custody arithmetic mismatch: judged good decisions must equal judged helped prescriptions + successful abstentions");
   const difficultyTotal = Object.values(raw.difficulty_strata).reduce((sum: number, count: any) => sum + Number(count), 0);
   if (difficultyTotal !== raw.opened_decisions) throw new Error("custody arithmetic mismatch: difficulty strata must equal opened decisions");
@@ -932,6 +1020,7 @@ export function buildShareCardPayload(summary: PossessionSummary, options: { per
     unique_task_classes: summary.uniqueTaskClasses,
     difficulty_strata: { ...summary.difficultyStrata },
     verified_good_decisions: summary.verifiedGoodDecisions,
+    verified_neutral_decisions: summary.verifiedNeutralDecisions,
     verified_evaluated_decisions: summary.verifiedDecisions,
     judged_good_decisions: summary.judgedGoodDecisions,
     judged_evaluated_decisions: summary.judgedDecisions,

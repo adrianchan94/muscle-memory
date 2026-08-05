@@ -42,8 +42,8 @@ import { Defense, ENGRAM, GuardMode, buildDefenses, buildNeocortexBlock, capture
 import { CURATOR, aggregateTelemetry, buildRegistry, bumpUsage, churnSignal, coverageMap, curateManagedSkills, curatorPass, isPinned, lifecycleTransition, managedSkillUsage, restoreManagedSkill, retireManagedSkill, retiredSkillBlocker, runAutonomousPrune, setPinned, skillVerbs, specDrift } from "./lifecycle";
 import { AUTOPILOT_DEFAULT, AutopilotMode, REVIEW_PROMPT, SemanticFn, applySemanticEvidence, autopilotPlan, buildEvidenceManifest, executeAutopilotPlan, forkAuthor, graduateStagedSkill, isHighConfidenceCreate, loadHandledReflects, managedView, normalizePrescriptionQuery, pickUpdateTarget, reflectSignature, retrievePreferences, reviewAndAuthor, routeSkill, runAutopilot, runReflectiveReview, searchSkills, streamChunkText } from "./autopilot";
 import { friendlyRouteLabel, renderAgentBoxScore, renderMuscleMemoryPanel, summarizeReflectActions } from "./ui";
-import { buildShareCardPayload, loadPossessionEvents, pendingPossessionViews, recordInstrumentVerifiedOutcome, recordPossessionEvent, summarizePossessionLedger, type DecisionRoute, type DifficultyTier, type OutcomeResult, type EvidenceTier, type LifecycleAction, type PossessionDecisionEvent } from "./possessions";
-import { bindExactFileVerificationTask, createExactFileVerificationTask, isStoredVerificationReceiptBound, verifyExactFilePossession } from "./verification";
+import { claimBearingVerdict, buildShareCardPayload, loadPossessionEvents, pendingPossessionViews, recordInstrumentVerifiedOutcome, recordPossessionEvent, summarizePossessionLedger, type DecisionRoute, type DifficultyTier, type OutcomeResult, type EvidenceTier, type LifecycleAction, type PossessionDecisionEvent } from "./possessions";
+import { bindExactFileVerificationTask, createExactFileVerificationTask, verifyExactFilePossession } from "./verification";
 import { collectWins, renderWins } from "./wins";
 import { mineAgentHistory } from "./history";
 import { loadPlusMinus, loadRatingEvents, modelIdentity, providerIdentity, rateSkill, renderPlusMinus } from "./referee";
@@ -51,7 +51,7 @@ import { attachSquadShelf, ensureSquadArchive, publishSkillToShelf, pullShelfSki
 
 
 // Test hook (deterministic validation without live data).
-export const __mm = { meshAgentLabel, commandTemplate, fingerprint, redactFragment, buildDiffFragment, detect, detectTemplates, detectSequences, maturityScore, MM, loadRows, dedupCheck, slug, draftSkillFromCandidate, candidateName, candidateDescription, curateManagedSkills, managedSkillUsage,
+export const __mm = { meshAgentLabel, summarizePossessionLedger, commandTemplate, fingerprint, redactFragment, buildDiffFragment, detect, detectTemplates, detectSequences, maturityScore, MM, loadRows, dedupCheck, slug, draftSkillFromCandidate, candidateName, candidateDescription, curateManagedSkills, managedSkillUsage,
   streamChunkText, isDurableLesson, isValidSkillName, buildCrossConversationEvidence, REVIEW_PROMPT, reviewAndAuthor, searchSkills, pickUpdateTarget, runReflectiveReview, graduateStagedSkill, publishSkillToCatalog, catalogPrivacyScan, isHighConfidenceCreate, runAutonomousPrune,
   buildEvidenceManifest, retrievePreferences, coverageMap, churnSignal, summarizeReflectActions, renderMuscleMemoryPanel, loadMeshFeed, renderMeshFeed,
   buildRegistry, curatorPass, skillVerbs, specDrift, lifecycleTransition, CURATOR, setPinned, isPinned, buildDefenses, preActionDefense,
@@ -122,7 +122,7 @@ export default function activate(letta: any) {
       // Qualifying closed helped prescriptions only — not ratings, uses, abstentions, or proof claims.
       helped++;
       if (outcome.evidence_tier !== "verified" || !decision.verification || !outcome.verification) continue;
-      if (isStoredVerificationReceiptBound(decision.verification, outcome.verification, decision.possession_id, decision.event_id)) provenNames.add(decision.skill);
+      if (claimBearingVerdict(decision, outcome).verified) provenNames.add(decision.skill);
     }
     return { total: active.size, proven: provenNames.size, provenNames: [...provenNames].sort(), helped };
   };
@@ -230,7 +230,7 @@ export default function activate(letta: any) {
       else if (outcome?.result === "harmed") row.harmed++;
       else if (outcome?.result === "neutral") row.neutral++;
       if (outcome?.evidence_tier === "verified" && outcome.result === "helped" && event.verification && outcome.verification
-        && isStoredVerificationReceiptBound(event.verification, outcome.verification, event.possession_id, event.event_id)) row.verified++;
+        && claimBearingVerdict(event, outcome).verified) row.verified++;
       else if (outcome?.evidence_tier === "agent_judged" || outcome?.evidence_tier === "human_judged") row.judged++;
       stats.set(event.skill, row);
     }
@@ -1248,7 +1248,7 @@ export default function activate(letta: any) {
         const source = decisions.get(event.possession_id);
         if (!source || source.action !== "prescribe" || source.skill !== skill) continue;
         if (event.evidence_tier === "verified" && event.result === "helped" && source.verification && event.verification
-          && isStoredVerificationReceiptBound(source.verification, event.verification, source.possession_id, source.event_id)) verified++;
+          && claimBearingVerdict(source, event).verified) verified++;
         else if (event.evidence_tier === "agent_judged" || event.evidence_tier === "human_judged") judged++;
       }
       const proven = renderRosterSnapshot(ctx).provenNames.includes(skill);

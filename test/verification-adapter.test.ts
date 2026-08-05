@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
+import { initInstrumentKey } from "../mods/instrument";
+import { __resetInstrumentKeyCache } from "../mods/possessions";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -23,6 +25,11 @@ const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 let workspace = "";
 
 beforeEach(() => {
+  // verified evidence now requires an initialised instrument key, kept outside the state dir
+  const keyHome = mkdtempSync(join(tmpdir(), "mm-vk-"));
+  process.env.MM_INSTRUMENT_KEY_FILE = join(keyHome, "k.key");
+  initInstrumentKey({ keyPath: process.env.MM_INSTRUMENT_KEY_FILE, stateDir: process.env.MM_STATE_DIR || "/nonexistent" });
+  __resetInstrumentKeyCache();
   rmSync(POSSESSION_LEDGER_PATH, { force: true });
   rmSync(VERIFICATION_TASK_DIR, { recursive: true, force: true });
   workspace = mkdtempSync(join(tmpdir(), "mm-exact-file-"));
@@ -56,7 +63,10 @@ function openBoundDecision(taskId: string, taskClass = "exact-file-repair") {
   });
 }
 
-test("exact-file adapter owns the result and produces one bound-verified possession", () => {
+test("A · a pre-existing correct target is artifact-verified but earns no procedural credit", () => {
+  // The target is already correct BEFORE the task is registered, and no skill is invoked.
+  // The instrument can honestly say the artifact matches; it cannot say anything caused it.
+  // Crediting `helped` here was P0-B.
   writeFileSync(join(workspace, "target.txt"), "repaired\n");
   createExactFileVerificationTask({
     taskId: "repair-success",
@@ -85,20 +95,20 @@ test("exact-file adapter owns the result and produces one bound-verified possess
 
   const summary = summarizePossessionLedger();
   expect(summary).toMatchObject({
-    verifiedDecisions: 1,
-    verifiedGoodDecisions: 1,
+    verifiedDecisions: 1,          // provenance: the instrument derived this
+    verifiedGoodDecisions: 0,      // but nothing was caused, so no credit
     judgedDecisions: 0,
     judgedGoodDecisions: 0,
     unboundVerifiedDowngraded: 0,
-    helpfulInterventions: 1,
+    helpfulInterventions: 0,
   });
   expect(summary.lastPlay).toMatchObject({ evidence: "bound_verified", result: "helped" });
   const card = buildShareCardPayload(summary, { period: "all_time" });
   expect(card).toMatchObject({
     period: "EARLY TAPE",
-    verified_good_decisions: 1,
+    verified_good_decisions: 0,        // artifact verified, nothing caused
+    verified_neutral_decisions: 1,     // the third state: verified, no procedural credit
     verified_evaluated_decisions: 1,
-    statement: "1 of 1 bound-verified good decisions · early tape",
   });
 });
 

@@ -1,7 +1,7 @@
 // mods/index.ts
-import { mkdirSync as mkdirSync8, readFileSync as readFileSync10, existsSync as existsSync10, writeFileSync as writeFileSync9, readdirSync as readdirSync4 } from "node:fs";
-import { join as join12 } from "node:path";
-import { randomBytes } from "node:crypto";
+import { mkdirSync as mkdirSync9, readFileSync as readFileSync11, existsSync as existsSync11, writeFileSync as writeFileSync10, readdirSync as readdirSync4 } from "node:fs";
+import { join as join13 } from "node:path";
+import { randomBytes as randomBytes2 } from "node:crypto";
 
 // mods/core.ts
 import { appendFileSync, copyFileSync, lstatSync, mkdirSync, readFileSync, existsSync, writeFileSync, readdirSync, renameSync, rmSync } from "node:fs";
@@ -3463,9 +3463,9 @@ function renderMuscleMemoryPanel(state) {
 }
 
 // mods/possessions.ts
-import { createHash as createHash3 } from "node:crypto";
-import { appendFileSync as appendFileSync2, existsSync as existsSync6, mkdirSync as mkdirSync6, readFileSync as readFileSync6 } from "node:fs";
-import { dirname as dirname2, join as join7 } from "node:path";
+import { createHash as createHash4 } from "node:crypto";
+import { appendFileSync as appendFileSync2, existsSync as existsSync7, mkdirSync as mkdirSync7, readFileSync as readFileSync7 } from "node:fs";
+import { dirname as dirname3, join as join8 } from "node:path";
 
 // mods/verification.ts
 import {
@@ -3777,9 +3777,145 @@ function verifyExactFilePossession(decision) {
   };
 }
 
+// mods/instrument.ts
+import { createHash as createHash3, createHmac, randomBytes, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
+import { chmodSync as chmodSync2, existsSync as existsSync6, mkdirSync as mkdirSync6, readFileSync as readFileSync6, realpathSync as realpathSync2, statSync as statSync2, writeFileSync as writeFileSync6 } from "node:fs";
+import { homedir as homedir2 } from "node:os";
+import { dirname as dirname2, join as join7, resolve as resolve2, sep as sep2 } from "node:path";
+function defaultInstrumentKeyPath(home = homedir2()) {
+  return join7(home, ".letta", "instrument", "muscle-memory.key");
+}
+function resolveInstrumentKeyPath(opts = {}) {
+  const env = opts.env ?? process.env;
+  const override = String(env.MM_INSTRUMENT_KEY_FILE || "").trim();
+  return override ? resolve2(override) : defaultInstrumentKeyPath(opts.home ?? homedir2());
+}
+function isInsideStateDir(candidate, stateDir) {
+  const real = (p) => {
+    try {
+      return realpathSync2(p);
+    } catch {
+      return resolve2(p);
+    }
+  };
+  const key = real(candidate);
+  const keyDir = real(dirname2(candidate));
+  const state = real(stateDir);
+  const under = (p) => p === state || p.startsWith(state + sep2);
+  return under(key) || under(keyDir);
+}
+function loadInstrumentKey(opts) {
+  const keyPath = opts.keyPath ?? resolveInstrumentKeyPath({ env: opts.env });
+  if (isInsideStateDir(keyPath, opts.stateDir))
+    return { available: false, reason: "key_inside_state_dir", keyPath };
+  if (!existsSync6(keyPath))
+    return { available: false, reason: "key_absent", keyPath };
+  const mode = statSync2(keyPath).mode & 511;
+  if (mode !== 384)
+    return { available: false, reason: "key_permissions", keyPath, detail: mode.toString(8) };
+  const dirMode = statSync2(dirname2(keyPath)).mode & 511;
+  if (dirMode & 63)
+    return { available: false, reason: "key_dir_permissions", keyPath, detail: dirMode.toString(8) };
+  const raw = readFileSync6(keyPath, "utf8").trim();
+  const [keyId, material] = raw.split(".");
+  if (!keyId || !material || !/^[a-z0-9]{8}$/.test(keyId))
+    return { available: false, reason: "key_malformed", keyPath };
+  return { available: true, keyId, secret: Buffer.from(material, "base64url"), keyPath };
+}
+var EVIDENCE_FIELDS = [
+  "schema_version",
+  "key_id",
+  "nonce",
+  "timestamp",
+  "possession_id",
+  "decision_event_id",
+  "skill",
+  "task_id",
+  "task_class",
+  "manifest_sha256",
+  "baseline_sha256",
+  "baseline_captured_at",
+  "expected_sha256",
+  "final_sha256",
+  "invocation_receipt_id",
+  "verifier_id",
+  "verifier_version",
+  "target_rel",
+  "result_class"
+];
+function canonicalEvidenceBytes(payload) {
+  if (!payload || typeof payload !== "object")
+    throw new Error("evidence payload must be an object");
+  const raw = payload;
+  if (Object.keys(raw).length !== EVIDENCE_FIELDS.length)
+    throw new Error("evidence payload field count mismatch");
+  const canonical = {};
+  for (const field of [...EVIDENCE_FIELDS].sort()) {
+    if (!(field in raw))
+      throw new Error(`evidence payload missing '${field}'`);
+    canonical[field] = raw[field];
+  }
+  return Buffer.from(JSON.stringify(canonical), "utf8");
+}
+function signEvidencePayload(payload, key) {
+  return createHmac("sha256", key.secret).update(canonicalEvidenceBytes(payload)).digest("hex");
+}
+function verifyEvidenceSignature(payload, signature, key) {
+  let expected;
+  try {
+    expected = Buffer.from(signEvidencePayload(payload, key), "hex");
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : "malformed payload" };
+  }
+  if (typeof signature !== "string" || !/^[a-f0-9]{64}$/i.test(signature))
+    return { ok: false, reason: "malformed signature" };
+  const actual = Buffer.from(signature, "hex");
+  if (actual.length !== expected.length)
+    return { ok: false, reason: "length mismatch" };
+  return timingSafeEqual2(actual, expected) ? { ok: true } : { ok: false, reason: "signature mismatch" };
+}
+
 // mods/possessions.ts
-var POSSESSION_LEDGER_PATH = join7(STATE_DIR, "possessions.jsonl");
+var POSSESSION_LEDGER_PATH = join8(STATE_DIR, "possessions.jsonl");
+var keyCache;
+function currentInstrumentKey() {
+  if (keyCache !== undefined)
+    return keyCache;
+  const loaded = loadInstrumentKey({ stateDir: STATE_DIR });
+  keyCache = loaded.available ? { keyId: loaded.keyId, secret: loaded.secret } : null;
+  return keyCache;
+}
 var POSSESSION_SCHEMA = "mm.possession.v1";
+function authenticateStoredEvidence(input) {
+  const deny = (reason) => ({ authenticated: false, reason, artifactVerified: false, proceduralCredit: false, resultClass: "neutral" });
+  const payload = input.evidence?.payload;
+  if (!input.evidence || !payload)
+    return deny("legacy_unsigned");
+  if (!input.key)
+    return deny("key_unavailable");
+  if (payload.key_id !== input.key.keyId)
+    return deny("unknown_key");
+  if (input.evidence.signature === undefined)
+    return deny("missing_signature");
+  if (!verifyEvidenceSignature(payload, input.evidence.signature, input.key).ok)
+    return deny("bad_signature");
+  const artifactVerified = payload.final_sha256 === payload.expected_sha256;
+  const hadGap = payload.baseline_sha256 !== payload.expected_sha256;
+  const invoked = !!String(payload.invocation_receipt_id || "").trim();
+  const invocationAfterBaseline = input.invocationObservedAt === undefined || input.invocationObservedAt >= Number(payload.baseline_captured_at);
+  let proceduralReason;
+  if (!hadGap)
+    proceduralReason = "no_gap_to_close";
+  else if (!invoked)
+    proceduralReason = "no_observed_invocation";
+  else if (!invocationAfterBaseline)
+    proceduralReason = "invocation_precedes_baseline";
+  else if (!artifactVerified)
+    proceduralReason = "artifact_mismatch";
+  const proceduralCredit = proceduralReason === undefined;
+  const resultClass = artifactVerified ? proceduralCredit ? String(payload.result_class) : "neutral" : invoked ? "harmed" : "neutral";
+  return { authenticated: true, artifactVerified, proceduralCredit, proceduralReason, resultClass };
+}
 var EFFICIENCY_CONTRACT = Object.freeze({
   id: "mm.efficiency.v2",
   numerator: "same_tier_helped_prescriptions + same_tier_successful_abstentions",
@@ -3906,6 +4042,7 @@ function normalizeEvent(input, mode) {
       reason: redactFragment(String(event.reason), 4, 320),
       ...event.evidence_ref ? { evidence_ref: redactFragment(String(event.evidence_ref), 2, 180) } : {},
       ...event.supersedes_event_id ? { supersedes_event_id: event.supersedes_event_id } : {},
+      ...event.evidence ? { evidence: event.evidence } : {},
       ...verification ? { verification } : {}
     };
   }
@@ -3937,7 +4074,7 @@ function classifyNormalizationError(error, raw) {
   return raw?.type === "decision" ? "unknown_enum" : "invalid_schema";
 }
 function inspectPossessionLedger() {
-  const rawText = existsSync6(POSSESSION_LEDGER_PATH) ? readFileSync6(POSSESSION_LEDGER_PATH, "utf8") : "";
+  const rawText = existsSync7(POSSESSION_LEDGER_PATH) ? readFileSync7(POSSESSION_LEDGER_PATH, "utf8") : "";
   const lines = rawText.split(`
 `).filter((line) => line.trim());
   const exclusions = emptyExclusions();
@@ -4037,7 +4174,7 @@ function inspectPossessionLedger() {
     events,
     integrity: {
       blocked,
-      ledgerSha256: createHash3("sha256").update(rawText).digest("hex"),
+      ledgerSha256: createHash4("sha256").update(rawText).digest("hex"),
       rowCount: lines.length,
       validRows: events.length,
       malformedRows,
@@ -4085,7 +4222,7 @@ function appendPossessionEvent(input, mode) {
     if (!active && clean.supersedes_event_id)
       throw new Error("cannot supersede a missing outcome");
   }
-  mkdirSync6(dirname2(POSSESSION_LEDGER_PATH), { recursive: true });
+  mkdirSync7(dirname3(POSSESSION_LEDGER_PATH), { recursive: true });
   appendFileSync2(POSSESSION_LEDGER_PATH, `${JSON.stringify(clean)}
 `, "utf8");
   return clean;
@@ -4093,7 +4230,35 @@ function appendPossessionEvent(input, mode) {
 function recordPossessionEvent(input) {
   return appendPossessionEvent(input, "caller");
 }
-function recordInstrumentVerifiedOutcome(input) {
+function recordInstrumentVerifiedOutcome(input, context) {
+  const key = currentInstrumentKey();
+  const receipt = input.verification;
+  if (key && receipt && typeof receipt === "object") {
+    const r = receipt;
+    const payload = {
+      schema_version: "mm.evidence.v1",
+      key_id: key.keyId,
+      nonce: `${input.possession_id}:${input.event_id}`,
+      timestamp: input.ts,
+      possession_id: input.possession_id,
+      decision_event_id: String(r.decision_event_id ?? ""),
+      skill: String(context?.skill ?? ""),
+      task_id: String(r.task_id ?? ""),
+      task_class: String(r.task_class ?? ""),
+      manifest_sha256: String(r.manifest_sha256 ?? ""),
+      baseline_sha256: String(context?.baselineSha256 ?? ""),
+      baseline_captured_at: Number(context?.baselineCapturedAt ?? 0),
+      expected_sha256: String(r.artifact_sha256 ?? ""),
+      final_sha256: r.matched ? String(r.artifact_sha256 ?? "") : "",
+      invocation_receipt_id: String(context?.invocationReceiptId ?? ""),
+      verifier_id: String(r.adapter_id ?? ""),
+      verifier_version: String(r.adapter_version ?? ""),
+      target_rel: String(r.target_rel ?? ""),
+      result_class: input.result
+    };
+    const signed = { ...input, evidence: { payload, signature: signEvidencePayload(payload, key) } };
+    return appendPossessionEvent(signed, "instrument");
+  }
   return appendPossessionEvent(input, "instrument");
 }
 function loadPossessionEvents() {
@@ -4102,7 +4267,7 @@ function loadPossessionEvents() {
 var pct = (good, total) => total ? Math.round(100 * good / total) : null;
 var cleanIntegrity = () => ({
   blocked: false,
-  ledgerSha256: createHash3("sha256").update("").digest("hex"),
+  ledgerSha256: createHash4("sha256").update("").digest("hex"),
   rowCount: 0,
   validRows: 0,
   malformedRows: 0,
@@ -4123,12 +4288,24 @@ var safePossessionView = (decision, outcome) => ({
   openedAt: decision.ts,
   ...outcome ? {
     result: outcome.result,
-    evidence: outcome.evidence_tier === "verified" && decision.verification && outcome.verification && isStoredVerificationReceiptBound(decision.verification, outcome.verification, decision.possession_id, decision.event_id) ? "bound_verified" : "judged"
+    evidence: claimBearingVerdict(decision, outcome).verified ? "bound_verified" : "judged"
   } : { evidence: "none" }
 });
 function pendingPossessionViews(events) {
   const outcomes = new Set(events.filter((event) => event.type === "outcome").map((event) => event.possession_id));
   return events.filter((event) => event.type === "decision" && !outcomes.has(event.possession_id)).sort((a, b) => b.ts - a.ts).map((decision) => safePossessionView(decision));
+}
+function claimBearingVerdict(decision, outcome) {
+  if (outcome.evidence_tier !== "verified")
+    return { verified: false, proceduralCredit: false };
+  const key = currentInstrumentKey();
+  const verdict = authenticateStoredEvidence({ evidence: outcome.evidence, key });
+  if (!verdict.authenticated)
+    return { verified: false, proceduralCredit: false, downgrade: verdict.reason };
+  const structurallyBound = !!decision.verification && !!outcome.verification && isStoredVerificationReceiptBound(decision.verification, outcome.verification, decision.possession_id, decision.event_id);
+  if (!structurallyBound)
+    return { verified: false, proceduralCredit: false, downgrade: "bad_signature" };
+  return { verified: true, proceduralCredit: verdict.proceduralCredit, proceduralReason: verdict.proceduralReason };
 }
 function summarizePossessions(events, integrity = cleanIntegrity()) {
   const decisions = events.filter((event) => event.type === "decision");
@@ -4165,6 +4342,7 @@ function summarizePossessions(events, integrity = cleanIntegrity()) {
   let verifiedGood = 0;
   let judgedGood = 0;
   let unboundVerifiedDowngraded = 0;
+  let verifiedNeutralDecisions = 0;
   let prescribedEvaluated = 0;
   for (const decision of decisions) {
     const difficulty = decision.difficulty ?? "unknown";
@@ -4198,15 +4376,21 @@ function summarizePossessions(events, integrity = cleanIntegrity()) {
       continue;
     }
     scoredDecisions++;
-    const boundVerified = outcome.evidence_tier === "verified" && !!decision.verification && !!outcome.verification && isStoredVerificationReceiptBound(decision.verification, outcome.verification, decision.possession_id, decision.event_id);
+    const verdict = claimBearingVerdict(decision, outcome);
+    const boundVerified = verdict.verified;
     if (outcome.evidence_tier === "verified" && !boundVerified)
       unboundVerifiedDowngraded++;
     let good = false;
     if (decision.action === "prescribe") {
       prescribedEvaluated++;
-      if (outcome.result === "helped") {
+      const creditable = !boundVerified || verdict.proceduralCredit;
+      if (outcome.result === "helped" && creditable) {
         helpfulInterventions++;
         good = true;
+      } else if (outcome.result === "helped") {
+        neutralInterventions++;
+        if (boundVerified)
+          verifiedNeutralDecisions++;
       }
       if (outcome.result === "harmed")
         harmfulInterventions++;
@@ -4308,6 +4492,7 @@ function summarizePossessions(events, integrity = cleanIntegrity()) {
     judgedDecisions,
     judgedGoodDecisions: judgedGood,
     unboundVerifiedDowngraded,
+    verifiedNeutralDecisions,
     decisionEfficiencyPct: pct(goodDecisions, scoredDecisions),
     verifiedEfficiencyPct: pct(verifiedGood, verifiedDecisions),
     judgedEfficiencyPct: pct(judgedGood, judgedDecisions),
@@ -4344,6 +4529,7 @@ var SHARE_KEYS = new Set([
   "unique_task_classes",
   "difficulty_strata",
   "verified_good_decisions",
+  "verified_neutral_decisions",
   "verified_evaluated_decisions",
   "judged_good_decisions",
   "judged_evaluated_decisions",
@@ -4472,12 +4658,15 @@ function validateShareCardPayload(input) {
   if (raw.verified_evaluated_abstentions !== 0 || raw.verified_successful_abstentions !== 0)
     throw new Error("exact-file verification cannot claim verified abstentions");
   const verifiedHelpful = raw.verified_good_decisions;
-  const verifiedHarmful = raw.verified_evaluated_decisions - raw.verified_good_decisions;
+  const verifiedHarmful = Math.max(0, raw.verified_evaluated_decisions - raw.verified_good_decisions - (raw.verified_neutral_decisions ?? 0));
   const judgedHelpful = raw.helpful_interventions - verifiedHelpful;
   const judgedHarmful = raw.harmful_interventions - verifiedHarmful;
   if (judgedHelpful < 0 || judgedHarmful < 0)
     throw new Error("custody arithmetic mismatch: verified intervention counts exceed totals");
-  if (judgedHelpful + judgedHarmful + raw.neutral_interventions + raw.judged_only_abstentions !== raw.judged_evaluated_decisions)
+  const judgedNeutral = raw.neutral_interventions - (raw.verified_neutral_decisions ?? 0);
+  if (judgedNeutral < 0)
+    throw new Error("custody arithmetic mismatch: verified neutral exceeds neutral total");
+  if (judgedHelpful + judgedHarmful + judgedNeutral + raw.judged_only_abstentions !== raw.judged_evaluated_decisions)
     throw new Error("custody arithmetic mismatch: judged intervention and abstention outcomes must equal judged evaluated decisions");
   if (raw.judged_good_decisions !== judgedHelpful + raw.judged_successful_abstentions)
     throw new Error("custody arithmetic mismatch: judged good decisions must equal judged helped prescriptions + successful abstentions");
@@ -4536,6 +4725,7 @@ function buildShareCardPayload(summary, options) {
     unique_task_classes: summary.uniqueTaskClasses,
     difficulty_strata: { ...summary.difficultyStrata },
     verified_good_decisions: summary.verifiedGoodDecisions,
+    verified_neutral_decisions: summary.verifiedNeutralDecisions,
     verified_evaluated_decisions: summary.verifiedDecisions,
     judged_good_decisions: summary.judgedGoodDecisions,
     judged_evaluated_decisions: summary.judgedDecisions,
@@ -4558,13 +4748,13 @@ function buildShareCardPayload(summary, options) {
 }
 
 // mods/wins.ts
-import { existsSync as existsSync7, readFileSync as readFileSync7, readdirSync as readdirSync3 } from "node:fs";
-import { join as join8 } from "node:path";
+import { existsSync as existsSync8, readFileSync as readFileSync8, readdirSync as readdirSync3 } from "node:fs";
+import { join as join9 } from "node:path";
 function readJsonl(path) {
-  if (!existsSync7(path))
+  if (!existsSync8(path))
     return [];
   const out = [];
-  for (const line of readFileSync7(path, "utf8").split(`
+  for (const line of readFileSync8(path, "utf8").split(`
 `)) {
     if (!line.trim())
       continue;
@@ -4591,7 +4781,7 @@ function str(o, k) {
   return "";
 }
 function collectWins(stateDir = STATE_DIR) {
-  const exp = readJsonl(join8(stateDir, "experience.jsonl"));
+  const exp = readJsonl(join9(stateDir, "experience.jsonl"));
   const convs = new Set;
   let firstRepTs = null;
   for (const r of exp) {
@@ -4602,18 +4792,18 @@ function collectWins(stateDir = STATE_DIR) {
     if (ts !== null && (firstRepTs === null || ts < firstRepTs))
       firstRepTs = ts;
   }
-  const sessions = new Set(readJsonl(join8(stateDir, "sessions.jsonl")).map((s) => str(s, "conv")).filter(Boolean));
+  const sessions = new Set(readJsonl(join9(stateDir, "sessions.jsonl")).map((s) => str(s, "conv")).filter(Boolean));
   for (const c of convs)
     sessions.add(c);
   const skillsEarned = [];
   const updatesFolded = [];
-  const receiptsDir = join8(stateDir, "receipts");
-  if (existsSync7(receiptsDir)) {
+  const receiptsDir = join9(stateDir, "receipts");
+  if (existsSync8(receiptsDir)) {
     for (const f of readdirSync3(receiptsDir)) {
       if (!/^reflect-\d+\.json$/.test(f))
         continue;
       try {
-        const r = JSON.parse(readFileSync7(join8(receiptsDir, f), "utf8"));
+        const r = JSON.parse(readFileSync8(join9(receiptsDir, f), "utf8"));
         const action = str(r, "action");
         const name = str(r, "name");
         const ts = num(r, "ts") ?? 0;
@@ -4629,7 +4819,7 @@ function collectWins(stateDir = STATE_DIR) {
   }
   skillsEarned.sort((a, b) => b.ts - a.ts);
   updatesFolded.sort((a, b) => b.ts - a.ts);
-  const hits = readJsonl(join8(stateDir, "defense-hits.jsonl"));
+  const hits = readJsonl(join9(stateDir, "defense-hits.jsonl"));
   let knownFixSurfaced = 0;
   let lastFlag = null;
   for (const h of hits) {
@@ -4640,17 +4830,17 @@ function collectWins(stateDir = STATE_DIR) {
       lastFlag = { step: str(h, "step"), errClass: str(h, "errClass"), defense: str(h, "defense"), ts };
   }
   let noiseRejected = 0;
-  for (const e of readJsonl(join8(stateDir, "ui-events.jsonl"))) {
+  for (const e of readJsonl(join9(stateDir, "ui-events.jsonl"))) {
     if (str(e, "phase") !== "noise_rejected")
       continue;
     const m = str(e, "summary").match(/rejected (\d+)/);
     noiseRejected += m ? Number(m[1]) : 1;
   }
   const skillUses = [];
-  const usagePath = join8(stateDir, "skill-usage.json");
-  if (existsSync7(usagePath)) {
+  const usagePath = join9(stateDir, "skill-usage.json");
+  if (existsSync8(usagePath)) {
     try {
-      const u = JSON.parse(readFileSync7(usagePath, "utf8"));
+      const u = JSON.parse(readFileSync8(usagePath, "utf8"));
       if (u && typeof u === "object")
         for (const [name, rec] of Object.entries(u)) {
           const uses = num(rec, "uses") ?? (typeof rec === "number" ? rec : 0);
@@ -4727,14 +4917,14 @@ function renderWins(w, now = Date.now()) {
 }
 
 // mods/history.ts
-import { existsSync as existsSync8, readFileSync as readFileSync8, writeFileSync as writeFileSync6 } from "node:fs";
-import { join as join9 } from "node:path";
-var MINE_WATERMARK_PATH = join9(STATE_DIR, "mined-watermark.json");
+import { existsSync as existsSync9, readFileSync as readFileSync9, writeFileSync as writeFileSync7 } from "node:fs";
+import { join as join10 } from "node:path";
+var MINE_WATERMARK_PATH = join10(STATE_DIR, "mined-watermark.json");
 function loadWatermarks() {
   try {
-    if (!existsSync8(MINE_WATERMARK_PATH))
+    if (!existsSync9(MINE_WATERMARK_PATH))
       return {};
-    const parsed = JSON.parse(readFileSync8(MINE_WATERMARK_PATH, "utf8"));
+    const parsed = JSON.parse(readFileSync9(MINE_WATERMARK_PATH, "utf8"));
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch {
     return {};
@@ -4745,7 +4935,7 @@ function saveWatermark(agentId, id, ts) {
     ensureDir();
     const all = loadWatermarks();
     all[agentId] = { id, ts };
-    writeFileSync6(MINE_WATERMARK_PATH, JSON.stringify(all, null, 2));
+    writeFileSync7(MINE_WATERMARK_PATH, JSON.stringify(all, null, 2));
   } catch {}
 }
 function parseHistoryMessage(m) {
@@ -4858,10 +5048,10 @@ async function mineAgentHistory(client, agentId, opts) {
 }
 
 // mods/referee.ts
-import { existsSync as existsSync9, readFileSync as readFileSync9, writeFileSync as writeFileSync7, appendFileSync as appendFileSync3 } from "node:fs";
-import { join as join10 } from "node:path";
-var PLUSMINUS_PATH = join10(STATE_DIR, "skill-plusminus.json");
-var RATING_REASONS_PATH = join10(STATE_DIR, "rating-reasons.jsonl");
+import { existsSync as existsSync10, readFileSync as readFileSync10, writeFileSync as writeFileSync8, appendFileSync as appendFileSync3 } from "node:fs";
+import { join as join11 } from "node:path";
+var PLUSMINUS_PATH = join11(STATE_DIR, "skill-plusminus.json");
+var RATING_REASONS_PATH = join11(STATE_DIR, "rating-reasons.jsonl");
 function appendRatingReason(ev) {
   try {
     ensureDir();
@@ -4874,9 +5064,9 @@ function appendRatingReason(ev) {
 }
 function loadPlusMinus() {
   try {
-    if (!existsSync9(PLUSMINUS_PATH))
+    if (!existsSync10(PLUSMINUS_PATH))
       return {};
-    const parsed = JSON.parse(readFileSync9(PLUSMINUS_PATH, "utf8"));
+    const parsed = JSON.parse(readFileSync10(PLUSMINUS_PATH, "utf8"));
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch {
     return {};
@@ -4884,10 +5074,10 @@ function loadPlusMinus() {
 }
 function loadRatingEvents() {
   try {
-    if (!existsSync9(RATING_REASONS_PATH))
+    if (!existsSync10(RATING_REASONS_PATH))
       return [];
     const out = [];
-    for (const line of readFileSync9(RATING_REASONS_PATH, "utf8").split(`
+    for (const line of readFileSync10(RATING_REASONS_PATH, "utf8").split(`
 `)) {
       if (!line.trim())
         continue;
@@ -4909,7 +5099,7 @@ function recordPlusMinus(skillName, up, stepId) {
   ledger[skillName] = next;
   try {
     ensureDir();
-    writeFileSync7(PLUSMINUS_PATH, JSON.stringify(ledger, null, 2));
+    writeFileSync8(PLUSMINUS_PATH, JSON.stringify(ledger, null, 2));
     return { line: next, persisted: true };
   } catch {
     return { line: next, persisted: false };
@@ -5014,8 +5204,8 @@ function renderPlusMinus(ledger) {
 }
 
 // mods/shelf.ts
-import { mkdirSync as mkdirSync7, writeFileSync as writeFileSync8 } from "node:fs";
-import { join as join11 } from "node:path";
+import { mkdirSync as mkdirSync8, writeFileSync as writeFileSync9 } from "node:fs";
+import { join as join12 } from "node:path";
 var SQUAD_ARCHIVE_NAME = process.env.MM_SQUAD_ARCHIVE || "mm-squad-shelf";
 var SHELF_DOC_TAG = "mm:shelf-doc";
 async function ensureSquadArchive(client, opts) {
@@ -5101,12 +5291,12 @@ async function pullShelfSkill(client, agentId, skillName) {
       return { ok: false, stagedPath: null, publisher: null, reason: `no shelf doc found for '${skillName}' (is the shelf attached to this agent?)` };
     if (SECRET_TOKEN_RE.test(best.content))
       return { ok: false, stagedPath: null, publisher: best.publisher, reason: "shelf content failed the secret gate — refused" };
-    const dir = join11(PUBLISH_STAGED_DIR, skillName);
-    mkdirSync7(dir, { recursive: true });
-    const staged = join11(dir, "SKILL.md");
+    const dir = join12(PUBLISH_STAGED_DIR, skillName);
+    mkdirSync8(dir, { recursive: true });
+    const staged = join12(dir, "SKILL.md");
     const header = `<!-- muscle-memory shelf pull · publisher: ${best.publisher} · published: ${best.publishedAt} · pulled: ${new Date().toISOString()} · REVIEW BEFORE PROMOTION -->
 `;
-    writeFileSync8(staged, header + best.content);
+    writeFileSync9(staged, header + best.content);
     return { ok: true, stagedPath: staged, publisher: best.publisher, reason: "staged for review" };
   } catch (e) {
     return { ok: false, stagedPath: null, publisher: null, reason: `pull failed: ${e instanceof Error ? e.message : "unknown"}` };
@@ -5116,6 +5306,7 @@ async function pullShelfSkill(client, agentId, skillName) {
 // mods/index.ts
 var __mm = {
   meshAgentLabel,
+  summarizePossessionLedger,
   commandTemplate: commandTemplate2,
   fingerprint: fingerprint2,
   redactFragment,
@@ -5256,7 +5447,7 @@ function activate(letta) {
       clearTimeout(panelBeatTimer);
     panelBeatTimer = null;
   });
-  const DEFENSE_HITS = join12(STATE_DIR, "defense-hits.jsonl");
+  const DEFENSE_HITS = join13(STATE_DIR, "defense-hits.jsonl");
   let defensesCache = [];
   const refreshDefenses = () => {
     try {
@@ -5265,7 +5456,7 @@ function activate(letta) {
       defensesCache = [];
     }
   };
-  const isInstalledSkill = (name, ctx) => scanDirs(ctx).some((dir) => existsSync10(join12(dir, name, "SKILL.md")));
+  const isInstalledSkill = (name, ctx) => scanDirs(ctx).some((dir) => existsSync11(join13(dir, name, "SKILL.md")));
   const recordLifecycle = (action, skill, reason) => {
     const stamp = Date.now();
     try {
@@ -5308,7 +5499,7 @@ function activate(letta) {
       helped++;
       if (outcome.evidence_tier !== "verified" || !decision.verification || !outcome.verification)
         continue;
-      if (isStoredVerificationReceiptBound(decision.verification, outcome.verification, decision.possession_id, decision.event_id))
+      if (claimBearingVerdict(decision, outcome).verified)
         provenNames.add(decision.skill);
     }
     return { total: active.size, proven: provenNames.size, provenNames: [...provenNames].sort(), helped };
@@ -5360,7 +5551,7 @@ tracking: decision not recorded — ${String(error?.message || error)}`;
       return track("ABSTAIN — no observed/known procedure gap was declared. Relevance alone is not an indication; let the model work unaided.", "abstain", "no-gap");
     const dirs = scanDirs(ctx);
     const top = searchSkills(dirs, normalizePrescriptionQuery(query), 3);
-    const decision = routeSkill(top, [], (name) => dirs.some((dir) => existsSync10(join12(dir, name, "SKILL.md"))), 18);
+    const decision = routeSkill(top, [], (name) => dirs.some((dir) => existsSync11(join13(dir, name, "SKILL.md"))), 18);
     if (decision.route === "update" && decision.target) {
       const t = decision.target;
       const model = modelIdentity(ctx?.model);
@@ -5424,7 +5615,7 @@ CLOSE · muscle_memory_close possession_id="${row.possessionId}"`;
         row.harmed++;
       else if (outcome?.result === "neutral")
         row.neutral++;
-      if (outcome?.evidence_tier === "verified" && outcome.result === "helped" && event.verification && outcome.verification && isStoredVerificationReceiptBound(event.verification, outcome.verification, event.possession_id, event.event_id))
+      if (outcome?.evidence_tier === "verified" && outcome.result === "helped" && event.verification && outcome.verification && claimBearingVerdict(event, outcome).verified)
         row.verified++;
       else if (outcome?.evidence_tier === "agent_judged" || outcome?.evidence_tier === "human_judged")
         row.judged++;
@@ -5567,8 +5758,8 @@ STATUS · ${res.reason}`;
         const span2 = { tokensIn: event?.usage?.promptTokens ?? event?.tokensIn, tokensOut: event?.usage?.completionTokens ?? event?.tokensOut, ms: Date.now() - started, stop: event?.stopReason };
         let t = {};
         try {
-          if (existsSync10(TELEMETRY_PATH))
-            t = JSON.parse(readFileSync10(TELEMETRY_PATH, "utf8"));
+          if (existsSync11(TELEMETRY_PATH))
+            t = JSON.parse(readFileSync11(TELEMETRY_PATH, "utf8"));
         } catch {}
         const agg = aggregateTelemetry([span2]);
         t.calls = (t.calls || 0) + agg.calls;
@@ -5577,7 +5768,7 @@ STATUS · ${res.reason}`;
         t.ms = (t.ms || 0) + agg.ms;
         try {
           ensureDir();
-          writeFileSync9(TELEMETRY_PATH, JSON.stringify(t));
+          writeFileSync10(TELEMETRY_PATH, JSON.stringify(t));
         } catch {}
       } catch {}
     }));
@@ -5587,9 +5778,9 @@ STATUS · ${res.reason}`;
     disposers.push(letta.events.on("compact_start", (event, ctx) => {
       try {
         ensureDir();
-        mkdirSync8(RECEIPTS_DIR, { recursive: true });
+        mkdirSync9(RECEIPTS_DIR, { recursive: true });
         const { candidates } = detect(loadExperience());
-        writeFileSync9(join12(RECEIPTS_DIR, `compact-${Date.now()}.json`), JSON.stringify({ phase: "start", conv: event?.conversationId ?? null, trigger: event?.trigger ?? null, candidatesPreserved: candidates.length, ts: Date.now() }));
+        writeFileSync10(join13(RECEIPTS_DIR, `compact-${Date.now()}.json`), JSON.stringify({ phase: "start", conv: event?.conversationId ?? null, trigger: event?.trigger ?? null, candidatesPreserved: candidates.length, ts: Date.now() }));
       } catch {}
       const rfMode = process.env.MM_REFLECT;
       if (rfMode !== "staged" && rfMode !== "auto" || compactReflectInFlight)
@@ -5607,8 +5798,8 @@ STATUS · ${res.reason}`;
     disposers.push(letta.events.on("compact_end", (event) => {
       try {
         ensureDir();
-        mkdirSync8(RECEIPTS_DIR, { recursive: true });
-        writeFileSync9(join12(RECEIPTS_DIR, `compact-end-${Date.now()}.json`), JSON.stringify({ phase: "end", conv: event?.conversationId ?? null, trigger: event?.trigger ?? null, messagesBefore: event?.messagesBefore ?? null, messagesAfter: event?.messagesAfter ?? null, contextTokensBefore: event?.contextTokensBefore ?? null, contextTokensAfter: event?.contextTokensAfter ?? null, ts: Date.now() }));
+        mkdirSync9(RECEIPTS_DIR, { recursive: true });
+        writeFileSync10(join13(RECEIPTS_DIR, `compact-end-${Date.now()}.json`), JSON.stringify({ phase: "end", conv: event?.conversationId ?? null, trigger: event?.trigger ?? null, messagesBefore: event?.messagesBefore ?? null, messagesAfter: event?.messagesAfter ?? null, contextTokensBefore: event?.contextTokensBefore ?? null, contextTokensAfter: event?.contextTokensAfter ?? null, ts: Date.now() }));
       } catch {}
     }));
   }
@@ -5750,7 +5941,7 @@ ${renderPlusMinus(loadPlusMinus())}` };
         if (sub === "staged") {
           let s = [];
           try {
-            s = existsSync10(STAGED_DIR) ? readdirSync4(STAGED_DIR).filter((n) => existsSync10(join12(STAGED_DIR, n, "SKILL.md"))) : [];
+            s = existsSync11(STAGED_DIR) ? readdirSync4(STAGED_DIR).filter((n) => existsSync11(join13(STAGED_DIR, n, "SKILL.md"))) : [];
           } catch {}
           return { type: "output", output: s.length ? `staged skills (1-tap to graduate):
 ` + s.map((n) => `  · ${n}`).join(`
@@ -5877,13 +6068,13 @@ ${issues}${reps}${dupline}
             const target = String(argv?.[2] || "").trim();
             if (!target)
               return { type: "output", output: "usage: /muscle-memory shelf publish <skill>  (publishes the SANITIZED staged copy — run `publish stage <skill>` first)" };
-            const stagedPath = join12(STATE_DIR, "publish-staged", slug(target), "SKILL.md");
-            if (!existsSync10(stagedPath))
+            const stagedPath = join13(STATE_DIR, "publish-staged", slug(target), "SKILL.md");
+            if (!existsSync11(stagedPath))
               return { type: "output", output: `\uD83D\uDEAB no sanitized staged copy for '${target}' — run \`/muscle-memory publish stage ${target}\` first (the shelf only ever receives sanitized content)` };
             const archiveId = await ensureSquadArchive(letta.client);
             if (!archiveId)
               return { type: "output", output: "\uD83D\uDEAB could not ensure the squad shelf archive (client lacks the archives surface?)" };
-            const res = await publishSkillToShelf(letta.client, archiveId, slug(target), readFileSync10(stagedPath, "utf8"), String(process.env.MM_AGENT || "agent"));
+            const res = await publishSkillToShelf(letta.client, archiveId, slug(target), readFileSync11(stagedPath, "utf8"), String(process.env.MM_AGENT || "agent"));
             return { type: "output", output: res.ok ? `\uD83D\uDCE1 shelf-published '${target}' → ${SQUAD_ARCHIVE_NAME} (${archiveId})
   squad agents: attach once, then \`/muscle-memory shelf pull ${target}\`` : `\uD83D\uDEAB shelf publish failed — ${res.reason}` };
           }
@@ -5940,7 +6131,7 @@ ${plan.digest}` };
           const reg = buildRegistry(dirs);
           let staged2 = [];
           try {
-            staged2 = existsSync10(STAGED_DIR) ? readdirSync4(STAGED_DIR).filter((n) => existsSync10(join12(STAGED_DIR, n, "SKILL.md"))) : [];
+            staged2 = existsSync11(STAGED_DIR) ? readdirSync4(STAGED_DIR).filter((n) => existsSync11(join13(STAGED_DIR, n, "SKILL.md"))) : [];
           } catch {}
           const used = reg.skills.filter((s) => s.uses > 0);
           const idle = reg.skills.filter((s) => s.uses === 0 && s.state !== "archived");
@@ -5952,7 +6143,7 @@ ${plan.digest}` };
               return "";
             return ` · outcomes ${row.plus} helped / ${row.minus} missed`;
           };
-          const distribution = (name) => existsSync10(join12(globalSkillsDir(), name, "SKILL.md")) ? " · \uD83D\uDCE1 catalog" : "";
+          const distribution = (name) => existsSync11(join13(globalSkillsDir(), name, "SKILL.md")) ? " · \uD83D\uDCE1 catalog" : "";
           const L = ["\uD83D\uDCBE muscle-memory · skill lifecycle (creation → use → prune)"];
           L.push(`
 \uD83C\uDF31 staged · 1-tap to graduate (${staged2.length})`);
@@ -6004,7 +6195,7 @@ ${plan.digest}` };
                 managed++;
         } catch {}
         try {
-          staged = existsSync10(STAGED_DIR) ? readdirSync4(STAGED_DIR).filter((n) => existsSync10(join12(STAGED_DIR, n, "SKILL.md"))).length : 0;
+          staged = existsSync11(STAGED_DIR) ? readdirSync4(STAGED_DIR).filter((n) => existsSync11(join13(STAGED_DIR, n, "SKILL.md"))).length : 0;
         } catch {}
         const cov = (() => {
           try {
@@ -6102,7 +6293,7 @@ ${plan.digest}` };
     const readRun = async (ctx) => {
       const a = ctx?.args || {};
       const dirs = scanDirs(ctx);
-      const findSkillDir = (name) => dirs.find((d) => existsSync10(join12(d, name, "SKILL.md")));
+      const findSkillDir = (name) => dirs.find((d) => existsSync11(join13(d, name, "SKILL.md")));
       try {
         if (a.action === "report" || a.action === "boxscore") {
           const summary = summarizePossessionLedger();
@@ -6144,8 +6335,8 @@ ${plan.digest}` };
         }
         if (a.action === "defense_hits") {
           const hits = [];
-          if (existsSync10(DEFENSE_HITS))
-            for (const l of readFileSync10(DEFENSE_HITS, "utf8").trim().split(`
+          if (existsSync11(DEFENSE_HITS))
+            for (const l of readFileSync11(DEFENSE_HITS, "utf8").trim().split(`
 `).slice(-20)) {
               if (l)
                 try {
@@ -6174,7 +6365,7 @@ skipped: ${plan.skipped.length}`;
           const ev = buildCrossConversationEvidence(loadExperience());
           const reviewDirs = [...new Set([...dirs, STAGED_DIR])];
           const top = searchSkills(reviewDirs, ev.digest, 3);
-          const decision = routeSkill(top, [], (name) => reviewDirs.some((dir) => existsSync10(join12(dir, name, "SKILL.md"))), 18);
+          const decision = routeSkill(top, [], (name) => reviewDirs.some((dir) => existsSync11(join13(dir, name, "SKILL.md"))), 18);
           const route = decision.route === "update" && decision.target ? `UPDATE-FIRST → "${decision.target.name}" (score ${decision.target.score}, ${decision.target.matched} distinctive terms, dominant)` : decision.route === "park-ambiguous" ? "PARK (ambiguous overlap — refusing autonomous create)" : decision.route === "park-semantic" ? `PARK (possible semantic duplicate of "${decision.suspect}")` : "CREATE (no existing skill safely covers this)";
           return `reflective review preview — ${ev.convs} sessions, ${ev.items} durable signals
 routing: ${route}
@@ -6233,7 +6424,7 @@ ${d.body}` };
       const a = ctx?.args || {};
       const dir = agentSkillsDir(ctx);
       const dirs = scanDirs(ctx);
-      const findSkillDir = (name) => dirs.find((d) => existsSync10(join12(d, name, "SKILL.md")));
+      const findSkillDir = (name) => dirs.find((d) => existsSync11(join13(d, name, "SKILL.md")));
       try {
         if (a.action === "autopilot_run") {
           const cfg = { ...AUTOPILOT_DEFAULT, mode: a.mode === "auto" ? "auto" : "staged" };
@@ -6544,7 +6735,7 @@ Load with muscle_memory_skill_read action:load, then invoke the normal Skill too
       try {
         const recorded = recordPossessionEvent({
           schema: "mm.possession.v1",
-          event_id: `o-${possessionId}-${Date.now().toString(36)}-${randomBytes(4).toString("hex")}`,
+          event_id: `o-${possessionId}-${Date.now().toString(36)}-${randomBytes2(4).toString("hex")}`,
           possession_id: possessionId,
           ts: Date.now(),
           type: "outcome",
@@ -6616,7 +6807,7 @@ EVIDENCE · judged result added · not verified${receipt}`;
         const source = decisions.get(event.possession_id);
         if (!source || source.action !== "prescribe" || source.skill !== skill)
           continue;
-        if (event.evidence_tier === "verified" && event.result === "helped" && source.verification && event.verification && isStoredVerificationReceiptBound(source.verification, event.verification, source.possession_id, source.event_id))
+        if (event.evidence_tier === "verified" && event.result === "helped" && source.verification && event.verification && claimBearingVerdict(source, event).verified)
           verified++;
         else if (event.evidence_tier === "agent_judged" || event.evidence_tier === "human_judged")
           judged++;
@@ -6675,7 +6866,7 @@ EVIDENCE · ${judged} judged · ${verified} verified · ${proven ? "proven" : "s
         const stamp = Date.now();
         const recorded = recordInstrumentVerifiedOutcome({
           schema: "mm.possession.v1",
-          event_id: `o-${possessionId}-${stamp.toString(36)}-${randomBytes(4).toString("hex")}`,
+          event_id: `o-${possessionId}-${stamp.toString(36)}-${randomBytes2(4).toString("hex")}`,
           possession_id: possessionId,
           ts: stamp,
           type: "outcome",
