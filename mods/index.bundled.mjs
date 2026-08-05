@@ -5307,6 +5307,8 @@ async function pullShelfSkill(client, agentId, skillName) {
 var __mm = {
   meshAgentLabel,
   summarizePossessionLedger,
+  recordPossessionEvent,
+  recordInstrumentVerifiedOutcome,
   commandTemplate: commandTemplate2,
   fingerprint: fingerprint2,
   redactFragment,

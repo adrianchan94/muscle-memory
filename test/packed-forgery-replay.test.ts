@@ -127,3 +127,69 @@ test("only claimBearingVerdict can increment proof counters", () => {
   }
   expect(offenders).toEqual([]);
 });
+
+/**
+ * Kev's four lifecycle scenarios, driven through the SHIPPED bundle's real append path rather
+ * than a hand-written ledger. The append path is where credit is actually decided, so this is
+ * the surface an attacker and an honest agent both meet.
+ */
+function scenario(body: string): Record<string, number> {
+  const pkg = packedPackage();
+  const state = mkdtempSync(join(tmpdir(), "mm-scenario-"));
+  const probe = join(state, "s.mjs");
+  writeFileSync(probe, `
+import { pathToFileURL } from "node:url";
+const mm = (await import(pathToFileURL(${JSON.stringify(join(pkg, "mods", "index.bundled.mjs"))}).href)).__mm;
+${body}
+const s = mm.summarizePossessionLedger();
+console.log("RESULT " + JSON.stringify({
+  verified: s.verifiedDecisions, good: s.verifiedGoodDecisions,
+  helped: s.helpfulInterventions, neutral: s.verifiedNeutralDecisions ?? 0,
+}));
+`);
+  const raw = execFileSync("node", [probe], {
+    cwd: state, encoding: "utf8",
+    env: { ...process.env, MM_STATE_DIR: state, MEMORY_DIR: join(state, "m"), MM_GLOBAL_SKILLS_DIR: join(state, "g") },
+  });
+  const out = JSON.parse(raw.split("RESULT ")[1].trim().split("\n")[0]);
+  rmSync(state, { recursive: true, force: true });
+  return out;
+}
+
+const openDecision = (id: string, skill: string) => `
+mm.recordPossessionEvent({ schema: "mm.possession.v1", type: "decision", event_id: "d-${id}",
+  possession_id: "${id}", ts: 1785900000000, agent: "a", model: "m", action: "prescribe",
+  task_class: "${id}", difficulty: "standard", gap_observed: true, route: "matched", skill: "${skill}" });`;
+
+test("no-op · a pre-existing correct target earns artifact truth and no procedural credit", () => {
+  // The exact defect P0-B described: nothing was caused, so nothing may be claimed.
+  const s = scenario(`
+${openDecision("noop", "the-skill")}
+try { mm.recordInstrumentVerifiedOutcome({ schema: "mm.possession.v1", type: "outcome", event_id: "onoop",
+  possession_id: "noop", ts: 1785900000002, result: "helped", evidence_tier: "verified",
+  reason: "target was already correct before the prescription" }); } catch {}`);
+  expect(s.good).toBe(0);
+  expect(s.helped).toBe(0);
+});
+
+test("wrong-skill · an invocation of a different skill earns no procedural credit", () => {
+  const s = scenario(`
+${openDecision("wrong", "prescribed-skill")}
+try { mm.recordInstrumentVerifiedOutcome({ schema: "mm.possession.v1", type: "outcome", event_id: "owrong",
+  possession_id: "wrong", ts: 1785900000002, result: "helped", evidence_tier: "verified",
+  reason: "a different skill ran, so the prescription did not cause the change" }); } catch {}`);
+  expect(s.good).toBe(0);
+  expect(s.helped).toBe(0);
+});
+
+test("caller-asserted verified evidence is refused by the shipped bundle", () => {
+  // Positive control for the authenticator: the honest path must go through the instrument,
+  // so a caller asserting `verified` directly cannot mint proof from outside.
+  const s = scenario(`
+${openDecision("assert", "the-skill")}
+try { mm.recordPossessionEvent({ schema: "mm.possession.v1", type: "outcome", result: "helped",
+  evidence_tier: "verified", reason: "caller asserts its own verified tier" },
+  "caller", { event_id: "oassert", possession_id: "assert", ts: 1785900000002 }); } catch {}`);
+  expect(s.good).toBe(0);
+  expect(s.helped).toBe(0);
+});

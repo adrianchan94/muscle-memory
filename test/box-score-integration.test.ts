@@ -4,16 +4,23 @@ import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import activate from "../mods/index";
-import { globalSkillsDir, readUiState, writeUiState } from "../mods/core";
+import { STATE_DIR, globalSkillsDir, readUiState, writeUiState } from "../mods/core";
 import { POSSESSION_LEDGER_PATH, loadPossessionEvents } from "../mods/possessions";
 import { VERIFICATION_TASK_DIR } from "../mods/verification";
 import { loadPlusMinus } from "../mods/referee";
+import { initInstrumentKey } from "../mods/instrument";
 
 const tools = new Map<string, any>();
 const commands = new Map<string, any>();
 let renderPanel: null | (() => string[]) = null;
 
 beforeEach(() => {
+  // This suite exercises the verified-evidence path, which refuses to sign without an
+  // instrument key. Mint our own outside the state dir rather than inheriting one from
+  // whichever test file happened to run first.
+  const keyHome = mkdtempSync(join(tmpdir(), "mm-box-key-"));
+  process.env.MM_INSTRUMENT_KEY_FILE = join(keyHome, "muscle-memory.key");
+  initInstrumentKey({ keyPath: process.env.MM_INSTRUMENT_KEY_FILE, stateDir: STATE_DIR });
   tools.clear();
   commands.clear();
   renderPanel = null;
