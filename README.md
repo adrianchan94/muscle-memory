@@ -1,31 +1,93 @@
 # Muscle Memory V1
 
-## Skills that earn their minutes
+**Verifier-gated procedural memory for Letta agents.** It watches real work, distils the smallest reusable procedure into a skill, prescribes exactly one skill — or abstains — when you hit a gap, then records whether that intervention helped, harmed, or changed nothing.
 
-**Verifier-gated procedural memory for Letta agents.** Muscle Memory watches real work, learns the smallest reusable procedure, prescribes exactly one matching skill—or abstains—and records whether the intervention helped, harmed, or changed nothing.
+Your agent has a skill shelf. Over time it becomes a storage unit:
 
-> **Context is treatment, not nutrition.** Relevance earns a look. Observed outcomes earn another possession.
+- useful workflows stay buried in chat history
+- repeated mistakes keep repeating
+- duplicate skills pile up, and stale ones stay on the shelf long after they stopped being correct
 
-> 🏆 **Winner — Letta Mod Challenge (July 2026).** Following the challenge, Letta distributed `muscle-memory` through their [mods repo](https://github.com/letta-ai/mods/tree/main/packages/muscle-memory) and npm org as [`@letta-ai/muscle-memory`](https://www.npmjs.com/package/@letta-ai/muscle-memory). That remains the legacy distribution; this repository is the owner-maintained continuation and its `@adrianchan94/muscle-memory` identity is not published yet.
+The usual fix makes it worse — inject more context, hope the model reads it. **Muscle Memory is not that.** It is not a vector store, not top-k retrieval, and not a bigger prompt:
 
-[Research](https://muscle-memory-v1-research.vercel.app/) · [RC3 release notes](./docs/RELEASE-NOTES-v1.0.0-rc.3.md) · [Agent guide](./MOD.md) · [Security](./SECURITY.md) · [Contributing](./CONTRIBUTING.md)
+| | Muscle Memory | Retrieval-style memory |
+|---|---|---|
+| At task time | **one** installed skill, or `ABSTAIN` | top-k passages, or everything relevant |
+| Trigger | you attest an observed gap | similarity score |
+| After the task | the next action is recorded as helped / harmed / neutral | nothing |
+
+Relevance is not an indication. If you already know the recovery, it tells you to work unaided.
+
+## What it looks like in use
+
+Real tool output, trimmed for width:
 
 ```txt
-observe → diagnose a real gap → prescribe one or abstain → execute → verify or judge → update the roster
+› muscle_memory_prescribe(
+    task: "An exact-match edit failed because the target text is stale.",
+    gap_observed: true )
+
+  PRESCRIBE "recovering-failed-exact-match-edits" — one smallest matching installed skill
+  NEXT · invoke the normal Skill tool, perform the task, then call muscle_memory_close
+         with the observed result
+  gap diagnosis: caller-attested observed/known procedure gap; the router does not infer
+         hidden model capability
+  control: do not inject sibling skills or the full shelf
+
+› Skill(skill: "recovering-failed-exact-match-edits")     … the agent does the work …
+
+› muscle_memory_close(
+    possession_id: "<id>", result: "helped",
+    reason: "The re-anchor procedure resolved the failed edit and the original check passed." )
+
+  OUTCOME RECORDED · helped · agent-judged
+  SKILL · recovering-failed-exact-match-edits
+  EVIDENCE · 1 judged · 0 verified · still unproven
 ```
+
+Call it without a real gap and it refuses:
+
+```txt
+  ABSTAIN — no observed/known procedure gap was declared. Relevance alone is not an
+  indication; let the model work unaided.
+```
+
+That closed possession is the whole point: one skill helped once now reads `EARLY POSITIVE · NEEDS REPLICATION` on the roster — not "promoted". Nothing is promoted or retired on one result.
+
+## What the evidence actually says
+
+This is the Decision Report from one seat running Muscle Memory today — the product's own render, real counts, with only the live `LAST` and `PENDING` lines trimmed:
+
+```txt
+MUSCLE MEMORY · DECISION REPORT · EARLY EVIDENCE
+INTERVENTIONS · 5 served · 5 helped · 0 harmed
+ABSTENTIONS · 20 · 19 succeeded unaided · 1 failed
+SKILLS · 18 active · 0 proven
+STATUS · early judged evidence · 0 verified · not claim-bearing
+```
+
+Read it exactly as the last line reads it. This is **early judged evidence from one live seat** — one agent, one operator, one workload, judged by agent and human, not by an instrument. It is not a benchmark, not replicated, and not claim-bearing. `0 proven` is not a gap in the tape; `proven` requires instrument-owned verification, and these possessions did not carry it.
+
+Two things are worth noticing anyway: **`harmed` is a first-class outcome that this system will print about itself**, and it abstained four times as often as it intervened.
+
+The design comes from a bounded research program. **Muscle Memory V1 is the product; [Knowing Is Not Doing: Measuring Execution-Time Governance of Learned Skills in LLM Agents](https://muscle-memory-v1-research.vercel.app/) is the canonical research record behind its design.** It demonstrates bounded effects in tested tool-use tasks. It does **not** establish universal model behaviour or external replication.
+
+## Install (30 seconds)
 
 ```bash
 letta install git:github.com/adrianchan94/muscle-memory
 /reload
 ```
 
-The owner-maintained source is available now from GitHub. The npm identity is **`@adrianchan94/muscle-memory`**, but it is **not published yet**; npm release, `main` merge, and the final `1.0.0` tag remain explicit approval gates.
+That is the whole install. A fresh agent then sees **three tools** — `muscle_memory_prescribe`, `muscle_memory_close`, and a bounded read — and an idle status line, `💾 muscle-memory · N skills · H helped`. Mutation, lifecycle, ratings, verification, and diagnostics stay hidden until you set `MM_ADVANCED=on`. The memory system should not eat the context it is trying to improve.
 
-**Resting surface:** `💾 muscle-memory · N skills · H helped` — `· P proven` appears only when bound, instrument-owned verification exists. Uses, ratings, and retrievals never inflate the board.
+The npm identity is **`@adrianchan94/muscle-memory`**, but it is **not published**; this is a release candidate. See the [RC3 release notes](./docs/RELEASE-NOTES-v1.0.0-rc.3.md) and [cold-review kit](./docs/cold-review/README.md) for the gates.
+
+[Research record](https://muscle-memory-v1-research.vercel.app/) · [RC3 release notes](./docs/RELEASE-NOTES-v1.0.0-rc.3.md) · [Agent guide](./MOD.md) · [Provenance](#source-ownership-and-lineage) · [Security](./SECURITY.md) · [Contributing](./CONTRIBUTING.md)
 
 ![muscle-memory live demo](./demo.gif)
 
-The demo is a repository review artifact and is excluded from the packed release.
+<sub>Demo GIF is a repository review artifact and is excluded from the packed release.</sub>
 
 ## What ships in V1
 
@@ -217,12 +279,12 @@ Example dashboard (illustrative — your own counts will differ after install):
 
 ```txt
 💾 muscle-memory · reflect staged
-2567 reps observed · 9 managed · 1 staged
+<reps> reps observed · 9 managed · 1 staged
 
 squad distillations:
-  kev   graduated example-skill-a
-  mack  published example-skill-b
-  demo  graduated example-skill-c
+  agent-a  graduated example-skill-a
+  agent-b  published example-skill-b
+  agent-c  graduated example-skill-c
 ```
 
 ---
@@ -300,7 +362,7 @@ The generic `record_agent_possession` tool still cannot accept `verified`. Calle
 
 ---
 
-## The box score: skills earn their minutes
+## The Decision Report
 
 The **Decision Report** is the agent-facing box score. Muscle Memory does not infer that a skill helped merely because it was retrieved; task-time use is tracked as a bounded possession:
 
@@ -519,7 +581,7 @@ npm run final:gate
 npm pack --dry-run
 ```
 
-The previously frozen `1.0.0-rc.2` reference package completed:
+**Historical evidence — `1.0.0-rc.2` only. RC3 does not inherit this by similarity.** The previously frozen `1.0.0-rc.2` reference package completed:
 
 - **package/final gate — PASS:** 169 tests, routing evaluation, packed-tarball install smoke, secret/private-path scan, and checked-in/fresh bundle parity
 - **disposable Letta canary — PASS:** packed activation, tool registration, block sync, archival passage sync, and cleanup with zero model calls (`7f6a07e0…902c0d`)
@@ -577,7 +639,7 @@ Known boundaries — these are Bounded, not Verified:
 - **Maintenance-at-scale is unproven.** The maintenance loop has regression coverage and internal dogfood receipts, but is not validated at scale on a real recurring workload.
 - **Extraction-at-scale is untested.** Whether repair-chain extraction helps more than raw-log authoring on large noisy substrate is open.
 - **The raw-noise proxy is a health/regression signal, not a win claim.**
-- Full improvement router is roadmap, not part of RC2.
+- Full improvement router is roadmap, not part of this release candidate.
 - Global Custom Skills may require `/reload` before the current session sees them.
 - Quality gates reduce bad skills but do not replace human judgment for high-stakes workflows.
 
@@ -605,6 +667,8 @@ The canonical product home and install source is:
 https://github.com/adrianchan94/muscle-memory
 ```
 
-The package is owner-maintained by Adrian Chan under `@adrianchan94/muscle-memory`. Muscle Memory was originally contributed through Letta's community mod program; the historical `@letta-ai` package and Letta-mods pull requests remain lineage, not current custody. Letta supplies the runtime and open mod substrate, but does not own or maintain this repository.
+The package is owner-maintained by Adrian Chan under `@adrianchan94/muscle-memory`.
+
+**Winner — Letta Mod Challenge (July 2026).** Following the challenge, Letta distributed `muscle-memory` through their [mods repo](https://github.com/letta-ai/mods/tree/main/packages/muscle-memory) and npm org as [`@letta-ai/muscle-memory`](https://www.npmjs.com/package/@letta-ai/muscle-memory). That remains the legacy distribution and is lineage, not current custody. This repository is the owner-maintained continuation. Letta supplies the runtime and open mod substrate, but does not own or maintain this repository.
 
 The final `1.0.0` release will be created here only after the owner candidate receives its new exact-byte seal and review gates. Until then, install from the reviewed Git branch and treat npm commands as future release instructions, not current availability.

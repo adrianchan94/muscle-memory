@@ -1,0 +1,123 @@
+{
+  "candidateVersion": "1.0.0-rc.3",
+  "packageName": "@adrianchan94/muscle-memory",
+  "defaultSurface": {
+    "toolNames": [
+      "muscle_memory_skill_read",
+      "muscle_memory_prescribe",
+      "muscle_memory_close"
+    ],
+    "toolCount": 3,
+    "tools": [
+      {
+        "name": "muscle_memory_skill_read",
+        "description": "Read the private Decision Report, resume a pending possession, review the skill roster, or load one known skill. For a current task gap, use muscle_memory_prescribe.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "report",
+                "pending_possessions",
+                "roster",
+                "load"
+              ],
+              "description": "report current evidence, resume one pending possession, review the skill roster, or load one known skill"
+            },
+            "name": {
+              "type": "string",
+              "description": "skill name — required only for load"
+            }
+          },
+          "required": [
+            "action"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "muscle_memory_prescribe",
+        "description": "Use after you observe a real procedural miss, or when you know you lack the procedure for the current task. Provide only the task and your explicit gap attestation. Returns exactly ONE installed Skill or ABSTAIN and opens one private possession. It never dumps the shelf, creates a skill, or infers hidden model capability. If you already know the recovery, do not call this tool; continue unaided. After a prescription, invoke the exact Skill tool, complete the task, then use muscle_memory_close.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "task": {
+              "type": "string",
+              "description": "the current procedural miss or known missing procedure; raw task text is never persisted"
+            },
+            "gap_observed": {
+              "type": "boolean",
+              "description": "caller attests a concrete miss or known missing procedure; false means abstain. Muscle Memory never infers hidden model capability"
+            }
+          },
+          "required": [
+            "task",
+            "gap_observed"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "muscle_memory_close",
+        "description": "Lightweight default closeout for a Muscle Memory possession. Provide the returned possession_id, the observed result, and one concrete reason. The tool records agent_judged evidence automatically, reports whether the skill remains unproven, and cannot accept or self-award verified evidence. Use record_agent_possession only for human-judged closeout, evidence references, or append-only corrections; use verify_agent_possession for pre-bound instrument proof.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "possession_id": {
+              "type": "string",
+              "description": "possession ID returned by muscle_memory_prescribe"
+            },
+            "result": {
+              "type": "string",
+              "enum": [
+                "helped",
+                "harmed",
+                "neutral",
+                "succeeded_unaided",
+                "failed_unaided"
+              ],
+              "description": "observed result; prescriptions use helped|harmed|neutral and abstentions use succeeded_unaided|failed_unaided"
+            },
+            "reason": {
+              "type": "string",
+              "description": "one concrete sentence describing the observed task outcome"
+            }
+          },
+          "required": [
+            "possession_id",
+            "result",
+            "reason"
+          ],
+          "additionalProperties": false
+        }
+      }
+    ]
+  },
+  "advancedSurface": {
+    "toolNames": [
+      "muscle_memory_skill_read",
+      "muscle_memory_prescribe",
+      "muscle_memory_close",
+      "record_agent_possession",
+      "register_exact_file_verification",
+      "verify_agent_possession",
+      "muscle_memory_skill_write",
+      "muscle_memory_lifecycle_run",
+      "rate_skill"
+    ],
+    "toolCount": 9
+  },
+  "commands": [
+    "muscle-memory"
+  ],
+  "permissions": [
+    "muscle-memory-guard"
+  ],
+  "assertions": {
+    "defaultSurfaceIsLean": true,
+    "prescribeIsDedicatedTwoField": true,
+    "prescribeRejectsExtraFields": true,
+    "advancedStrictlyExtendsDefault": true
+  }
+}

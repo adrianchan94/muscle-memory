@@ -1,0 +1,137 @@
+{
+  "packageName": "@adrianchan94/muscle-memory",
+  "version": "1.0.0-rc.3",
+  "declaredFilesField": [
+    "MOD.md",
+    "CHANGELOG.md",
+    "README.md",
+    "LICENSE",
+    "mods"
+  ],
+  "tarball": {
+    "name": "adrianchan94-muscle-memory-1.0.0-rc.3.tgz",
+    "sha256": "c68e29d28fc6efe802f8f26ed55c9f491317e9c9e59a9f98ff076f94e6a8ff7e",
+    "bytes": 249342,
+    "npmReportedSize": 249342,
+    "npmReportedUnpackedSize": 864666,
+    "fileCount": 21
+  },
+  "bundle": {
+    "path": "mods/index.bundled.mjs",
+    "committedSha256": "6a3ab91243780550088e2417c4b56012ee3f5cb60484156d2d2997148a24e60e",
+    "rebuiltFromSourceSha256": "6a3ab91243780550088e2417c4b56012ee3f5cb60484156d2d2997148a24e60e",
+    "parity": true
+  },
+  "shippedFiles": [
+    {
+      "path": "CHANGELOG.md",
+      "bytes": 24440,
+      "sha256": "308732685d607c72852194424d1378a95c09e8be932ddcc050923d8f18b86163"
+    },
+    {
+      "path": "LICENSE",
+      "bytes": 691,
+      "sha256": "8bd952d3be4da20edcb307a437c5865bb4b4d56bcce425ea25e3a411cede479c"
+    },
+    {
+      "path": "MOD.md",
+      "bytes": 10493,
+      "sha256": "bb1ecd98a06ac91e6452dec3b9026420f985976f30415be0bd9b04e4d90af78c"
+    },
+    {
+      "path": "README.md",
+      "bytes": 42624,
+      "sha256": "cf46d23ed3e9499de3775207f23aa79d10166e71662ea950d50639692b8bc2ab"
+    },
+    {
+      "path": "mods/autopilot.ts",
+      "bytes": 74678,
+      "sha256": "8dc59e7eff3821b2b2167a9313c53ae08c1ddef691adeb10f18ee2d010d09007"
+    },
+    {
+      "path": "mods/core.ts",
+      "bytes": 37191,
+      "sha256": "0270f05cd2d7ffdd554b60c72c1988e1ae4d9d019d0de98df23cb66428b01a86"
+    },
+    {
+      "path": "mods/detect.ts",
+      "bytes": 40312,
+      "sha256": "2660c157aadcc71674830327c58f579c910184ffc089d7e245e8e45d8c3d452b"
+    },
+    {
+      "path": "mods/engram.ts",
+      "bytes": 31230,
+      "sha256": "fece7f99018eb772a9f50727e8364c33a73f84b5c24499006d87ed1ec9b609b1"
+    },
+    {
+      "path": "mods/gate.ts",
+      "bytes": 21851,
+      "sha256": "ddc9b92483efdc78bb5b226567af0cb93bfafba702a9217e406c29c6b3d06ed2"
+    },
+    {
+      "path": "mods/history.ts",
+      "bytes": 8890,
+      "sha256": "bb3dbf6dceb522f4b5986f699b571a005183f4c8419dfb3600b7e5a8c02ce860"
+    },
+    {
+      "path": "mods/index.bundled.mjs",
+      "bytes": 332100,
+      "sha256": "6a3ab91243780550088e2417c4b56012ee3f5cb60484156d2d2997148a24e60e"
+    },
+    {
+      "path": "mods/index.ts",
+      "bytes": 106555,
+      "sha256": "8b575d94f4963cc29e8534cfe61569a9a2f6a07c6bda90b2181c25aa2f7a7e3c"
+    },
+    {
+      "path": "mods/lifecycle.ts",
+      "bytes": 14447,
+      "sha256": "84d58e34280f6b42e9a4846374bf77b2f02d49defa793f5130485bb03a7c264c"
+    },
+    {
+      "path": "mods/possessions.ts",
+      "bytes": 44919,
+      "sha256": "eef2b565c408785c6ab370758a16a9a66dc2f4498cf9ce77e5862821b39cc06f"
+    },
+    {
+      "path": "mods/publish.ts",
+      "bytes": 17014,
+      "sha256": "f5da9754061d98fdd4619dd2de3a1ff4376a056d34ce5d812b5632c6ca1dd836"
+    },
+    {
+      "path": "mods/referee.ts",
+      "bytes": 10836,
+      "sha256": "278bdd6a0cff5e08e5da406334f0511cb67bcc09d43442f3f6ead1e01d04f6db"
+    },
+    {
+      "path": "mods/shelf.ts",
+      "bytes": 9086,
+      "sha256": "46ed4cb035a00c748570153449a9520988de5a73b18c376151d29fac3041328b"
+    },
+    {
+      "path": "mods/ui.ts",
+      "bytes": 10231,
+      "sha256": "214a1bca6c2e145b61b7be5dd3a6f1bbac821875ff7a1e3c6912152a742967f8"
+    },
+    {
+      "path": "mods/verification.ts",
+      "bytes": 16486,
+      "sha256": "7fad32f0c1b68717fdda1b800e972d6719866150b8bc469ed55c931dfefe276a"
+    },
+    {
+      "path": "mods/wins.ts",
+      "bytes": 8081,
+      "sha256": "7c7b739b4ad5ca8696d442fa04c13b9a6e551986352b6da09a6611a22c0c1ddb"
+    },
+    {
+      "path": "package.json",
+      "bytes": 2511,
+      "sha256": "9d3565003b3aa2c51d714155cf5069590b0a8b53e083575d1808a1adadebb06f"
+    }
+  ],
+  "assertions": {
+    "noReviewDocsInTarball": true,
+    "bundleMatchesSource": true,
+    "everyShippedFileHashed": true
+  }
+}
