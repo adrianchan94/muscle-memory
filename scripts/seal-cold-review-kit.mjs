@@ -162,6 +162,7 @@ of these, you have the wrong bytes and the review does not count:
 | \`c7fda030…\`, \`24f4eb3f…\`, \`390c3bdc…\`, \`17e7aee3…\`, \`9d533974…\` | superseded commits from the evidence-integrity cycle |
 | \`8d965bfd…\` | **superseded archive — the one G1 CLEAR and the G2 dogfood were bound to.** If you are holding it, stop |
 | \`9e7b7668…\` | superseded archive previously placed on the Desktop |
+| \`6bd385b0…\`, \`39057acc…\` | superseded archives from the void-ledger completion reseals |
 | \`3097a31d…\` | superseded commit — the product-freeze head before the generator-only void-ledger fix |
 | \`385e648e…\` | superseded product tarball from the P0-wiring HOLD candidate |
 
