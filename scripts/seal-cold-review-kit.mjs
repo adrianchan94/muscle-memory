@@ -160,6 +160,10 @@ of these, you have the wrong bytes and the review does not count:
 | \`f44e71ca…\`, \`02cd14fe…\`, \`4fced9f8…\`, \`46829794…\`, \`6a6fcdf8…\` | superseded product tarballs from the evidence-integrity cycle |
 | \`0ed5d89f…\`, \`9b774dbd…\`, \`40de32c3…\`, \`3cd6e645…\`, \`58262ab8…\` | superseded cold-review archives |
 | \`c7fda030…\`, \`24f4eb3f…\`, \`390c3bdc…\`, \`17e7aee3…\`, \`9d533974…\` | superseded commits from the evidence-integrity cycle |
+| \`8d965bfd…\` | **superseded archive — the one G1 CLEAR and the G2 dogfood were bound to.** If you are holding it, stop |
+| \`9e7b7668…\` | superseded archive previously placed on the Desktop |
+| \`3097a31d…\` | superseded commit — the product-freeze head before the generator-only void-ledger fix |
+| \`385e648e…\` | superseded product tarball from the P0-wiring HOLD candidate |
 
 ## How to attach and review
 
