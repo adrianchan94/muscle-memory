@@ -191,7 +191,7 @@ export function autonomousShelves(ctx?: any): string[] { return skillShelves(ctx
 
 export function slug(s: string): string { return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 64); }
 
-export function listSkillNames(dir: string): string[] { try { return readdirSync(dir).filter((n) => existsSync(join(dir, n, "SKILL.md"))); } catch { return []; } }
+export function listSkillNames(dir: string): string[] { try { return readdirSync(dir).filter((n) => { try { if (lstatSync(join(dir, n)).isSymbolicLink()) return false; } catch { return false; } return existsSync(join(dir, n, "SKILL.md")); }); } catch { return []; } }
 
 /**
  * Read-side mirror of `assertContained`. A skill NAME is a single directory segment, always.
@@ -209,16 +209,45 @@ export function assertSafeSkillName(name: unknown): string {
   return n;
 }
 
-export function readSkill(dir: string, name: string): string { assertSafeSkillName(name); try { return readFileSync(join(dir, name, "SKILL.md"), "utf8"); } catch { return ""; } }
+/**
+ * THE skill-directory resolution layer. Every accessor goes through this — not because the
+ * reported call site needed it, but because the previous three containment fixes each guarded
+ * the call they were reported against and the next reviewer simply found a different accessor.
+ *
+ * `assertSafeSkillName` proves the name is a single segment. It says nothing about what that
+ * segment IS on disk. A skill directory that is itself a symlink pointing out of the shelf turns
+ * every reader into an exfiltration primitive and every writer into an arbitrary overwrite.
+ *
+ * Refuse the link itself rather than only links that escape: a skill directory is a real
+ * directory of content the agent owns, and there is no legitimate reason for one to be a link.
+ */
+export function resolveSkillDir(root: string, name: string): string {
+  assertSafeSkillName(name);
+  const full = join(root, name);
+  let st;
+  try { st = lstatSync(full); } catch { return full; } // not created yet — nothing to escape through
+  if (st.isSymbolicLink()) {
+    let target = "";
+    try { target = realpathSync(full); } catch { throw new Error(`containment: skill dir '${name}' is a broken symlink — refusing`); }
+    let outside = true;
+    try { const rel = relative(realpathSync(root), target); outside = !rel || rel.startsWith("..") || isAbsolute(rel); } catch { /* treat as outside */ }
+    throw new Error(`containment: skill dir '${name}' is a symlink${outside ? ` escaping the shelf root (${target})` : ""} — refusing`);
+  }
+  return full;
+}
+
+export function readSkill(dir: string, name: string): string { const sd = resolveSkillDir(dir, name); try { return readFileSync(join(sd, "SKILL.md"), "utf8"); } catch { return ""; } }
 
 export function skillDesc(dir: string, name: string): string { return (readSkill(dir, name).match(/description:\s*(.+)/)?.[1] || "").trim(); }
 
 export function isManaged(dir: string, name: string): boolean { return readSkill(dir, name).includes(MM_TAG); }
 
 export function writeSkill(dir: string, name: string, content: string): string {
-  mkdirSync(join(dir, name), { recursive: true });
-  const tmp = join(dir, name, ".SKILL.md.tmp"); writeFileSync(tmp, content); renameSync(tmp, join(dir, name, "SKILL.md"));
-  return join(dir, name, "SKILL.md");
+  const sd = resolveSkillDir(dir, name);
+  mkdirSync(sd, { recursive: true });
+  resolveSkillDir(dir, name); // mkdir may have followed a link planted mid-call
+  const tmp = join(sd, ".SKILL.md.tmp"); writeFileSync(tmp, content); renameSync(tmp, join(sd, "SKILL.md"));
+  return join(sd, "SKILL.md");
 }
 
 export const CATALOG_SYNC_DIR = join(STATE_DIR, "catalog-sync");
@@ -503,7 +532,7 @@ export function validateSupportPath(filePath: string): { ok: boolean; reason?: s
   return { ok: true };
 }
 
-export function skillDirOf(name: string, ctx?: any): string | null { return scanDirs(ctx).find((d) => existsSync(join(d, name, "SKILL.md"))) || null; }
+export function skillDirOf(name: string, ctx?: any): string | null { return scanDirs(ctx).find((d) => { try { return existsSync(join(resolveSkillDir(d, name), "SKILL.md")); } catch { return false; } }) ?? null; }
 
 /**
  * Containment for every support-file write. `validateSupportPath` reasons about the path as a

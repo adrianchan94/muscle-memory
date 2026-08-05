@@ -1116,7 +1116,7 @@ export default function activate(letta: any) {
         action: { type: "string", enum: ["reflect", "graduate", "publish", "prune"], description: "Lifecycle action. All are reversible except publish, which writes to the shared catalog and needs approve: true" },
         mode: { type: "string", enum: ["staged", "auto"], description: "reflect mode; staged writes every result to the staging shelf and promotes nothing — graduate explicitly. auto promotes." },
         name: { type: "string", description: "staged skill name — for graduate" },
-        approve: { type: "boolean", description: "required for publish: confirms the sanitized skill may be written to the shared catalog" }
+        approve: { type: "boolean", description: "required for publish, unless the operator has set MM_PUBLISH=auto (standing approval for autopilot graduates). Confirms the sanitized skill may be written to the shared catalog" }
       },
       required: ["action"],
       additionalProperties: false

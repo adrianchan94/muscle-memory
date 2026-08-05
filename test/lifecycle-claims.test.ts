@@ -184,3 +184,24 @@ test("class: the lifecycle schema does not advertise the bug it used to have", (
   // It literally read "staged still auto-graduates trusted updates/high-confidence creates".
   expect(idx).not.toMatch(/staged still auto-graduates/);
 });
+
+test("class: the MM_PUBLISH=auto carve-out is documented, defaults off, and still sanitizes", () => {
+  const auto = readFileSync(new URL("../mods/autopilot.ts", import.meta.url), "utf8");
+  // Standing approval, not absent approval: the env var must be an explicit opt-in that
+  // defaults to off, and the bytes must still go through the same sanitizing publisher.
+  expect(auto).toMatch(/process\.env\.MM_PUBLISH === "auto"/);
+  expect(auto).not.toMatch(/process\.env\.MM_PUBLISH !== "off"/);
+  const block = auto.slice(auto.indexOf('process.env.MM_PUBLISH === "auto"'));
+  expect(block.slice(0, 400)).toMatch(/publishSkillToCatalog/);
+
+  // And the claim must say so. A docs page that promises per-call approval while an env var
+  // grants standing approval is the same defect class as a stale sha: the words disagree with
+  // the bytes.
+  const claims = readFileSync(new URL("../docs/cold-review/CLAIMS-AND-LIMITATIONS.md", import.meta.url), "utf8");
+  expect(claims).toMatch(/MM_PUBLISH=auto/);
+  expect(claims).toMatch(/standing\s+approval/i); // markdown wraps; do not assume one line
+
+  const idx = readFileSync(new URL("../mods/index.ts", import.meta.url), "utf8");
+  const desc = idx.match(/approve: \{ type: "boolean"[^}]*\}/)?.[0] ?? "";
+  expect(desc).toMatch(/MM_PUBLISH=auto/);
+});

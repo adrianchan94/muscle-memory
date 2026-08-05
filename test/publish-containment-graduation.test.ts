@@ -14,7 +14,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, symlinkSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { writeSupportFile, removeSupportFile, readSkill } from "../mods/core";
+import { writeSupportFile, removeSupportFile, readSkill, writeSkill, listSkillNames } from "../mods/core";
 import { publishSkillToCatalog } from "../mods/publish";
 
 // These tests must own their shelf, and must hand it back. Setting MM_AGENT_SKILLS_DIR without
@@ -190,10 +190,85 @@ test("containment covers the READ path as well as the write path", () => {
   const core = readFileSync(new URL("../mods/core.ts", import.meta.url), "utf8");
   expect(core).toMatch(/export function assertSafeSkillName/);
   const rs = core.match(/export function readSkill[^\n]*/)?.[0] ?? "";
-  expect(rs).toMatch(/assertSafeSkillName/);
+  // readSkill now reaches the name check through the directory resolver, which also proves the
+  // segment is a real directory rather than a link out of the shelf.
+  expect(rs).toMatch(/resolveSkillDir/);
+  expect(core).toMatch(/export function resolveSkillDir[\s\S]{0,400}?assertSafeSkillName/);
   // Every load entry point in the tool surface, not just the one that was reported.
   const idx = readFileSync(new URL("../mods/index.ts", import.meta.url), "utf8");
   const finders = [...idx.matchAll(/const findSkillDir = [^\n]*/g)];
   expect(finders.length).toBeGreaterThan(0);
   for (const f of finders) expect(f[0]).toMatch(/assertSafeSkillName/);
+});
+
+// ── 5 · the skill DIRECTORY itself is a symlink ────────────────────────────────
+// Fourth containment surface, and the reason this one is asserted at the resolution layer
+// rather than per call site: the previous three fixes each guarded the call they were reported
+// against, and the next reviewer simply found a different accessor. `assertSafeSkillName` proves
+// the NAME is one segment; it says nothing about what that segment IS on disk. A skill directory
+// that is itself a symlink pointing out of the shelf turns every accessor into an escape.
+
+test("claim: a symlinked skill DIRECTORY refuses the read — no external content is returned", () => {
+  const root = mkdtempSync(join(tmpdir(), "mm-sdir-"));
+  const shelf = join(root, "skills");
+  mkdirSync(shelf, { recursive: true });
+  const victim = join(root, "victim");
+  mkdirSync(victim, { recursive: true });
+  writeFileSync(join(victim, "SKILL.md"), "TOP SECRET EXTERNAL");
+  symlinkSync(victim, join(shelf, "innocent"));
+
+  let out = "", reason = "";
+  try {
+    out = readSkill(shelf, "innocent");
+  } catch (e) {
+    reason = String(e);
+  }
+  expect(out).not.toContain("TOP SECRET EXTERNAL");
+  expect(reason).toMatch(/containment|symlink|escape|outside/i);
+});
+
+test("claim: a symlinked skill DIRECTORY refuses the write — no external file is overwritten", () => {
+  const root = mkdtempSync(join(tmpdir(), "mm-sdirw-"));
+  const shelf = join(root, "skills");
+  mkdirSync(shelf, { recursive: true });
+  const victim = join(root, "victim");
+  mkdirSync(victim, { recursive: true });
+  writeFileSync(join(victim, "SKILL.md"), "ORIGINAL");
+  symlinkSync(victim, join(shelf, "innocent"));
+
+  let reason = "";
+  try {
+    writeSkill(shelf, "innocent", "ATTACKER CONTENT");
+  } catch (e) {
+    reason = String(e);
+  }
+  expect(reason).toMatch(/containment|symlink|escape|outside/i);
+  expect(readFileSync(join(victim, "SKILL.md"), "utf8")).toBe("ORIGINAL");
+});
+
+test("green path: a real skill directory still reads and writes", () => {
+  const root = mkdtempSync(join(tmpdir(), "mm-sdirok-"));
+  const shelf = join(root, "skills");
+  mkdirSync(join(shelf, "real-skill"), { recursive: true });
+  writeFileSync(join(shelf, "real-skill", "SKILL.md"), "---\nname: real-skill\n---\nbody");
+  expect(readSkill(shelf, "real-skill")).toContain("body");
+  writeSkill(shelf, "real-skill", "updated");
+  expect(readSkill(shelf, "real-skill")).toBe("updated");
+  expect(listSkillNames(shelf)).toEqual(["real-skill"]);
+});
+
+test("class: every skill-dir accessor resolves through the guarded layer", () => {
+  const src = readFileSync(new URL("../mods/core.ts", import.meta.url), "utf8");
+  expect(src).toMatch(/export function resolveSkillDir/);
+  // Not per-call-site patches: the accessors must all go through one resolver, so a NEW
+  // accessor added later inherits the guard instead of re-opening the class a fifth time.
+  for (const fn of ["readSkill", "writeSkill", "skillDirOf"]) {
+    // One-liners and block bodies both: take everything up to the next top-level export.
+    const m = src.match(new RegExp(`export function ${fn}\\b[\\s\\S]*?(?=\\nexport )`));
+    expect(m, `${fn} not found`).toBeTruthy();
+    expect(m![0], `${fn} does not resolve through the guard`).toMatch(/resolveSkillDir/);
+  }
+  // Enumeration must not offer a symlinked entry as a skill in the first place.
+  const ls = src.match(/export function listSkillNames[\s\S]{0,400}?\n/)?.[0] ?? "";
+  expect(ls).toMatch(/lstatSync|resolveSkillDir|isSymbolicLink/);
 });

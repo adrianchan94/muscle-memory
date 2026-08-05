@@ -128,7 +128,15 @@ function slug(s) {
 }
 function listSkillNames(dir) {
   try {
-    return readdirSync(dir).filter((n) => existsSync(join(dir, n, "SKILL.md")));
+    return readdirSync(dir).filter((n) => {
+      try {
+        if (lstatSync(join(dir, n)).isSymbolicLink())
+          return false;
+      } catch {
+        return false;
+      }
+      return existsSync(join(dir, n, "SKILL.md"));
+    });
   } catch {
     return [];
   }
@@ -147,10 +155,35 @@ function assertSafeSkillName(name) {
     throw new Error(`unsafe skill name: null byte`);
   return n;
 }
-function readSkill(dir, name) {
+function resolveSkillDir(root, name) {
   assertSafeSkillName(name);
+  const full = join(root, name);
+  let st;
   try {
-    return readFileSync(join(dir, name, "SKILL.md"), "utf8");
+    st = lstatSync(full);
+  } catch {
+    return full;
+  }
+  if (st.isSymbolicLink()) {
+    let target = "";
+    try {
+      target = realpathSync(full);
+    } catch {
+      throw new Error(`containment: skill dir '${name}' is a broken symlink — refusing`);
+    }
+    let outside = true;
+    try {
+      const rel = relative(realpathSync(root), target);
+      outside = !rel || rel.startsWith("..") || isAbsolute(rel);
+    } catch {}
+    throw new Error(`containment: skill dir '${name}' is a symlink${outside ? ` escaping the shelf root (${target})` : ""} — refusing`);
+  }
+  return full;
+}
+function readSkill(dir, name) {
+  const sd = resolveSkillDir(dir, name);
+  try {
+    return readFileSync(join(sd, "SKILL.md"), "utf8");
   } catch {
     return "";
   }
@@ -162,11 +195,13 @@ function isManaged(dir, name) {
   return readSkill(dir, name).includes(MM_TAG);
 }
 function writeSkill(dir, name, content) {
-  mkdirSync(join(dir, name), { recursive: true });
-  const tmp = join(dir, name, ".SKILL.md.tmp");
+  const sd = resolveSkillDir(dir, name);
+  mkdirSync(sd, { recursive: true });
+  resolveSkillDir(dir, name);
+  const tmp = join(sd, ".SKILL.md.tmp");
   writeFileSync(tmp, content);
-  renameSync(tmp, join(dir, name, "SKILL.md"));
-  return join(dir, name, "SKILL.md");
+  renameSync(tmp, join(sd, "SKILL.md"));
+  return join(sd, "SKILL.md");
 }
 var CATALOG_SYNC_DIR = join(STATE_DIR, "catalog-sync");
 var CATALOG_SYNC_BACKUP_DIR = join(CATALOG_SYNC_DIR, "backups");
@@ -433,7 +468,13 @@ function validateSupportPath(filePath) {
   return { ok: true };
 }
 function skillDirOf(name, ctx) {
-  return scanDirs(ctx).find((d) => existsSync(join(d, name, "SKILL.md"))) || null;
+  return scanDirs(ctx).find((d) => {
+    try {
+      return existsSync(join(resolveSkillDir(d, name), "SKILL.md"));
+    } catch {
+      return false;
+    }
+  }) ?? null;
 }
 function assertContained(root, full) {
   const base = realpathSync(root);
@@ -6943,7 +6984,7 @@ Load with muscle_memory_skill_read action:load, then invoke the normal Skill too
         action: { type: "string", enum: ["reflect", "graduate", "publish", "prune"], description: "Lifecycle action. All are reversible except publish, which writes to the shared catalog and needs approve: true" },
         mode: { type: "string", enum: ["staged", "auto"], description: "reflect mode; staged writes every result to the staging shelf and promotes nothing — graduate explicitly. auto promotes." },
         name: { type: "string", description: "staged skill name — for graduate" },
-        approve: { type: "boolean", description: "required for publish: confirms the sanitized skill may be written to the shared catalog" }
+        approve: { type: "boolean", description: "required for publish, unless the operator has set MM_PUBLISH=auto (standing approval for autopilot graduates). Confirms the sanitized skill may be written to the shared catalog" }
       },
       required: ["action"],
       additionalProperties: false

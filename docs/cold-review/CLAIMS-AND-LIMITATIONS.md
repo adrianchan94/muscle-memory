@@ -57,3 +57,21 @@ This is **early judged evidence from a single seat**. It is not a controlled exp
 - a way to make the roster auto-promote or auto-retire
 - a divergence between the shipped bundle and the source
 - any private path, credential, or personal identifier in the packed tarball
+
+## Publishing to the shared catalog
+
+Writing a skill to the shared Custom Skills catalog is the one irreversible lifecycle action, and
+it is gated two ways.
+
+- **Per-call approval.** `lifecycle_run(action: "publish")` refuses without `approve: true`.
+- **The carve-out, stated plainly.** If the operator sets `MM_PUBLISH=auto`, autopilot graduates
+  publish without a per-call approval. The environment variable **is** the approval: setting it is
+  a deliberate operator act, it defaults to off, and an attacker limited to writing inside the
+  state directory cannot flip it. Content is sanitized on that path exactly as on the manual one.
+
+So the honest claim is *per-call approval is required unless the operator has granted standing
+approval via `MM_PUBLISH=auto`* — not *every publish is individually approved*. Both statements
+were true of the manual path; only the first is true of the whole system.
+
+A reviewer should read the default as load-bearing: off means no autonomous loop reaches the
+shared catalog without a human first opting in.
