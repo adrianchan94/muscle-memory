@@ -10,16 +10,16 @@
   ],
   "tarball": {
     "name": "adrianchan94-muscle-memory-1.0.0-rc.3.tgz",
-    "sha256": "46829794b884e89ee5bcced09ac3bf775c426b70b096bd56d56acbb52caaa5cf",
-    "bytes": 264257,
-    "npmReportedSize": 264257,
-    "npmReportedUnpackedSize": 914821,
+    "sha256": "6a6fcdf88e2c6568e4ddfb789e77754346d0f1b0e8bb2d6c8b1825036d3d1069",
+    "bytes": 264782,
+    "npmReportedSize": 264782,
+    "npmReportedUnpackedSize": 916522,
     "fileCount": 23
   },
   "bundle": {
     "path": "mods/index.bundled.mjs",
-    "committedSha256": "fed340a72b3390a703a0e34e9e3fe67d4d45abdbdbd3a67700bcae02d52049db",
-    "rebuiltFromSourceSha256": "fed340a72b3390a703a0e34e9e3fe67d4d45abdbdbd3a67700bcae02d52049db",
+    "committedSha256": "01befd9b135cbf6b620c47cec43f8e42878c69f8e8fafaa2c7ea2b4ff853a8d1",
+    "rebuiltFromSourceSha256": "01befd9b135cbf6b620c47cec43f8e42878c69f8e8fafaa2c7ea2b4ff853a8d1",
     "parity": true
   },
   "shippedFiles": [
@@ -75,18 +75,18 @@
     },
     {
       "path": "mods/index.bundled.mjs",
-      "bytes": 347502,
-      "sha256": "fed340a72b3390a703a0e34e9e3fe67d4d45abdbdbd3a67700bcae02d52049db"
+      "bytes": 348371,
+      "sha256": "01befd9b135cbf6b620c47cec43f8e42878c69f8e8fafaa2c7ea2b4ff853a8d1"
     },
     {
       "path": "mods/index.ts",
-      "bytes": 108151,
-      "sha256": "e3f3edf5aee78a24c74c4b7dba43aa1ab813e564ed75f257df7d193a0e424f86"
+      "bytes": 108272,
+      "sha256": "164bf1dfed561032727aeec60d60ade0bb39331d51df9c4f8703082fbd9b4b74"
     },
     {
       "path": "mods/instrument.ts",
-      "bytes": 7959,
-      "sha256": "6a878ce911d197fea811201ac9420a62d2dff39d53fa513ea84a39c10524a8e4"
+      "bytes": 8670,
+      "sha256": "41d65f2c47a95af7ad6702a426ab8fd90cae3e2ed07893bf95c9a8cf12279454"
     },
     {
       "path": "mods/invocation.ts",

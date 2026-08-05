@@ -94,6 +94,23 @@ export function instrumentStatusLine(loaded: LoadedInstrumentKey): string | null
   return `INSTRUMENT KEY REFUSED · ${loaded.reason.replace(/_/g, " ")} · verified disabled (judged still works)`;
 }
 
+/**
+ * The status line, at most once per session, for the verified path only.
+ *
+ * A refused or uninitialised key disables verified evidence silently otherwise - the row simply
+ * lands unsigned and the operator finds out much later. Judged closeouts never see this: they
+ * work exactly as designed without a key, and nagging them would train people to ignore it.
+ */
+let noticeShown = false;
+export function instrumentSessionNotice(stateDir: string): string | null {
+  if (noticeShown) return null;
+  const line = instrumentStatusLine(loadInstrumentKey({ stateDir }));
+  if (!line) return null;
+  noticeShown = true;
+  return line;
+}
+export function __resetInstrumentNotice(): void { noticeShown = false; }
+
 // ── Signed evidence payload ─────────────────────────────────────────────────
 // Exact field set: an unknown or missing key fails verification rather than being ignored,
 // so nothing can ride along unsigned.

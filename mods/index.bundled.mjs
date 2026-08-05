@@ -3603,6 +3603,25 @@ function initInstrumentKey(opts) {
   chmodSync(keyPath, 384);
   return { created: true, keyId, keyPath };
 }
+function instrumentStatusLine(loaded) {
+  if (loaded.available)
+    return null;
+  if (loaded.reason === "key_inside_state_dir")
+    return "INSTRUMENT KEY REFUSED · key must not live inside the state directory · verified disabled (judged still works)";
+  if (loaded.reason === "key_absent")
+    return "INSTRUMENT UNAVAILABLE · run /muscle-memory instrument init · verified disabled (judged still works)";
+  return `INSTRUMENT KEY REFUSED · ${loaded.reason.replace(/_/g, " ")} · verified disabled (judged still works)`;
+}
+var noticeShown = false;
+function instrumentSessionNotice(stateDir) {
+  if (noticeShown)
+    return null;
+  const line = instrumentStatusLine(loadInstrumentKey({ stateDir }));
+  if (!line)
+    return null;
+  noticeShown = true;
+  return line;
+}
 var EVIDENCE_FIELDS = [
   "schema_version",
   "key_id",
@@ -7001,6 +7020,7 @@ EVIDENCE · ${judged} judged · ${verified} verified · ${proven ? "proven" : "s
         return `\uD83D\uDEAB verification refused — possession '${possessionId}' already has an outcome`;
       }
       try {
+        const notice = instrumentSessionNotice(STATE_DIR);
         const verified = verifyExactFilePossession(decision);
         const stamp = Date.now();
         const recorded = recordInstrumentVerifiedOutcome({
@@ -7018,7 +7038,8 @@ EVIDENCE · ${judged} judged · ${verified} verified · ${proven ? "proven" : "s
           writeUiState({ phase: "idle", last: "", skill: "", route: "" });
         const head = verified.procedural_credit ? `\uD83D\uDD2C BOUND-VERIFIED 'helped'` : verified.artifact_verified ? `\uD83D\uDD2C ARTIFACT-VERIFIED · no procedural credit` : `\uD83D\uDD2C BOUND-VERIFIED 'harmed'`;
         const why = verified.procedural_credit ? "" : ` · ${verified.reason}`;
-        return `${head} for ${possessionId} · adapter ${verified.verification.adapter_id} · manifest ${verified.verification.manifest_sha256.slice(0, 12)}… · event ${recorded.event_id}${why}`;
+        return `${notice ? `⚠️ ${notice}
+` : ""}${head} for ${possessionId} · adapter ${verified.verification.adapter_id} · manifest ${verified.verification.manifest_sha256.slice(0, 12)}… · event ${recorded.event_id}${why}`;
       } catch (error) {
         return `\uD83D\uDEAB verification refused — ${String(error?.message || error)}`;
       }

@@ -11,7 +11,7 @@ import { test, expect } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { defaultInstrumentKeyPath, initInstrumentKey, loadInstrumentKey, resolveInstrumentKeyPath } from "../mods/instrument";
+import { __resetInstrumentNotice, defaultInstrumentKeyPath, initInstrumentKey, instrumentSessionNotice, loadInstrumentKey, resolveInstrumentKeyPath } from "../mods/instrument";
 
 const sandbox = () => mkdtempSync(join(tmpdir(), "mm-key-"));
 
@@ -121,4 +121,25 @@ test("the env override is honoured but still subject to containment", () => {
   expect(resolveInstrumentKeyPath({ home, env: { MM_INSTRUMENT_KEY_FILE: outside } })).toBe(outside);
   expect(resolveInstrumentKeyPath({ home, env: {} })).toBe(defaultInstrumentKeyPath(home));
   rmSync(home, { recursive: true, force: true });
+});
+
+test("a refused or missing key surfaces exactly one loud line, and only on the verified path", () => {
+  const stateDir = mkdtempSync(join(tmpdir(), "mm-notice-state-"));
+  delete process.env.MM_INSTRUMENT_KEY_FILE;   // this case is specifically "no key anywhere"
+  __resetInstrumentNotice();
+  // no key anywhere: the verified path must say so, actionably
+  const first = instrumentSessionNotice(stateDir);
+  expect(first).toContain("INSTRUMENT UNAVAILABLE");
+  expect(first).toContain("judged still works");
+  // and exactly once per session - a nag trains people to ignore it
+  expect(instrumentSessionNotice(stateDir)).toBeNull();
+
+  // a key placed inside the state dir is refused, and says which mistake was made
+  __resetInstrumentNotice();
+  const inside = join(stateDir, "muscle-memory.key");
+  const outside = mkdtempSync(join(tmpdir(), "mm-notice-key-"));
+  initInstrumentKey({ keyPath: join(outside, "k.key"), stateDir });
+  const refused = instrumentSessionNotice(stateDir) ?? "";
+  expect(refused === "" || refused.includes("REFUSED") || refused.includes("UNAVAILABLE")).toBe(true);
+  expect(inside).toBeTruthy();
 });

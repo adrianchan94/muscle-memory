@@ -1,4 +1,4 @@
-import { beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
@@ -13,6 +13,10 @@ import { initInstrumentKey } from "../mods/instrument";
 const tools = new Map<string, any>();
 const commands = new Map<string, any>();
 let renderPanel: null | (() => string[]) = null;
+
+// The key env var is process-global: leaving it set leaks a usable key into every test file
+// that runs after this one, which is how the last cross-file dependency hid.
+afterEach(() => { delete process.env.MM_INSTRUMENT_KEY_FILE; });
 
 beforeEach(() => {
   // This suite exercises the verified-evidence path, which refuses to sign without an

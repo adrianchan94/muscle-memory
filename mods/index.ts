@@ -43,7 +43,7 @@ import { CURATOR, aggregateTelemetry, buildRegistry, bumpUsage, churnSignal, cov
 import { AUTOPILOT_DEFAULT, AutopilotMode, REVIEW_PROMPT, SemanticFn, applySemanticEvidence, autopilotPlan, buildEvidenceManifest, executeAutopilotPlan, forkAuthor, graduateStagedSkill, isHighConfidenceCreate, loadHandledReflects, managedView, normalizePrescriptionQuery, pickUpdateTarget, reflectSignature, retrievePreferences, reviewAndAuthor, routeSkill, runAutopilot, runReflectiveReview, searchSkills, streamChunkText } from "./autopilot";
 import { friendlyRouteLabel, renderAgentBoxScore, renderMuscleMemoryPanel, summarizeReflectActions } from "./ui";
 import { observeToolStart, observeToolEnd } from "./invocation";
-import { initInstrumentKey } from "./instrument";
+import { initInstrumentKey, instrumentSessionNotice } from "./instrument";
 import { claimBearingVerdict, buildShareCardPayload, loadPossessionEvents, pendingPossessionViews, recordInstrumentVerifiedOutcome, recordPossessionEvent, summarizePossessionLedger, type DecisionRoute, type DifficultyTier, type OutcomeResult, type EvidenceTier, type LifecycleAction, type PossessionDecisionEvent } from "./possessions";
 import { bindExactFileVerificationTask, createExactFileVerificationTask, verifyExactFilePossession } from "./verification";
 import { collectWins, renderWins } from "./wins";
@@ -1311,6 +1311,7 @@ export default function activate(letta: any) {
         return `🚫 verification refused — possession '${possessionId}' already has an outcome`;
       }
       try {
+        const notice = instrumentSessionNotice(STATE_DIR);
         const verified = verifyExactFilePossession(decision);
         const stamp = Date.now();
         const recorded = recordInstrumentVerifiedOutcome({
@@ -1333,7 +1334,7 @@ export default function activate(letta: any) {
             ? `🔬 ARTIFACT-VERIFIED · no procedural credit`
             : `🔬 BOUND-VERIFIED 'harmed'`;
         const why = verified.procedural_credit ? "" : ` · ${verified.reason}`;
-        return `${head} for ${possessionId} · adapter ${verified.verification.adapter_id} · manifest ${verified.verification.manifest_sha256.slice(0, 12)}… · event ${recorded.event_id}${why}`;
+        return `${notice ? `⚠️ ${notice}\n` : ""}${head} for ${possessionId} · adapter ${verified.verification.adapter_id} · manifest ${verified.verification.manifest_sha256.slice(0, 12)}… · event ${recorded.event_id}${why}`;
       } catch (error: any) {
         return `🚫 verification refused — ${String(error?.message || error)}`;
       }
