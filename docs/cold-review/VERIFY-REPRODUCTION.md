@@ -1,154 +1,59 @@
-# Verify it yourself — `1.0.0-rc.3`
+# Verify this candidate yourself
 
-Every number we assert is reproducible from a clean clone. If any command below disagrees with our stated value, that is a **P0** finding.
+Generated at seal time from the sealed artifact. Do not hand-edit —
+the generator is `scripts/emit-freeze-docs.mjs`.
 
-Requires: `node` ≥ 20, `npm`, and `bun` (the bundler and test runner).
+## The reproduction contract
 
-## 0 · Clone the exact candidate
+`npm pack` produces a gzip-wrapped tar. The **gzip envelope** varies by packer version and
+compression level; the **tar stream** inside does not. So the contract is the decompressed
+stream:
 
-```bash
-git clone https://github.com/adrianchan94/muscle-memory.git
-cd muscle-memory
-git checkout release/muscle-memory-v1
-git rev-parse HEAD
-```
-
-The frozen candidate commit is recorded in `FREEZE.txt` in this directory. If `git rev-parse HEAD` does not match it, you are not reviewing the frozen candidate.
-
-```bash
-git status --porcelain   # must print nothing
-git diff --check         # must print nothing (no whitespace/conflict damage)
-```
-
-## 1 · Reproduce the exact tarball
-
-The `.tgz` is deliberately **not committed**. Rebuild it:
-
-```bash
-npm ci
-npm run build
-npm pack
-shasum -a 256 adrianchan94-muscle-memory-1.0.0-rc.3.tgz
-wc -c  < adrianchan94-muscle-memory-1.0.0-rc.3.tgz
-```
-
-Expected:
-
-```
-778c6c598de86b905d1661d9709851a2a2c66b2c25aa24607f6a1e39f94a51df
-265276
-```
-
-> **Two different claims, kept apart.** The published `.tgz` sha256 identifies the release
-> object and is exact for the bytes we publish. It is **not** a cross-toolchain guarantee: gzip
-> framing is packer-dependent, so a different npm can wrap byte-identical content in a different
-> envelope. Measured here: re-gzipping the same tar at levels 1/6/9 gives three different
-> envelope hashes and one identical inner tar.
->
-> The portable invariant is the **decompressed tar stream**, plus the per-file manifest and the
-> bundle hash:
->
-> ```bash
-> gunzip -c adrianchan94-muscle-memory-1.0.0-rc.3.tgz | shasum -a 256
-> ```
->
-> A differing `.tgz` hash with an identical tar stream is **not** a defect. A differing tar
-> stream or file manifest **is**.
->
-> If `npm pack` fails with `EACCES` / `EEXIST` under `~/.npm/_cacache`, your local npm cache is damaged — that is your machine, not the candidate. Re-run with an isolated cache: `npm_config_cache=$(mktemp -d) npm pack`.
-
-## 2 · Reproduce the file manifest and source↔bundle parity
-
-```bash
-node scripts/dump-package-manifest.mjs --stdout
-```
-
-This rebuilds the bundle from `mods/index.ts` into a temp dir and compares it to the committed `mods/index.bundled.mjs`.
-
-Assertions that must all be `true`:
-
-- `bundleMatchesSource` — the shipped bundle is the source, compiled
-- `noReviewDocsInTarball` — this review directory does **not** ship to consumers
-- `everyShippedFileHashed`
-
-The script exits non-zero if any assertion fails.
-
-## 3 · Reproduce the tool surface
-
-```bash
-node scripts/dump-tool-schemas.mjs --stdout
-```
-
-This packs, installs into a throwaway consumer, activates the bundle against a fake Letta host, and dumps what actually registers.
-
-Assertions that must all be `true`:
-
-- `defaultSurfaceIsLean` — default surface is ≤3 tools
-- `prescribeIsDedicatedTwoField` — exactly `task` + `gap_observed`
-- `prescribeRejectsExtraFields` — `additionalProperties: false`
-- `advancedStrictlyExtendsDefault` — `MM_ADVANCED=on` adds, never removes
-
-Expected: default 3 tools, advanced 9.
-
-## 4 · Run the gates
-
-```bash
-npm test          # unit + integration
-npm run verify    # build + test + routing eval + live smoke + package smoke
-node scripts/final-gate.mjs
-```
-
-Our recorded results on the frozen commit — all exit code `0`:
-
-| Gate | Result |
+| Artifact | sha256 |
 |---|---|
-| `npm test` | all pass, 0 fail - exact counts in the sealed `MANIFEST.json` (`testCounts`), never restated by hand |
-| `npm run verify` | all stages green · `PACKAGE SMOKE: PASS` · `privatePathHits: []` |
-| `node scripts/final-gate.mjs` | `"verdict": "PASS_RELEASE_CANDIDATE"` · checked-in bundle sha == independent rebuild sha |
+| packed tarball (outer envelope, this machine) | `778c6c598de86b905d1661d9709851a2a2c66b2c25aa24607f6a1e39f94a51df` |
+| **decompressed tar stream (the contract)** | `41e8b19483ad79a07694c6a42e0b5bc7573b33941e8432439c77336f2860b259` |
+| bundled entry `mods/index.bundled.mjs` | `fb2bd37a3b33f22202c1f616f94118951a0052919b35afb8c140f598b715ea21` |
+| packed file count | 23 |
 
-## 5 · Fresh-temp install and runtime activation
-
-```bash
-npm run package:smoke
+```sh
+npm ci && npm run build && npm pack
+gunzip -c adrianchan94-muscle-memory-1.0.0-rc.3.tgz | shasum -a 256
+# must equal the tar-stream sha above
 ```
 
-It packs the candidate, installs it into a **fresh temp consumer**, activates the bundle, registers a skill, drives `register_exact_file_verification` → `prescribe` → `verify_agent_possession`, and separately drives the lean `muscle_memory_prescribe` → `muscle_memory_close` path. It asserts a 64-hex tarball sha, bundle hash equality, and `privatePathHits: []`.
+If the outer .tgz sha differs but the tar-stream sha matches, **the artifact is correct** and
+you are looking at gzip-envelope drift. That is expected across npm/node versions and is not
+a defect to report.
 
-## 6 · Contamination / privacy scan
+## Gates
 
-```bash
-git ls-files -z | xargs -0 grep -rinE "prenetics|im8|adrianwebflows|/Users/" | grep -v CONTRIBUTING.md
+| Command | Expected |
+|---|---|
+| `npm test` | 319 pass, 0 fail, 42 files — counted from a real run at seal time |
+| `npm run verify` | all stages green, exit 0 |
+| `node scripts/final-gate.mjs` | `PASS_RELEASE_CANDIDATE` |
+| `node scripts/package-smoke.mjs` | `PASS`, `privatePathHits: []` |
+| `node scripts/dump-package-manifest.mjs` | regenerates `PACKAGE-MANIFEST.json` identically |
 
-mkdir -p /tmp/mm-scan
-tar -xzf adrianchan94-muscle-memory-1.0.0-rc.3.tgz -C /tmp/mm-scan
-grep -rinE "prenetics|im8|adrianwebflows|/Users/" /tmp/mm-scan || echo "clean"
-```
+Test counts are generated, never restated by hand. Earlier revisions of this file cited a
+`MANIFEST.json` `testCounts` field that did not exist; the numbers above come from the run
+itself.
 
-Known and intended matches:
+## Environment
 
-- `CONTRIBUTING.md` names `Prenetics` / `IM8` **only** inside the rule forbidding them. Not a leak.
-- `demo.gif` (repo only, **not** packed) contains the byte sequence `im8` at offset 814317 inside LZW-compressed pixel data. Binary noise, not text.
+| Tool | Version at seal time |
+|---|---|
+| node | v26.0.0 |
+| bun | 1.3.14 |
+| npm | 11.12.1 |
 
-## 7 · CI on clean Linux
+The test suite runs under `bun test`. A different bun version may report the same assertions
+with different timings; counts should match exactly.
 
-Runs on `ubuntu-latest`. Run IDs are deliberately **not** listed in this file — a commit that
-edits this file changes the head, so any inline ID would name a different commit than the one
-you are reviewing.
+## Offline notes
 
-The authoritative run IDs for the exact frozen commit are in the sealed archive's `MANIFEST.json`
-(field `ci`). To confirm independently:
-
-```bash
-gh run list --branch release/muscle-memory-v1 \
-  --json headSha,conclusion,url --jq '.[] | select(.headSha=="<FROZEN_SHA>")'
-```
-
-Every run for the frozen commit must be `success`.
-
-### Why CI history before this range is red
-
-Earlier runs failed **only on Linux** while passing on macOS. The cause was a real defect, not a flake: `mods/core.ts` captured the global skill shelf at *module load*, so the shelf depended on which file imported `mods/core` first. A test that sets `MM_GLOBAL_SKILLS_DIR` at module scope therefore redirected the runtime for every file loaded after it — and file ordering differs between platforms. The shelf is now resolved per call. Worth re-deriving yourself; it is the most interesting bug in the range.
-
-## 8 · Pull request
-
-<https://github.com/adrianchan94/muscle-memory/pull/2>
+The snapshot is a content export (`git archive`) and carries no git history, so
+`git status` / `git diff` inside it are not meaningful — history verification is done by
+comparing the frozen commit SHA on GitHub. The final gate's `diff-check` step is skipped in a
+git-less export by design; that is not a failure.

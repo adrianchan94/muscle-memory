@@ -1,5 +1,7 @@
 MUSCLE MEMORY — COLD REVIEW FREEZE RECORD
 =========================================
+GENERATED at seal time. Every number below is derived from the artifact being sealed.
+Do not hand-edit: the generator is scripts/emit-freeze-docs.mjs.
 
 CANDIDATE
   package            @adrianchan94/muscle-memory
@@ -7,45 +9,40 @@ CANDIDATE
   status             RELEASE CANDIDATE — not published, not tagged, not merged
 
 EXACT BYTES
-  packed tarball     778c6c598de86b905d1661d9709851a2a2c66b2c25aa24607f6a1e39f94a51df
+  packed tarball     778c6c598de86b905d1661d9709851a2a2c66b2c25aa24607f6a1e39f94a51df          <- CURRENT
   tarball bytes      265276
-  bundled entry      see PACKAGE-MANIFEST.json -> bundle.committedSha256
-                     (derived, never restated by hand; a hand-copied bundle hash
-                      already went stale once and was caught in custody review)
-  packed file set    MOD.md, CHANGELOG.md, README.md, LICENSE, mods/   (21 files)
+  packed file count  23
+  bundled entry      fb2bd37a3b33f22202c1f616f94118951a0052919b35afb8c140f598b715ea21
+  tar-stream sha256  41e8b19483ad79a07694c6a42e0b5bc7573b33941e8432439c77336f2860b259
 
-  The tarball is NOT committed. Rebuild it with `npm ci && npm run build && npm pack`
-  and compare. See VERIFY-REPRODUCTION.md.
+  REPRODUCTION CONTRACT: the decompressed tar stream, not the gzip envelope.
+  `npm pack` output is gzip-wrapped, and the envelope varies with packer and
+  compression level while the tar stream inside stays identical. If your outer
+  .tgz sha differs but the tar-stream sha matches, the artifact is correct.
+  Gzip-envelope drift is NOT a defect and NOT a P0.
+
+    shasum -a 256 <your>.tgz              # outer envelope — may differ
+    gunzip -c <your>.tgz | shasum -a 256  # must equal tar-stream sha256 above
 
 FROZEN COMMIT
   branch             release/muscle-memory-v1
-  pull request       https://github.com/adrianchan94/muscle-memory/pull/2
+  frozen commit      9d5093eb6560016d0745df47b913ca0ef192a84a
 
-  The frozen commit SHA is the head of PR #2 at the moment the offline archive was
-  sealed, and is recorded authoritatively in that archive's MANIFEST. A file cannot
-  contain its own commit hash, so this record deliberately does not restate it.
-
-  To confirm you are on the frozen commit:
-    git rev-parse HEAD          # compare against the archive MANIFEST
+  To confirm you are on it:
+    git rev-parse HEAD          # must equal the frozen commit above
     git status --porcelain      # must be empty
     git diff --check            # must be empty
 
 GATES ON THE FROZEN TREE
-  npm test                      counts are NOT restated here - see MANIFEST.json
-                                testCounts (machine-owned; hand-copied numbers went stale twice)
+  npm test                      319 pass, 0 fail across 42 files
+                                (counted from a real run at seal time, not prose)
   npm run verify                all stages green         exit 0
   node scripts/final-gate.mjs   PASS_RELEASE_CANDIDATE   exit 0
   package smoke                 PASS, privatePathHits []
 
-  CI (ubuntu-latest) for the frozen commit:
-    Run IDs are NOT restated here. Any commit that edits this file changes the head,
-    so an inline run ID is guaranteed to name a different commit than the one you are
-    reviewing. That mismatch already voided one review; the structure now prevents it.
-
-    The authoritative run IDs for the exact frozen commit are in the sealed archive's
-    MANIFEST (field: ci). To look them up yourself:
-      gh run list --branch release/muscle-memory-v1 \
-        --json headSha,conclusion,url --jq '.[] | select(.headSha=="<FROZEN_SHA>")'
+  CI (ubuntu-latest) for this exact frozen commit:
+    https://github.com/adrianchan94/muscle-memory/actions/runs/30996457269
+    https://github.com/adrianchan94/muscle-memory/actions/runs/30996455983
 
 GENERATED EVIDENCE (regenerate and diff)
   node scripts/dump-package-manifest.mjs   -> PACKAGE-MANIFEST.json
@@ -53,25 +50,13 @@ GENERATED EVIDENCE (regenerate and diff)
   Both exit non-zero if their assertions fail.
 
 INVALIDATION RULE
-  Any change to MOD.md, CHANGELOG.md, README.md, LICENSE, or mods/ changes the packed
-  bytes and VOIDS this freeze. A new candidate identity must be minted and both cold
-  reviews re-run. This has already happened six times in this cycle:
-
-    cbfcbf6d…  265276 B  VOID — superseded by the canonical-research-record wording
-    f0f63ae5…  265276 B  VOID — superseded by the README product-hierarchy rewrite
-    c68e29d2…  265276 B  VOID — superseded by the research kit and the username-leak fix
-    99b2a80c…  265276 B  VOID — superseded by the changelog entry describing that fix
-    00f094c2…  265276 B  VOID — superseded by the cold-review P1 repair cut
-    1a7b35a0…  265276 B  VOID — superseded by the meshAgentLabel privacy repair
-    f44e71ca…  265276 B  CURRENT
-
-  Changes under docs/ do NOT affect the packed bytes; docs/ is excluded from the
+  Any change to the packaged files (MOD.md, CHANGELOG.md, README.md, LICENSE, mods) changes the packed bytes and
+  VOIDS this freeze. Changes under docs/ and scripts/ do NOT: both are excluded from the
   package `files` field, and PACKAGE-MANIFEST.json asserts that no review doc ships.
 
-NON-INHERITANCE
-  RC3 inherits no prior qualification. The historical product tarball e2b9c4a1…,
-  cold-review archive v6 cb951cbe…, and owner candidate d97875fa… are preserved as
-  history. None of their seals, reviews, or approvals transfer to these bytes.
+  The full list of superseded pins is in the sealed cold-review brief, under
+  "Void pins — do not review these". If your archive, brief, or checkout shows any of
+  them, you have the wrong bytes.
 
 BLOCKED AT FREEZE TIME
   no git tag · no GitHub release (not even a draft) · no npm publish ·

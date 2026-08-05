@@ -112,6 +112,16 @@ const manifest = {
 
 // Derived from the version, not a baked-in date: a reseal on a later day must not
 // inherit a filename that misstates when it was sealed.
+// Regenerate the freeze record and reproduction guide from live truth before sealing, so the
+// sealed brief can never contradict the artifact it ships with. Hand-maintained numbers in these
+// two files drifted (21 vs 23 packed files, a superseded tarball named CURRENT) and that is a
+// publish blocker regardless of runtime quality.
+{
+  const { emitFreezeDocs } = await import("./emit-freeze-docs.mjs");
+  const out = emitFreezeDocs({ manifest, ciUrls, frozenCommit });
+  console.error(`freeze docs regenerated: ${out.fileCount} packed files · ${out.counts.pass} pass / ${out.counts.fail} fail`);
+}
+
 const archiveName = `mm-v${pkg.version}-cold-review.tar.gz`;
 
 // ── 5b · the brief is GENERATED from the derived values, never hand-written ──
