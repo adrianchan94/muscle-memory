@@ -9,11 +9,11 @@ CANDIDATE
   status             RELEASE CANDIDATE — not published, not tagged, not merged
 
 EXACT BYTES
-  packed tarball     778c6c598de86b905d1661d9709851a2a2c66b2c25aa24607f6a1e39f94a51df          <- CURRENT
-  tarball bytes      265276
+  packed tarball     66c0522c2971af543f6cce8ffd2e35db83e0b72788cb9f0b469b0c69a3219783          <- CURRENT
+  tarball bytes      267800
   packed file count  23
-  bundled entry      fb2bd37a3b33f22202c1f616f94118951a0052919b35afb8c140f598b715ea21
-  tar-stream sha256  41e8b19483ad79a07694c6a42e0b5bc7573b33941e8432439c77336f2860b259
+  bundled entry      d870254888c357ba853d66ea8770516dbbde6cdb0fae315e7fb92541012e2408
+  tar-stream sha256  bf2455a7c75d97987c10de4513433baac1070069a4345da1e33c8a7a7aae7d4a
 
   REPRODUCTION CONTRACT: the decompressed tar stream, not the gzip envelope.
   `npm pack` output is gzip-wrapped, and the envelope varies with packer and
@@ -39,7 +39,7 @@ FROZEN COMMIT
     git diff --check            # must be empty
 
 GATES ON THE FROZEN TREE
-  npm test                      319 pass, 0 fail across 42 files
+  npm test                      323 pass, 0 fail across 42 files
                                 (counted from a real run at seal time, not prose)
   npm run verify                all stages green         exit 0
   node scripts/final-gate.mjs   PASS_RELEASE_CANDIDATE   exit 0
