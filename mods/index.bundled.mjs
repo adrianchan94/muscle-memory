@@ -1,6 +1,6 @@
 // mods/index.ts
-import { mkdirSync as mkdirSync9, readFileSync as readFileSync11, existsSync as existsSync11, writeFileSync as writeFileSync10, readdirSync as readdirSync4 } from "node:fs";
-import { join as join13 } from "node:path";
+import { mkdirSync as mkdirSync10, readFileSync as readFileSync12, existsSync as existsSync12, writeFileSync as writeFileSync10, readdirSync as readdirSync4 } from "node:fs";
+import { join as join14 } from "node:path";
 import { randomBytes as randomBytes2 } from "node:crypto";
 
 // mods/core.ts
@@ -3462,42 +3462,236 @@ function renderMuscleMemoryPanel(state) {
   return resting();
 }
 
+// mods/invocation.ts
+import { appendFileSync as appendFileSync2, existsSync as existsSync5, mkdirSync as mkdirSync5, readFileSync as readFileSync5 } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { dirname as dirname2, join as join6 } from "node:path";
+var INVOCATION_LOG_PATH = join6(STATE_DIR, "invocations.jsonl");
+var SCHEMA = "mm.invocation.v1";
+var SAFE = /^[a-z0-9][a-z0-9._:-]{0,127}$/i;
+var pending = new Map;
+function appendInvocation(event) {
+  mkdirSync5(dirname2(INVOCATION_LOG_PATH), { recursive: true });
+  appendFileSync2(INVOCATION_LOG_PATH, `${JSON.stringify(event)}
+`, "utf8");
+}
+function loadInvocations() {
+  if (!existsSync5(INVOCATION_LOG_PATH))
+    return [];
+  const rows = [];
+  for (const line of readFileSync5(INVOCATION_LOG_PATH, "utf8").split(`
+`)) {
+    const text = line.trim();
+    if (!text)
+      continue;
+    try {
+      const raw = JSON.parse(text);
+      if (raw?.schema !== SCHEMA)
+        continue;
+      if (!SAFE.test(String(raw.possession_id ?? "")) || !SAFE.test(String(raw.invocation_id ?? "")))
+        continue;
+      rows.push(raw);
+    } catch {}
+  }
+  return rows;
+}
+function qualifyingInvocation(opts) {
+  const rows = (opts.invocations ?? loadInvocations()).filter((row) => row.possession_id === opts.possessionId && row.decision_event_id === opts.decisionEventId && row.skill === opts.skill && row.started_at >= opts.baselineAt && row.ended_at >= row.started_at && row.ended_at <= opts.verifiedAt);
+  return rows.length === 1 ? rows[0] : null;
+}
+function observeToolStart(event, now = Date.now()) {
+  if (String(event?.toolName ?? "") !== "Skill")
+    return;
+  const skill = String(event?.args?.skill ?? "");
+  const callId = String(event?.toolCallId ?? "");
+  if (!skill || !callId || !SAFE.test(callId))
+    return;
+  pending.set(callId, { skill, startedAt: now });
+  if (pending.size > 256) {
+    const first = pending.keys().next().value;
+    if (first !== undefined)
+      pending.delete(first);
+  }
+}
+function observeToolEnd(event, openPossessions, now = Date.now()) {
+  const callId = String(event?.toolCallId ?? "");
+  const started = callId ? pending.get(callId) : undefined;
+  if (!started)
+    return null;
+  pending.delete(callId);
+  const status = String(event?.status ?? "");
+  const ok = status ? status === "success" : event?.ok ?? !(event?.isError || event?.error);
+  if (!ok)
+    return null;
+  const matches = openPossessions.filter((row) => row.skill === started.skill);
+  if (matches.length !== 1)
+    return null;
+  const invocation = {
+    schema: SCHEMA,
+    invocation_id: `inv-${randomUUID()}`,
+    possession_id: matches[0].possession_id,
+    decision_event_id: matches[0].event_id,
+    skill: started.skill,
+    call_id: callId,
+    started_at: started.startedAt,
+    ended_at: now,
+    nonce: randomUUID()
+  };
+  appendInvocation(invocation);
+  return invocation;
+}
+
+// mods/instrument.ts
+import { createHash as createHash2, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { chmodSync, existsSync as existsSync6, mkdirSync as mkdirSync6, readFileSync as readFileSync6, realpathSync, statSync, writeFileSync as writeFileSync5 } from "node:fs";
+import { homedir as homedir2 } from "node:os";
+import { dirname as dirname3, join as join7, resolve, sep } from "node:path";
+function defaultInstrumentKeyPath(home = homedir2()) {
+  return join7(home, ".letta", "instrument", "muscle-memory.key");
+}
+function resolveInstrumentKeyPath(opts = {}) {
+  const env = opts.env ?? process.env;
+  const override = String(env.MM_INSTRUMENT_KEY_FILE || "").trim();
+  return override ? resolve(override) : defaultInstrumentKeyPath(opts.home ?? homedir2());
+}
+function isInsideStateDir(candidate, stateDir) {
+  const real = (p) => {
+    try {
+      return realpathSync(p);
+    } catch {
+      return resolve(p);
+    }
+  };
+  const key = real(candidate);
+  const keyDir = real(dirname3(candidate));
+  const state = real(stateDir);
+  const under = (p) => p === state || p.startsWith(state + sep);
+  return under(key) || under(keyDir);
+}
+function loadInstrumentKey(opts) {
+  const keyPath = opts.keyPath ?? resolveInstrumentKeyPath({ env: opts.env });
+  if (isInsideStateDir(keyPath, opts.stateDir))
+    return { available: false, reason: "key_inside_state_dir", keyPath };
+  if (!existsSync6(keyPath))
+    return { available: false, reason: "key_absent", keyPath };
+  const mode = statSync(keyPath).mode & 511;
+  if (mode !== 384)
+    return { available: false, reason: "key_permissions", keyPath, detail: mode.toString(8) };
+  const dirMode = statSync(dirname3(keyPath)).mode & 511;
+  if (dirMode & 63)
+    return { available: false, reason: "key_dir_permissions", keyPath, detail: dirMode.toString(8) };
+  const raw = readFileSync6(keyPath, "utf8").trim();
+  const [keyId, material] = raw.split(".");
+  if (!keyId || !material || !/^[a-z0-9]{8}$/.test(keyId))
+    return { available: false, reason: "key_malformed", keyPath };
+  return { available: true, keyId, secret: Buffer.from(material, "base64url"), keyPath };
+}
+function initInstrumentKey(opts) {
+  const keyPath = opts.keyPath ?? resolveInstrumentKeyPath({ env: opts.env });
+  if (isInsideStateDir(keyPath, opts.stateDir)) {
+    throw new Error("refusing to create the instrument key inside the state directory; it must live outside the directory whose contents it authenticates");
+  }
+  const existing = loadInstrumentKey({ keyPath, stateDir: opts.stateDir });
+  if (existing.available)
+    return { created: false, keyId: existing.keyId, keyPath };
+  mkdirSync6(dirname3(keyPath), { recursive: true, mode: 448 });
+  chmodSync(dirname3(keyPath), 448);
+  const material = randomBytes(32);
+  const keyId = createHash2("sha256").update(material).digest("hex").slice(0, 8);
+  writeFileSync5(keyPath, `${keyId}.${material.toString("base64url")}
+`, { mode: 384 });
+  chmodSync(keyPath, 384);
+  return { created: true, keyId, keyPath };
+}
+var EVIDENCE_FIELDS = [
+  "schema_version",
+  "key_id",
+  "nonce",
+  "timestamp",
+  "possession_id",
+  "decision_event_id",
+  "skill",
+  "task_id",
+  "task_class",
+  "manifest_sha256",
+  "baseline_sha256",
+  "baseline_captured_at",
+  "expected_sha256",
+  "final_sha256",
+  "invocation_receipt_id",
+  "verifier_id",
+  "verifier_version",
+  "target_rel",
+  "result_class"
+];
+function canonicalEvidenceBytes(payload) {
+  if (!payload || typeof payload !== "object")
+    throw new Error("evidence payload must be an object");
+  const raw = payload;
+  if (Object.keys(raw).length !== EVIDENCE_FIELDS.length)
+    throw new Error("evidence payload field count mismatch");
+  const canonical = {};
+  for (const field of [...EVIDENCE_FIELDS].sort()) {
+    if (!(field in raw))
+      throw new Error(`evidence payload missing '${field}'`);
+    canonical[field] = raw[field];
+  }
+  return Buffer.from(JSON.stringify(canonical), "utf8");
+}
+function signEvidencePayload(payload, key) {
+  return createHmac("sha256", key.secret).update(canonicalEvidenceBytes(payload)).digest("hex");
+}
+function verifyEvidenceSignature(payload, signature, key) {
+  let expected;
+  try {
+    expected = Buffer.from(signEvidencePayload(payload, key), "hex");
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : "malformed payload" };
+  }
+  if (typeof signature !== "string" || !/^[a-f0-9]{64}$/i.test(signature))
+    return { ok: false, reason: "malformed signature" };
+  const actual = Buffer.from(signature, "hex");
+  if (actual.length !== expected.length)
+    return { ok: false, reason: "length mismatch" };
+  return timingSafeEqual(actual, expected) ? { ok: true } : { ok: false, reason: "signature mismatch" };
+}
+
 // mods/possessions.ts
 import { createHash as createHash4 } from "node:crypto";
-import { appendFileSync as appendFileSync2, existsSync as existsSync7, mkdirSync as mkdirSync7, readFileSync as readFileSync7 } from "node:fs";
-import { dirname as dirname3, join as join8 } from "node:path";
+import { appendFileSync as appendFileSync3, existsSync as existsSync8, mkdirSync as mkdirSync8, readFileSync as readFileSync8 } from "node:fs";
+import { dirname as dirname4, join as join9 } from "node:path";
 
 // mods/verification.ts
 import {
-  chmodSync,
+  chmodSync as chmodSync2,
   closeSync,
   constants,
-  existsSync as existsSync5,
+  existsSync as existsSync7,
   fstatSync,
   lstatSync as lstatSync2,
-  mkdirSync as mkdirSync5,
+  mkdirSync as mkdirSync7,
   openSync,
-  readFileSync as readFileSync5,
-  realpathSync,
-  statSync,
-  writeFileSync as writeFileSync5
+  readFileSync as readFileSync7,
+  realpathSync as realpathSync2,
+  statSync as statSync2,
+  writeFileSync as writeFileSync6
 } from "node:fs";
-import { createHash as createHash2, timingSafeEqual } from "node:crypto";
-import { isAbsolute, join as join6, relative as relative2, resolve, sep } from "node:path";
+import { createHash as createHash3, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
+import { isAbsolute, join as join8, relative as relative2, resolve as resolve2, sep as sep2 } from "node:path";
 var EXACT_FILE_ADAPTER_ID = "mm.exact-file-sha256.v1";
 var VERIFICATION_TASK_SCHEMA = "mm.verification-task.exact-file.v1";
 var VERIFICATION_BINDING_SCHEMA = "mm.verification-binding.v1";
 var VERIFICATION_RECEIPT_SCHEMA = "mm.verification-receipt.v1";
-var VERIFICATION_TASK_DIR = join6(STATE_DIR, "verification-tasks");
+var VERIFICATION_TASK_DIR = join8(STATE_DIR, "verification-tasks");
 var ADAPTER_VERSION = "1";
 var ROOT_ID = "configured";
 var SAFE_SLUG = /^[a-z0-9][a-z0-9-]{0,79}$/;
 var SAFE_ID = /^[a-z0-9][a-z0-9._:-]{0,127}$/i;
 var SHA256 = /^[a-f0-9]{64}$/;
-var TASK_KEYS = new Set(["schema", "adapter_id", "adapter_version", "task_id", "task_class", "registered_at", "root_id", "root_identity_sha256", "target_rel", "expected_sha256"]);
+var TASK_KEYS = new Set(["schema", "adapter_id", "adapter_version", "task_id", "task_class", "registered_at", "root_id", "root_identity_sha256", "target_rel", "expected_sha256", "baseline_sha256"]);
 var receiptCustody = new WeakSet;
 var BINDING_KEYS = new Set(["schema", "adapter_id", "adapter_version", "task_id", "task_class", "manifest_sha256"]);
-var RECEIPT_KEYS = new Set(["schema", "adapter_id", "adapter_version", "task_id", "task_class", "possession_id", "decision_event_id", "manifest_sha256", "artifact_sha256", "matched", "verified_at"]);
+var RECEIPT_KEYS = new Set(["schema", "adapter_id", "adapter_version", "task_id", "task_class", "possession_id", "decision_event_id", "manifest_sha256", "artifact_sha256", "matched", "procedural_credit", "verified_at"]);
 function exactObject(input, keys, label) {
   if (!input || typeof input !== "object" || Array.isArray(input))
     throw new Error(`${label} must be an object`);
@@ -3537,12 +3731,12 @@ function normalizeInstrumentVerificationReceipt(input) {
     throw new Error("verification verified_at must be a non-negative safe integer");
   return { ...raw };
 }
-var hashBytes = (bytes) => createHash2("sha256").update(bytes).digest("hex");
+var hashBytes = (bytes) => createHash3("sha256").update(bytes).digest("hex");
 var rootIdentitySha256 = (root) => {
-  const st = statSync(root);
+  const st = statSync2(root);
   return hashBytes(`${root}\x00${st.dev}\x00${st.ino}`);
 };
-var taskPath = (taskId) => join6(VERIFICATION_TASK_DIR, `${taskId}.json`);
+var taskPath = (taskId) => join8(VERIFICATION_TASK_DIR, `${taskId}.json`);
 function assertSlug(label, value) {
   if (typeof value !== "string" || !SAFE_SLUG.test(value))
     throw new Error(`${label} must be a lowercase safe slug`);
@@ -3569,18 +3763,18 @@ function configuredRoot() {
   const raw = String(process.env.MM_EXACT_FILE_ROOT || "").trim();
   if (!raw || !isAbsolute(raw))
     throw new Error("MM_EXACT_FILE_ROOT must be configured as an absolute trusted root");
-  const root = realpathSync(raw);
-  if (!statSync(root).isDirectory())
+  const root = realpathSync2(raw);
+  if (!statSync2(root).isDirectory())
     throw new Error("MM_EXACT_FILE_ROOT must resolve to a directory");
   return root;
 }
 function resolveTarget(root, targetRel, requireFile) {
   assertTargetRel(targetRel);
-  const lexical = resolve(root, targetRel);
+  const lexical = resolve2(root, targetRel);
   const lexicalRel = relative2(root, lexical);
   if (!lexicalRel || lexicalRel.startsWith("..") || isAbsolute(lexicalRel))
     throw new Error("target_rel escapes the trusted root");
-  if (!existsSync5(lexical)) {
+  if (!existsSync7(lexical)) {
     if (requireFile)
       throw new Error("verification target does not exist");
     return lexical;
@@ -3588,10 +3782,10 @@ function resolveTarget(root, targetRel, requireFile) {
   const lst = lstatSync2(lexical);
   if (lst.isSymbolicLink())
     throw new Error("verification target cannot be a symlink");
-  const target = realpathSync(lexical);
-  if (target !== root && !target.startsWith(`${root}${sep}`))
+  const target = realpathSync2(lexical);
+  if (target !== root && !target.startsWith(`${root}${sep2}`))
     throw new Error("verification target resolves outside the trusted root");
-  if (!statSync(target).isFile())
+  if (!statSync2(target).isFile())
     throw new Error("verification target must be a regular file");
   return target;
 }
@@ -3628,12 +3822,12 @@ function parseTaskBytes(bytes, path) {
 function loadTask(taskId) {
   assertSlug("task_id", taskId);
   const path = taskPath(taskId);
-  if (!existsSync5(path))
+  if (!existsSync7(path))
     throw new Error(`unknown verification task '${taskId}'`);
-  const mode = statSync(path).mode & 511;
+  const mode = statSync2(path).mode & 511;
   if ((mode & 146) !== 0)
     throw new Error("verification manifest must remain read-only");
-  const bytes = readFileSync5(path, "utf8");
+  const bytes = readFileSync7(path, "utf8");
   const task = parseTaskBytes(bytes, path);
   if (task.task_id !== taskId)
     throw new Error("verification manifest task_id mismatch");
@@ -3648,7 +3842,13 @@ function createExactFileVerificationTask(input) {
   if (!Number.isSafeInteger(registeredAt) || registeredAt < 0)
     throw new Error("registeredAt must be a non-negative safe integer");
   const root = configuredRoot();
-  resolveTarget(root, input.targetRel, true);
+  const targetPath = resolveTarget(root, input.targetRel, true);
+  let baselineSha = null;
+  try {
+    baselineSha = hashBytes(readFileSync7(targetPath));
+  } catch {
+    baselineSha = null;
+  }
   const task = {
     schema: VERIFICATION_TASK_SCHEMA,
     adapter_id: EXACT_FILE_ADAPTER_ID,
@@ -3659,15 +3859,16 @@ function createExactFileVerificationTask(input) {
     root_id: ROOT_ID,
     root_identity_sha256: rootIdentitySha256(root),
     target_rel: input.targetRel,
-    expected_sha256: input.expectedSha256
+    expected_sha256: input.expectedSha256,
+    baseline_sha256: baselineSha
   };
   const bytes = `${JSON.stringify(task)}
 `;
-  mkdirSync5(VERIFICATION_TASK_DIR, { recursive: true });
+  mkdirSync7(VERIFICATION_TASK_DIR, { recursive: true });
   const path = taskPath(input.taskId);
-  writeFileSync5(path, bytes, { encoding: "utf8", flag: "wx", mode: 292 });
-  chmodSync(path, 292);
-  const reread = readFileSync5(path, "utf8");
+  writeFileSync6(path, bytes, { encoding: "utf8", flag: "wx", mode: 292 });
+  chmodSync2(path, 292);
+  const reread = readFileSync7(path, "utf8");
   if (reread !== bytes)
     throw new Error("verification manifest write custody mismatch");
   return { path, manifestSha256: hashBytes(reread), task };
@@ -3736,16 +3937,16 @@ function verifyExactFilePossession(decision) {
     const before = fstatSync(fd);
     if (!before.isFile())
       throw new Error("verification target must remain a regular file");
-    const openedReal = realpathSync(target);
-    if (openedReal !== root && !openedReal.startsWith(`${root}${sep}`))
+    const openedReal = realpathSync2(target);
+    if (openedReal !== root && !openedReal.startsWith(`${root}${sep2}`))
       throw new Error("verification target escaped the trusted root while opening");
-    const openedPathStat = statSync(openedReal);
+    const openedPathStat = statSync2(openedReal);
     if (openedPathStat.dev !== before.dev || openedPathStat.ino !== before.ino)
       throw new Error("verification target changed before hashing");
-    bytes = readFileSync5(fd);
+    bytes = readFileSync7(fd);
     const after = fstatSync(fd);
-    const afterReal = realpathSync(target);
-    const afterPathStat = statSync(afterReal);
+    const afterReal = realpathSync2(target);
+    const afterPathStat = statSync2(afterReal);
     if (afterReal !== openedReal || afterPathStat.dev !== after.dev || afterPathStat.ino !== after.ino || before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size || before.mtimeMs !== after.mtimeMs) {
       throw new Error("verification target changed while hashing");
     }
@@ -3753,7 +3954,17 @@ function verifyExactFilePossession(decision) {
     closeSync(fd);
   }
   const artifactSha256 = hashBytes(bytes);
-  const matched = timingSafeEqual(Buffer.from(artifactSha256, "hex"), Buffer.from(task.expected_sha256, "hex"));
+  const matched = timingSafeEqual2(Buffer.from(artifactSha256, "hex"), Buffer.from(task.expected_sha256, "hex"));
+  const preExisting = task.baseline_sha256 !== null && task.baseline_sha256 === task.expected_sha256;
+  const verifiedAt = Date.now();
+  const invocation = decision.skill ? qualifyingInvocation({
+    possessionId: decision.possession_id,
+    decisionEventId: decision.event_id,
+    skill: decision.skill,
+    baselineAt: task.registered_at,
+    verifiedAt
+  }) : null;
+  const proceduralCredit = matched && !preExisting && invocation !== null;
   const verification = {
     schema: VERIFICATION_RECEIPT_SCHEMA,
     adapter_id: EXACT_FILE_ADAPTER_ID,
@@ -3765,118 +3976,25 @@ function verifyExactFilePossession(decision) {
     manifest_sha256: manifestSha256,
     artifact_sha256: artifactSha256,
     matched,
-    verified_at: Date.now()
+    procedural_credit: proceduralCredit,
+    verified_at: verifiedAt
   };
   receiptCustody.add(verification);
+  const result = !matched ? "harmed" : proceduralCredit ? "helped" : "neutral";
+  const reason = !matched ? "exact-file SHA-256 did not match the bound manifest" : proceduralCredit ? "exact-file SHA-256 was wrong at registration and matches the bound manifest now" : preExisting ? "exact-file SHA-256 matched the bound manifest, but the target already matched before the prescription — artifact verified, no procedural credit" : "exact-file SHA-256 matches now, but no invocation of the prescribed skill was observed — artifact verified, no procedural credit";
   return {
-    result: matched ? "helped" : "harmed",
+    result,
     evidence_tier: "verified",
-    reason: matched ? "exact-file SHA-256 matched the bound manifest" : "exact-file SHA-256 did not match the bound manifest",
+    reason,
     evidence_ref: `adapter:${EXACT_FILE_ADAPTER_ID}:${manifestSha256}`,
-    verification
+    verification,
+    artifact_verified: matched,
+    procedural_credit: proceduralCredit
   };
-}
-
-// mods/instrument.ts
-import { createHash as createHash3, createHmac, randomBytes, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
-import { chmodSync as chmodSync2, existsSync as existsSync6, mkdirSync as mkdirSync6, readFileSync as readFileSync6, realpathSync as realpathSync2, statSync as statSync2, writeFileSync as writeFileSync6 } from "node:fs";
-import { homedir as homedir2 } from "node:os";
-import { dirname as dirname2, join as join7, resolve as resolve2, sep as sep2 } from "node:path";
-function defaultInstrumentKeyPath(home = homedir2()) {
-  return join7(home, ".letta", "instrument", "muscle-memory.key");
-}
-function resolveInstrumentKeyPath(opts = {}) {
-  const env = opts.env ?? process.env;
-  const override = String(env.MM_INSTRUMENT_KEY_FILE || "").trim();
-  return override ? resolve2(override) : defaultInstrumentKeyPath(opts.home ?? homedir2());
-}
-function isInsideStateDir(candidate, stateDir) {
-  const real = (p) => {
-    try {
-      return realpathSync2(p);
-    } catch {
-      return resolve2(p);
-    }
-  };
-  const key = real(candidate);
-  const keyDir = real(dirname2(candidate));
-  const state = real(stateDir);
-  const under = (p) => p === state || p.startsWith(state + sep2);
-  return under(key) || under(keyDir);
-}
-function loadInstrumentKey(opts) {
-  const keyPath = opts.keyPath ?? resolveInstrumentKeyPath({ env: opts.env });
-  if (isInsideStateDir(keyPath, opts.stateDir))
-    return { available: false, reason: "key_inside_state_dir", keyPath };
-  if (!existsSync6(keyPath))
-    return { available: false, reason: "key_absent", keyPath };
-  const mode = statSync2(keyPath).mode & 511;
-  if (mode !== 384)
-    return { available: false, reason: "key_permissions", keyPath, detail: mode.toString(8) };
-  const dirMode = statSync2(dirname2(keyPath)).mode & 511;
-  if (dirMode & 63)
-    return { available: false, reason: "key_dir_permissions", keyPath, detail: dirMode.toString(8) };
-  const raw = readFileSync6(keyPath, "utf8").trim();
-  const [keyId, material] = raw.split(".");
-  if (!keyId || !material || !/^[a-z0-9]{8}$/.test(keyId))
-    return { available: false, reason: "key_malformed", keyPath };
-  return { available: true, keyId, secret: Buffer.from(material, "base64url"), keyPath };
-}
-var EVIDENCE_FIELDS = [
-  "schema_version",
-  "key_id",
-  "nonce",
-  "timestamp",
-  "possession_id",
-  "decision_event_id",
-  "skill",
-  "task_id",
-  "task_class",
-  "manifest_sha256",
-  "baseline_sha256",
-  "baseline_captured_at",
-  "expected_sha256",
-  "final_sha256",
-  "invocation_receipt_id",
-  "verifier_id",
-  "verifier_version",
-  "target_rel",
-  "result_class"
-];
-function canonicalEvidenceBytes(payload) {
-  if (!payload || typeof payload !== "object")
-    throw new Error("evidence payload must be an object");
-  const raw = payload;
-  if (Object.keys(raw).length !== EVIDENCE_FIELDS.length)
-    throw new Error("evidence payload field count mismatch");
-  const canonical = {};
-  for (const field of [...EVIDENCE_FIELDS].sort()) {
-    if (!(field in raw))
-      throw new Error(`evidence payload missing '${field}'`);
-    canonical[field] = raw[field];
-  }
-  return Buffer.from(JSON.stringify(canonical), "utf8");
-}
-function signEvidencePayload(payload, key) {
-  return createHmac("sha256", key.secret).update(canonicalEvidenceBytes(payload)).digest("hex");
-}
-function verifyEvidenceSignature(payload, signature, key) {
-  let expected;
-  try {
-    expected = Buffer.from(signEvidencePayload(payload, key), "hex");
-  } catch (error) {
-    return { ok: false, reason: error instanceof Error ? error.message : "malformed payload" };
-  }
-  if (typeof signature !== "string" || !/^[a-f0-9]{64}$/i.test(signature))
-    return { ok: false, reason: "malformed signature" };
-  const actual = Buffer.from(signature, "hex");
-  if (actual.length !== expected.length)
-    return { ok: false, reason: "length mismatch" };
-  return timingSafeEqual2(actual, expected) ? { ok: true } : { ok: false, reason: "signature mismatch" };
 }
 
 // mods/possessions.ts
-var POSSESSION_LEDGER_PATH = join8(STATE_DIR, "possessions.jsonl");
+var POSSESSION_LEDGER_PATH = join9(STATE_DIR, "possessions.jsonl");
 var keyCache;
 function currentInstrumentKey() {
   if (keyCache !== undefined)
@@ -4074,7 +4192,7 @@ function classifyNormalizationError(error, raw) {
   return raw?.type === "decision" ? "unknown_enum" : "invalid_schema";
 }
 function inspectPossessionLedger() {
-  const rawText = existsSync7(POSSESSION_LEDGER_PATH) ? readFileSync7(POSSESSION_LEDGER_PATH, "utf8") : "";
+  const rawText = existsSync8(POSSESSION_LEDGER_PATH) ? readFileSync8(POSSESSION_LEDGER_PATH, "utf8") : "";
   const lines = rawText.split(`
 `).filter((line) => line.trim());
   const exclusions = emptyExclusions();
@@ -4209,8 +4327,8 @@ function appendPossessionEvent(input, mode) {
       if (!decision.verification || !clean.verification || !isStoredVerificationReceiptBound(decision.verification, clean.verification, decision.possession_id, decision.event_id)) {
         throw new Error("verified outcome is not bound to the possession decision and stored manifest");
       }
-      const shouldHelp = clean.verification.matched;
-      if (shouldHelp && clean.result !== "helped" || !shouldHelp && clean.result !== "harmed") {
+      const expectedResult = !clean.verification.matched ? "harmed" : clean.verification.procedural_credit ? "helped" : "neutral";
+      if (clean.result !== expectedResult) {
         throw new Error("verified outcome result does not match the instrument receipt");
       }
     }
@@ -4222,8 +4340,8 @@ function appendPossessionEvent(input, mode) {
     if (!active && clean.supersedes_event_id)
       throw new Error("cannot supersede a missing outcome");
   }
-  mkdirSync7(dirname3(POSSESSION_LEDGER_PATH), { recursive: true });
-  appendFileSync2(POSSESSION_LEDGER_PATH, `${JSON.stringify(clean)}
+  mkdirSync8(dirname4(POSSESSION_LEDGER_PATH), { recursive: true });
+  appendFileSync3(POSSESSION_LEDGER_PATH, `${JSON.stringify(clean)}
 `, "utf8");
   return clean;
 }
@@ -4394,8 +4512,11 @@ function summarizePossessions(events, integrity = cleanIntegrity()) {
       }
       if (outcome.result === "harmed")
         harmfulInterventions++;
-      if (outcome.result === "neutral")
+      if (outcome.result === "neutral") {
         neutralInterventions++;
+        if (boundVerified)
+          verifiedNeutralDecisions++;
+      }
     } else {
       if (outcome.result === "succeeded_unaided") {
         successfulAbstentions++;
@@ -4748,13 +4869,13 @@ function buildShareCardPayload(summary, options) {
 }
 
 // mods/wins.ts
-import { existsSync as existsSync8, readFileSync as readFileSync8, readdirSync as readdirSync3 } from "node:fs";
-import { join as join9 } from "node:path";
+import { existsSync as existsSync9, readFileSync as readFileSync9, readdirSync as readdirSync3 } from "node:fs";
+import { join as join10 } from "node:path";
 function readJsonl(path) {
-  if (!existsSync8(path))
+  if (!existsSync9(path))
     return [];
   const out = [];
-  for (const line of readFileSync8(path, "utf8").split(`
+  for (const line of readFileSync9(path, "utf8").split(`
 `)) {
     if (!line.trim())
       continue;
@@ -4781,7 +4902,7 @@ function str(o, k) {
   return "";
 }
 function collectWins(stateDir = STATE_DIR) {
-  const exp = readJsonl(join9(stateDir, "experience.jsonl"));
+  const exp = readJsonl(join10(stateDir, "experience.jsonl"));
   const convs = new Set;
   let firstRepTs = null;
   for (const r of exp) {
@@ -4792,18 +4913,18 @@ function collectWins(stateDir = STATE_DIR) {
     if (ts !== null && (firstRepTs === null || ts < firstRepTs))
       firstRepTs = ts;
   }
-  const sessions = new Set(readJsonl(join9(stateDir, "sessions.jsonl")).map((s) => str(s, "conv")).filter(Boolean));
+  const sessions = new Set(readJsonl(join10(stateDir, "sessions.jsonl")).map((s) => str(s, "conv")).filter(Boolean));
   for (const c of convs)
     sessions.add(c);
   const skillsEarned = [];
   const updatesFolded = [];
-  const receiptsDir = join9(stateDir, "receipts");
-  if (existsSync8(receiptsDir)) {
+  const receiptsDir = join10(stateDir, "receipts");
+  if (existsSync9(receiptsDir)) {
     for (const f of readdirSync3(receiptsDir)) {
       if (!/^reflect-\d+\.json$/.test(f))
         continue;
       try {
-        const r = JSON.parse(readFileSync8(join9(receiptsDir, f), "utf8"));
+        const r = JSON.parse(readFileSync9(join10(receiptsDir, f), "utf8"));
         const action = str(r, "action");
         const name = str(r, "name");
         const ts = num(r, "ts") ?? 0;
@@ -4819,7 +4940,7 @@ function collectWins(stateDir = STATE_DIR) {
   }
   skillsEarned.sort((a, b) => b.ts - a.ts);
   updatesFolded.sort((a, b) => b.ts - a.ts);
-  const hits = readJsonl(join9(stateDir, "defense-hits.jsonl"));
+  const hits = readJsonl(join10(stateDir, "defense-hits.jsonl"));
   let knownFixSurfaced = 0;
   let lastFlag = null;
   for (const h of hits) {
@@ -4830,17 +4951,17 @@ function collectWins(stateDir = STATE_DIR) {
       lastFlag = { step: str(h, "step"), errClass: str(h, "errClass"), defense: str(h, "defense"), ts };
   }
   let noiseRejected = 0;
-  for (const e of readJsonl(join9(stateDir, "ui-events.jsonl"))) {
+  for (const e of readJsonl(join10(stateDir, "ui-events.jsonl"))) {
     if (str(e, "phase") !== "noise_rejected")
       continue;
     const m = str(e, "summary").match(/rejected (\d+)/);
     noiseRejected += m ? Number(m[1]) : 1;
   }
   const skillUses = [];
-  const usagePath = join9(stateDir, "skill-usage.json");
-  if (existsSync8(usagePath)) {
+  const usagePath = join10(stateDir, "skill-usage.json");
+  if (existsSync9(usagePath)) {
     try {
-      const u = JSON.parse(readFileSync8(usagePath, "utf8"));
+      const u = JSON.parse(readFileSync9(usagePath, "utf8"));
       if (u && typeof u === "object")
         for (const [name, rec] of Object.entries(u)) {
           const uses = num(rec, "uses") ?? (typeof rec === "number" ? rec : 0);
@@ -4917,14 +5038,14 @@ function renderWins(w, now = Date.now()) {
 }
 
 // mods/history.ts
-import { existsSync as existsSync9, readFileSync as readFileSync9, writeFileSync as writeFileSync7 } from "node:fs";
-import { join as join10 } from "node:path";
-var MINE_WATERMARK_PATH = join10(STATE_DIR, "mined-watermark.json");
+import { existsSync as existsSync10, readFileSync as readFileSync10, writeFileSync as writeFileSync7 } from "node:fs";
+import { join as join11 } from "node:path";
+var MINE_WATERMARK_PATH = join11(STATE_DIR, "mined-watermark.json");
 function loadWatermarks() {
   try {
-    if (!existsSync9(MINE_WATERMARK_PATH))
+    if (!existsSync10(MINE_WATERMARK_PATH))
       return {};
-    const parsed = JSON.parse(readFileSync9(MINE_WATERMARK_PATH, "utf8"));
+    const parsed = JSON.parse(readFileSync10(MINE_WATERMARK_PATH, "utf8"));
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch {
     return {};
@@ -5048,14 +5169,14 @@ async function mineAgentHistory(client, agentId, opts) {
 }
 
 // mods/referee.ts
-import { existsSync as existsSync10, readFileSync as readFileSync10, writeFileSync as writeFileSync8, appendFileSync as appendFileSync3 } from "node:fs";
-import { join as join11 } from "node:path";
-var PLUSMINUS_PATH = join11(STATE_DIR, "skill-plusminus.json");
-var RATING_REASONS_PATH = join11(STATE_DIR, "rating-reasons.jsonl");
+import { existsSync as existsSync11, readFileSync as readFileSync11, writeFileSync as writeFileSync8, appendFileSync as appendFileSync4 } from "node:fs";
+import { join as join12 } from "node:path";
+var PLUSMINUS_PATH = join12(STATE_DIR, "skill-plusminus.json");
+var RATING_REASONS_PATH = join12(STATE_DIR, "rating-reasons.jsonl");
 function appendRatingReason(ev) {
   try {
     ensureDir();
-    appendFileSync3(RATING_REASONS_PATH, JSON.stringify(ev) + `
+    appendFileSync4(RATING_REASONS_PATH, JSON.stringify(ev) + `
 `);
     return true;
   } catch {
@@ -5064,9 +5185,9 @@ function appendRatingReason(ev) {
 }
 function loadPlusMinus() {
   try {
-    if (!existsSync10(PLUSMINUS_PATH))
+    if (!existsSync11(PLUSMINUS_PATH))
       return {};
-    const parsed = JSON.parse(readFileSync10(PLUSMINUS_PATH, "utf8"));
+    const parsed = JSON.parse(readFileSync11(PLUSMINUS_PATH, "utf8"));
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch {
     return {};
@@ -5074,10 +5195,10 @@ function loadPlusMinus() {
 }
 function loadRatingEvents() {
   try {
-    if (!existsSync10(RATING_REASONS_PATH))
+    if (!existsSync11(RATING_REASONS_PATH))
       return [];
     const out = [];
-    for (const line of readFileSync10(RATING_REASONS_PATH, "utf8").split(`
+    for (const line of readFileSync11(RATING_REASONS_PATH, "utf8").split(`
 `)) {
       if (!line.trim())
         continue;
@@ -5204,8 +5325,8 @@ function renderPlusMinus(ledger) {
 }
 
 // mods/shelf.ts
-import { mkdirSync as mkdirSync8, writeFileSync as writeFileSync9 } from "node:fs";
-import { join as join12 } from "node:path";
+import { mkdirSync as mkdirSync9, writeFileSync as writeFileSync9 } from "node:fs";
+import { join as join13 } from "node:path";
 var SQUAD_ARCHIVE_NAME = process.env.MM_SQUAD_ARCHIVE || "mm-squad-shelf";
 var SHELF_DOC_TAG = "mm:shelf-doc";
 async function ensureSquadArchive(client, opts) {
@@ -5291,9 +5412,9 @@ async function pullShelfSkill(client, agentId, skillName) {
       return { ok: false, stagedPath: null, publisher: null, reason: `no shelf doc found for '${skillName}' (is the shelf attached to this agent?)` };
     if (SECRET_TOKEN_RE.test(best.content))
       return { ok: false, stagedPath: null, publisher: best.publisher, reason: "shelf content failed the secret gate — refused" };
-    const dir = join12(PUBLISH_STAGED_DIR, skillName);
-    mkdirSync8(dir, { recursive: true });
-    const staged = join12(dir, "SKILL.md");
+    const dir = join13(PUBLISH_STAGED_DIR, skillName);
+    mkdirSync9(dir, { recursive: true });
+    const staged = join13(dir, "SKILL.md");
     const header = `<!-- muscle-memory shelf pull · publisher: ${best.publisher} · published: ${best.publishedAt} · pulled: ${new Date().toISOString()} · REVIEW BEFORE PROMOTION -->
 `;
     writeFileSync9(staged, header + best.content);
@@ -5306,6 +5427,7 @@ async function pullShelfSkill(client, agentId, skillName) {
 // mods/index.ts
 var __mm = {
   meshAgentLabel,
+  initInstrumentKey,
   summarizePossessionLedger,
   recordPossessionEvent,
   recordInstrumentVerifiedOutcome,
@@ -5449,7 +5571,7 @@ function activate(letta) {
       clearTimeout(panelBeatTimer);
     panelBeatTimer = null;
   });
-  const DEFENSE_HITS = join13(STATE_DIR, "defense-hits.jsonl");
+  const DEFENSE_HITS = join14(STATE_DIR, "defense-hits.jsonl");
   let defensesCache = [];
   const refreshDefenses = () => {
     try {
@@ -5458,7 +5580,7 @@ function activate(letta) {
       defensesCache = [];
     }
   };
-  const isInstalledSkill = (name, ctx) => scanDirs(ctx).some((dir) => existsSync11(join13(dir, name, "SKILL.md")));
+  const isInstalledSkill = (name, ctx) => scanDirs(ctx).some((dir) => existsSync12(join14(dir, name, "SKILL.md")));
   const recordLifecycle = (action, skill, reason) => {
     const stamp = Date.now();
     try {
@@ -5553,7 +5675,7 @@ tracking: decision not recorded — ${String(error?.message || error)}`;
       return track("ABSTAIN — no observed/known procedure gap was declared. Relevance alone is not an indication; let the model work unaided.", "abstain", "no-gap");
     const dirs = scanDirs(ctx);
     const top = searchSkills(dirs, normalizePrescriptionQuery(query), 3);
-    const decision = routeSkill(top, [], (name) => dirs.some((dir) => existsSync11(join13(dir, name, "SKILL.md"))), 18);
+    const decision = routeSkill(top, [], (name) => dirs.some((dir) => existsSync12(join14(dir, name, "SKILL.md"))), 18);
     if (decision.route === "update" && decision.target) {
       const t = decision.target;
       const model = modelIdentity(ctx?.model);
@@ -5712,6 +5834,7 @@ STATUS · ${res.reason}`;
         appendJsonl(LOG_PATH, { ts: Date.now(), conv: event?.conversationId ?? null, agent: event?.agentId ?? null, tool, fp, tmpl, h: hash(fp), id: event?.toolCallId ?? null, ...fix ? { fix } : {} });
         if (tool === "Skill" && typeof event?.args?.skill === "string")
           bumpUsage(slug(String(event.args.skill)));
+        observeToolStart(event);
         if (defensesCache.length) {
           const hit = preActionDefense(stepSig({ tool, fp, tmpl }), defensesCache);
           if (hit && hit.severity >= 2)
@@ -5730,6 +5853,11 @@ STATUS · ${res.reason}`;
           const err = ok ? null : classifyError(outText, false);
           const cap = process.env.MM_CAPTURE;
           const errMsg = !ok && (cap === "context" || cap === "worked") ? redactFragment(outText, 8, 320) : undefined;
+          try {
+            const open = loadPossessionEvents();
+            const closed = new Set(open.filter((row) => row.type === "outcome").map((row) => row.possession_id));
+            observeToolEnd(event, open.filter((row) => row.type === "decision" && row.action === "prescribe" && !closed.has(row.possession_id)).map((row) => ({ possession_id: row.possession_id, event_id: row.event_id, skill: row.skill })));
+          } catch {}
           appendJsonl(OUTCOME_PATH, { ts: Date.now(), id: event?.toolCallId ?? null, tool: event?.toolName ?? null, conv: event?.conversationId ?? null, ok, err, ...errMsg ? { errMsg } : {} });
           if (process.env.MM_REFLEX === "on" && !ok && defensesCache.length) {
             const step = stepByCallId.get(String(event?.toolCallId ?? ""));
@@ -5760,8 +5888,8 @@ STATUS · ${res.reason}`;
         const span2 = { tokensIn: event?.usage?.promptTokens ?? event?.tokensIn, tokensOut: event?.usage?.completionTokens ?? event?.tokensOut, ms: Date.now() - started, stop: event?.stopReason };
         let t = {};
         try {
-          if (existsSync11(TELEMETRY_PATH))
-            t = JSON.parse(readFileSync11(TELEMETRY_PATH, "utf8"));
+          if (existsSync12(TELEMETRY_PATH))
+            t = JSON.parse(readFileSync12(TELEMETRY_PATH, "utf8"));
         } catch {}
         const agg = aggregateTelemetry([span2]);
         t.calls = (t.calls || 0) + agg.calls;
@@ -5780,9 +5908,9 @@ STATUS · ${res.reason}`;
     disposers.push(letta.events.on("compact_start", (event, ctx) => {
       try {
         ensureDir();
-        mkdirSync9(RECEIPTS_DIR, { recursive: true });
+        mkdirSync10(RECEIPTS_DIR, { recursive: true });
         const { candidates } = detect(loadExperience());
-        writeFileSync10(join13(RECEIPTS_DIR, `compact-${Date.now()}.json`), JSON.stringify({ phase: "start", conv: event?.conversationId ?? null, trigger: event?.trigger ?? null, candidatesPreserved: candidates.length, ts: Date.now() }));
+        writeFileSync10(join14(RECEIPTS_DIR, `compact-${Date.now()}.json`), JSON.stringify({ phase: "start", conv: event?.conversationId ?? null, trigger: event?.trigger ?? null, candidatesPreserved: candidates.length, ts: Date.now() }));
       } catch {}
       const rfMode = process.env.MM_REFLECT;
       if (rfMode !== "staged" && rfMode !== "auto" || compactReflectInFlight)
@@ -5800,8 +5928,8 @@ STATUS · ${res.reason}`;
     disposers.push(letta.events.on("compact_end", (event) => {
       try {
         ensureDir();
-        mkdirSync9(RECEIPTS_DIR, { recursive: true });
-        writeFileSync10(join13(RECEIPTS_DIR, `compact-end-${Date.now()}.json`), JSON.stringify({ phase: "end", conv: event?.conversationId ?? null, trigger: event?.trigger ?? null, messagesBefore: event?.messagesBefore ?? null, messagesAfter: event?.messagesAfter ?? null, contextTokensBefore: event?.contextTokensBefore ?? null, contextTokensAfter: event?.contextTokensAfter ?? null, ts: Date.now() }));
+        mkdirSync10(RECEIPTS_DIR, { recursive: true });
+        writeFileSync10(join14(RECEIPTS_DIR, `compact-end-${Date.now()}.json`), JSON.stringify({ phase: "end", conv: event?.conversationId ?? null, trigger: event?.trigger ?? null, messagesBefore: event?.messagesBefore ?? null, messagesAfter: event?.messagesAfter ?? null, contextTokensBefore: event?.contextTokensBefore ?? null, contextTokensAfter: event?.contextTokensAfter ?? null, ts: Date.now() }));
       } catch {}
     }));
   }
@@ -5943,7 +6071,7 @@ ${renderPlusMinus(loadPlusMinus())}` };
         if (sub === "staged") {
           let s = [];
           try {
-            s = existsSync11(STAGED_DIR) ? readdirSync4(STAGED_DIR).filter((n) => existsSync11(join13(STAGED_DIR, n, "SKILL.md"))) : [];
+            s = existsSync12(STAGED_DIR) ? readdirSync4(STAGED_DIR).filter((n) => existsSync12(join14(STAGED_DIR, n, "SKILL.md"))) : [];
           } catch {}
           return { type: "output", output: s.length ? `staged skills (1-tap to graduate):
 ` + s.map((n) => `  · ${n}`).join(`
@@ -6070,13 +6198,13 @@ ${issues}${reps}${dupline}
             const target = String(argv?.[2] || "").trim();
             if (!target)
               return { type: "output", output: "usage: /muscle-memory shelf publish <skill>  (publishes the SANITIZED staged copy — run `publish stage <skill>` first)" };
-            const stagedPath = join13(STATE_DIR, "publish-staged", slug(target), "SKILL.md");
-            if (!existsSync11(stagedPath))
+            const stagedPath = join14(STATE_DIR, "publish-staged", slug(target), "SKILL.md");
+            if (!existsSync12(stagedPath))
               return { type: "output", output: `\uD83D\uDEAB no sanitized staged copy for '${target}' — run \`/muscle-memory publish stage ${target}\` first (the shelf only ever receives sanitized content)` };
             const archiveId = await ensureSquadArchive(letta.client);
             if (!archiveId)
               return { type: "output", output: "\uD83D\uDEAB could not ensure the squad shelf archive (client lacks the archives surface?)" };
-            const res = await publishSkillToShelf(letta.client, archiveId, slug(target), readFileSync11(stagedPath, "utf8"), String(process.env.MM_AGENT || "agent"));
+            const res = await publishSkillToShelf(letta.client, archiveId, slug(target), readFileSync12(stagedPath, "utf8"), String(process.env.MM_AGENT || "agent"));
             return { type: "output", output: res.ok ? `\uD83D\uDCE1 shelf-published '${target}' → ${SQUAD_ARCHIVE_NAME} (${archiveId})
   squad agents: attach once, then \`/muscle-memory shelf pull ${target}\`` : `\uD83D\uDEAB shelf publish failed — ${res.reason}` };
           }
@@ -6133,7 +6261,7 @@ ${plan.digest}` };
           const reg = buildRegistry(dirs);
           let staged2 = [];
           try {
-            staged2 = existsSync11(STAGED_DIR) ? readdirSync4(STAGED_DIR).filter((n) => existsSync11(join13(STAGED_DIR, n, "SKILL.md"))) : [];
+            staged2 = existsSync12(STAGED_DIR) ? readdirSync4(STAGED_DIR).filter((n) => existsSync12(join14(STAGED_DIR, n, "SKILL.md"))) : [];
           } catch {}
           const used = reg.skills.filter((s) => s.uses > 0);
           const idle = reg.skills.filter((s) => s.uses === 0 && s.state !== "archived");
@@ -6145,7 +6273,7 @@ ${plan.digest}` };
               return "";
             return ` · outcomes ${row.plus} helped / ${row.minus} missed`;
           };
-          const distribution = (name) => existsSync11(join13(globalSkillsDir(), name, "SKILL.md")) ? " · \uD83D\uDCE1 catalog" : "";
+          const distribution = (name) => existsSync12(join14(globalSkillsDir(), name, "SKILL.md")) ? " · \uD83D\uDCE1 catalog" : "";
           const L = ["\uD83D\uDCBE muscle-memory · skill lifecycle (creation → use → prune)"];
           L.push(`
 \uD83C\uDF31 staged · 1-tap to graduate (${staged2.length})`);
@@ -6197,7 +6325,7 @@ ${plan.digest}` };
                 managed++;
         } catch {}
         try {
-          staged = existsSync11(STAGED_DIR) ? readdirSync4(STAGED_DIR).filter((n) => existsSync11(join13(STAGED_DIR, n, "SKILL.md"))).length : 0;
+          staged = existsSync12(STAGED_DIR) ? readdirSync4(STAGED_DIR).filter((n) => existsSync12(join14(STAGED_DIR, n, "SKILL.md"))).length : 0;
         } catch {}
         const cov = (() => {
           try {
@@ -6295,7 +6423,7 @@ ${plan.digest}` };
     const readRun = async (ctx) => {
       const a = ctx?.args || {};
       const dirs = scanDirs(ctx);
-      const findSkillDir = (name) => dirs.find((d) => existsSync11(join13(d, name, "SKILL.md")));
+      const findSkillDir = (name) => dirs.find((d) => existsSync12(join14(d, name, "SKILL.md")));
       try {
         if (a.action === "report" || a.action === "boxscore") {
           const summary = summarizePossessionLedger();
@@ -6337,8 +6465,8 @@ ${plan.digest}` };
         }
         if (a.action === "defense_hits") {
           const hits = [];
-          if (existsSync11(DEFENSE_HITS))
-            for (const l of readFileSync11(DEFENSE_HITS, "utf8").trim().split(`
+          if (existsSync12(DEFENSE_HITS))
+            for (const l of readFileSync12(DEFENSE_HITS, "utf8").trim().split(`
 `).slice(-20)) {
               if (l)
                 try {
@@ -6367,7 +6495,7 @@ skipped: ${plan.skipped.length}`;
           const ev = buildCrossConversationEvidence(loadExperience());
           const reviewDirs = [...new Set([...dirs, STAGED_DIR])];
           const top = searchSkills(reviewDirs, ev.digest, 3);
-          const decision = routeSkill(top, [], (name) => reviewDirs.some((dir) => existsSync11(join13(dir, name, "SKILL.md"))), 18);
+          const decision = routeSkill(top, [], (name) => reviewDirs.some((dir) => existsSync12(join14(dir, name, "SKILL.md"))), 18);
           const route = decision.route === "update" && decision.target ? `UPDATE-FIRST → "${decision.target.name}" (score ${decision.target.score}, ${decision.target.matched} distinctive terms, dominant)` : decision.route === "park-ambiguous" ? "PARK (ambiguous overlap — refusing autonomous create)" : decision.route === "park-semantic" ? `PARK (possible semantic duplicate of "${decision.suspect}")` : "CREATE (no existing skill safely covers this)";
           return `reflective review preview — ${ev.convs} sessions, ${ev.items} durable signals
 routing: ${route}
@@ -6426,7 +6554,7 @@ ${d.body}` };
       const a = ctx?.args || {};
       const dir = agentSkillsDir(ctx);
       const dirs = scanDirs(ctx);
-      const findSkillDir = (name) => dirs.find((d) => existsSync11(join13(d, name, "SKILL.md")));
+      const findSkillDir = (name) => dirs.find((d) => existsSync12(join14(d, name, "SKILL.md")));
       try {
         if (a.action === "autopilot_run") {
           const cfg = { ...AUTOPILOT_DEFAULT, mode: a.mode === "auto" ? "auto" : "staged" };
@@ -6879,7 +7007,9 @@ EVIDENCE · ${judged} judged · ${verified} verified · ${proven ? "proven" : "s
           flashEarnedMinute(affectedSkill || "prescribed skill", affectedSkill);
         } else
           writeUiState({ phase: "idle", last: "", skill: "", route: "" });
-        return `\uD83D\uDD2C BOUND-VERIFIED '${verified.result}' for ${possessionId} · adapter ${verified.verification.adapter_id} · manifest ${verified.verification.manifest_sha256.slice(0, 12)}… · event ${recorded.event_id}`;
+        const head = verified.procedural_credit ? `\uD83D\uDD2C BOUND-VERIFIED 'helped'` : verified.artifact_verified ? `\uD83D\uDD2C ARTIFACT-VERIFIED · no procedural credit` : `\uD83D\uDD2C BOUND-VERIFIED 'harmed'`;
+        const why = verified.procedural_credit ? "" : ` · ${verified.reason}`;
+        return `${head} for ${possessionId} · adapter ${verified.verification.adapter_id} · manifest ${verified.verification.manifest_sha256.slice(0, 12)}… · event ${recorded.event_id}${why}`;
       } catch (error) {
         return `\uD83D\uDEAB verification refused — ${String(error?.message || error)}`;
       }

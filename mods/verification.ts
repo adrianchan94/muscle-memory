@@ -13,6 +13,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import { qualifyingInvocation } from "./invocation";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { STATE_DIR } from "./core";
@@ -28,7 +29,7 @@ const ROOT_ID = "configured" as const;
 const SAFE_SLUG = /^[a-z0-9][a-z0-9-]{0,79}$/;
 const SAFE_ID = /^[a-z0-9][a-z0-9._:-]{0,127}$/i;
 const SHA256 = /^[a-f0-9]{64}$/;
-const TASK_KEYS = new Set(["schema", "adapter_id", "adapter_version", "task_id", "task_class", "registered_at", "root_id", "root_identity_sha256", "target_rel", "expected_sha256"]);
+const TASK_KEYS = new Set(["schema", "adapter_id", "adapter_version", "task_id", "task_class", "registered_at", "root_id", "root_identity_sha256", "target_rel", "expected_sha256", "baseline_sha256"]);
 const receiptCustody = new WeakSet<object>();
 
 export type ExactFileVerificationTask = {
@@ -42,6 +43,8 @@ export type ExactFileVerificationTask = {
   root_identity_sha256: string;
   target_rel: string;
   expected_sha256: string;
+  /** Target digest at registration, before any work. `null` when the target does not exist yet. */
+  baseline_sha256: string | null;
 };
 
 export type VerificationBinding = {
@@ -64,6 +67,8 @@ export type InstrumentVerificationReceipt = {
   manifest_sha256: string;
   artifact_sha256: string;
   matched: boolean;
+  /** Instrument-derived: baseline was wrong at registration and the artifact is right now. */
+  procedural_credit: boolean;
   verified_at: number;
 };
 
@@ -73,10 +78,14 @@ export type InstrumentVerifiedResult = {
   reason: string;
   evidence_ref: string;
   verification: InstrumentVerificationReceipt;
+  /** The instrument hashed the artifact and it matched. Says nothing about who caused it. */
+  artifact_verified: boolean;
+  /** The prescription plausibly caused the change: the baseline was wrong and is now right. */
+  procedural_credit: boolean;
 };
 
 const BINDING_KEYS = new Set(["schema", "adapter_id", "adapter_version", "task_id", "task_class", "manifest_sha256"]);
-const RECEIPT_KEYS = new Set(["schema", "adapter_id", "adapter_version", "task_id", "task_class", "possession_id", "decision_event_id", "manifest_sha256", "artifact_sha256", "matched", "verified_at"]);
+const RECEIPT_KEYS = new Set(["schema", "adapter_id", "adapter_version", "task_id", "task_class", "possession_id", "decision_event_id", "manifest_sha256", "artifact_sha256", "matched", "procedural_credit", "verified_at"]);
 
 function exactObject(input: unknown, keys: Set<string>, label: string): Record<string, unknown> {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error(`${label} must be an object`);
@@ -210,7 +219,11 @@ export function createExactFileVerificationTask(input: {
   const registeredAt = input.registeredAt ?? Date.now();
   if (!Number.isSafeInteger(registeredAt) || registeredAt < 0) throw new Error("registeredAt must be a non-negative safe integer");
   const root = configuredRoot();
-  resolveTarget(root, input.targetRel, true);
+  const targetPath = resolveTarget(root, input.targetRel, true);
+  // Capture the baseline BEFORE any work so "already correct" is distinguishable from "repaired".
+  // Without this the adapter cannot tell a no-op from a fix, which is exactly what P0-B exploited.
+  let baselineSha: string | null = null;
+  try { baselineSha = hashBytes(readFileSync(targetPath)); } catch { baselineSha = null; }
   const task: ExactFileVerificationTask = {
     schema: VERIFICATION_TASK_SCHEMA,
     adapter_id: EXACT_FILE_ADAPTER_ID,
@@ -222,6 +235,7 @@ export function createExactFileVerificationTask(input: {
     root_identity_sha256: rootIdentitySha256(root),
     target_rel: input.targetRel,
     expected_sha256: input.expectedSha256,
+    baseline_sha256: baselineSha,
   };
   const bytes = `${JSON.stringify(task)}\n`;
   mkdirSync(VERIFICATION_TASK_DIR, { recursive: true });
@@ -309,6 +323,20 @@ export function verifyExactFilePossession(decision: PossessionDecisionEvent): In
   }
   const artifactSha256 = hashBytes(bytes);
   const matched = timingSafeEqual(Buffer.from(artifactSha256, "hex"), Buffer.from(task.expected_sha256, "hex"));
+  // Procedural credit needs BOTH: a real gap at registration, and an instrument-observed
+  // invocation of the exact prescribed skill inside the window. Either alone is not causation.
+  const preExisting = task.baseline_sha256 !== null && task.baseline_sha256 === task.expected_sha256;
+  const verifiedAt = Date.now();
+  const invocation = decision.skill
+    ? qualifyingInvocation({
+        possessionId: decision.possession_id,
+        decisionEventId: decision.event_id,
+        skill: decision.skill,
+        baselineAt: task.registered_at,
+        verifiedAt,
+      })
+    : null;
+  const proceduralCredit = matched && !preExisting && invocation !== null;
   const verification: InstrumentVerificationReceipt = {
     schema: VERIFICATION_RECEIPT_SCHEMA,
     adapter_id: EXACT_FILE_ADAPTER_ID,
@@ -320,14 +348,28 @@ export function verifyExactFilePossession(decision: PossessionDecisionEvent): In
     manifest_sha256: manifestSha256,
     artifact_sha256: artifactSha256,
     matched,
-    verified_at: Date.now(),
+    procedural_credit: proceduralCredit,
+    verified_at: verifiedAt,
   };
   receiptCustody.add(verification);
+  // Artifact truth and causation are separate questions, and the ANSWER STRING has to say so.
+  // A match on a target that was already correct at registration is not help - reporting it as
+  // "helped" mis-trains the agent reading it, even though the scoreboard would demote it later.
+  const result: OutcomeResult = !matched ? "harmed" : proceduralCredit ? "helped" : "neutral";
+  const reason = !matched
+    ? "exact-file SHA-256 did not match the bound manifest"
+    : proceduralCredit
+      ? "exact-file SHA-256 was wrong at registration and matches the bound manifest now"
+      : preExisting
+        ? "exact-file SHA-256 matched the bound manifest, but the target already matched before the prescription — artifact verified, no procedural credit"
+        : "exact-file SHA-256 matches now, but no invocation of the prescribed skill was observed — artifact verified, no procedural credit";
   return {
-    result: matched ? "helped" : "harmed",
+    result,
     evidence_tier: "verified",
-    reason: matched ? "exact-file SHA-256 matched the bound manifest" : "exact-file SHA-256 did not match the bound manifest",
+    reason,
     evidence_ref: `adapter:${EXACT_FILE_ADAPTER_ID}:${manifestSha256}`,
     verification,
+    artifact_verified: matched,
+    procedural_credit: proceduralCredit,
   };
 }

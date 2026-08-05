@@ -212,14 +212,17 @@ test("pre-bound exact-file tool derives and records one instrument-owned verifie
     expect(decision).toMatchObject({ verification: { task_id: "tool-bound-repair", task_class: "stale-exact-edit" } });
 
     const verified = String(await verifierTool.run({ args: { possession_id: decision!.possession_id } }));
-    expect(verified).toContain("BOUND-VERIFIED 'helped'");
+    // The target was already correct at registration, so the tool must not teach "helped".
+    expect(verified).toContain("ARTIFACT-VERIFIED · no procedural credit");
+    expect(verified).not.toContain("'helped'");
     expect(loadPossessionEvents().find((event) => event.type === "outcome")).toMatchObject({
       evidence_tier: "verified",
-      result: "helped",
-      verification: { task_id: "tool-bound-repair", matched: true },
+      result: "neutral",
+      verification: { task_id: "tool-bound-repair", matched: true, procedural_credit: false },
     });
     const boxscore = String(await readTool.run({ args: { action: "boxscore" }, agent: { name: "Kev" } }));
-    expect(boxscore).toContain("INTERVENTIONS · 1 served · 1 helped · 0 harmed");
+    // Served, but not helped: the no-op is visible on the box score rather than inflating it.
+    expect(boxscore).toContain("INTERVENTIONS · 1 served · 0 helped · 0 harmed");
     expect(boxscore).toContain("STATUS · early verified evidence · 1 verified · not claim-bearing");
   } finally {
     dispose();

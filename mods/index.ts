@@ -42,6 +42,8 @@ import { Defense, ENGRAM, GuardMode, buildDefenses, buildNeocortexBlock, capture
 import { CURATOR, aggregateTelemetry, buildRegistry, bumpUsage, churnSignal, coverageMap, curateManagedSkills, curatorPass, isPinned, lifecycleTransition, managedSkillUsage, restoreManagedSkill, retireManagedSkill, retiredSkillBlocker, runAutonomousPrune, setPinned, skillVerbs, specDrift } from "./lifecycle";
 import { AUTOPILOT_DEFAULT, AutopilotMode, REVIEW_PROMPT, SemanticFn, applySemanticEvidence, autopilotPlan, buildEvidenceManifest, executeAutopilotPlan, forkAuthor, graduateStagedSkill, isHighConfidenceCreate, loadHandledReflects, managedView, normalizePrescriptionQuery, pickUpdateTarget, reflectSignature, retrievePreferences, reviewAndAuthor, routeSkill, runAutopilot, runReflectiveReview, searchSkills, streamChunkText } from "./autopilot";
 import { friendlyRouteLabel, renderAgentBoxScore, renderMuscleMemoryPanel, summarizeReflectActions } from "./ui";
+import { observeToolStart, observeToolEnd } from "./invocation";
+import { initInstrumentKey } from "./instrument";
 import { claimBearingVerdict, buildShareCardPayload, loadPossessionEvents, pendingPossessionViews, recordInstrumentVerifiedOutcome, recordPossessionEvent, summarizePossessionLedger, type DecisionRoute, type DifficultyTier, type OutcomeResult, type EvidenceTier, type LifecycleAction, type PossessionDecisionEvent } from "./possessions";
 import { bindExactFileVerificationTask, createExactFileVerificationTask, verifyExactFilePossession } from "./verification";
 import { collectWins, renderWins } from "./wins";
@@ -51,7 +53,7 @@ import { attachSquadShelf, ensureSquadArchive, publishSkillToShelf, pullShelfSki
 
 
 // Test hook (deterministic validation without live data).
-export const __mm = { meshAgentLabel, summarizePossessionLedger, recordPossessionEvent, recordInstrumentVerifiedOutcome, commandTemplate, fingerprint, redactFragment, buildDiffFragment, detect, detectTemplates, detectSequences, maturityScore, MM, loadRows, dedupCheck, slug, draftSkillFromCandidate, candidateName, candidateDescription, curateManagedSkills, managedSkillUsage,
+export const __mm = { meshAgentLabel, initInstrumentKey, summarizePossessionLedger, recordPossessionEvent, recordInstrumentVerifiedOutcome, commandTemplate, fingerprint, redactFragment, buildDiffFragment, detect, detectTemplates, detectSequences, maturityScore, MM, loadRows, dedupCheck, slug, draftSkillFromCandidate, candidateName, candidateDescription, curateManagedSkills, managedSkillUsage,
   streamChunkText, isDurableLesson, isValidSkillName, buildCrossConversationEvidence, REVIEW_PROMPT, reviewAndAuthor, searchSkills, pickUpdateTarget, runReflectiveReview, graduateStagedSkill, publishSkillToCatalog, catalogPrivacyScan, isHighConfidenceCreate, runAutonomousPrune,
   buildEvidenceManifest, retrievePreferences, coverageMap, churnSignal, summarizeReflectActions, renderMuscleMemoryPanel, loadMeshFeed, renderMeshFeed,
   buildRegistry, curatorPass, skillVerbs, specDrift, lifecycleTransition, CURATOR, setPinned, isPinned, buildDefenses, preActionDefense,
@@ -334,6 +336,9 @@ export default function activate(letta: any) {
         appendJsonl(LOG_PATH, { ts: Date.now(), conv: event?.conversationId ?? null, agent: event?.agentId ?? null, tool, fp, tmpl, h: hash(fp), id: event?.toolCallId ?? null, ...(fix ? { fix } : {}) });
         // v2 edge: Skill-usage tracking (curator) + PRE-ACTION defense (the tool_start hook Hermes lacks).
         if (tool === "Skill" && typeof event?.args?.skill === "string") bumpUsage(slug(String(event.args.skill)));
+        // Instrument-owned invocation observation. Procedural credit needs proof the prescribed
+        // skill actually ran, and only the runtime can witness that.
+        observeToolStart(event);
         if (defensesCache.length) {
           const hit = preActionDefense(stepSig({ tool, fp, tmpl }), defensesCache);
           if (hit && hit.severity >= 2) appendJsonl(DEFENSE_HITS, { ts: Date.now(), conv: event?.conversationId ?? null, step: hit.trigger, kind: hit.kind, errClass: hit.errClass, defense: hit.defense, severity: hit.severity });
@@ -357,6 +362,13 @@ export default function activate(letta: any) {
           const err = ok ? null : classifyError(outText, false);
           const cap = process.env.MM_CAPTURE;
           const errMsg = (!ok && (cap === "context" || cap === "worked")) ? redactFragment(outText, 8, 320) : undefined;
+          try {
+            const open = loadPossessionEvents();
+            const closed = new Set(open.filter((row) => row.type === "outcome").map((row) => row.possession_id));
+            observeToolEnd(event, open
+              .filter((row): row is PossessionDecisionEvent => row.type === "decision" && row.action === "prescribe" && !closed.has(row.possession_id))
+              .map((row) => ({ possession_id: row.possession_id, event_id: row.event_id, skill: row.skill })));
+          } catch { /* observation must never break the tool stream */ }
           appendJsonl(OUTCOME_PATH, { ts: Date.now(), id: event?.toolCallId ?? null, tool: event?.toolName ?? null, conv: event?.conversationId ?? null, ok, err, ...(errMsg ? { errMsg } : {}) });
           if (process.env.MM_REFLEX === "on" && !ok && defensesCache.length) {
             const step = stepByCallId.get(String(event?.toolCallId ?? ""));
@@ -1313,7 +1325,15 @@ export default function activate(letta: any) {
           const affectedSkill = String(decision.skill || "");
           flashEarnedMinute(affectedSkill || "prescribed skill", affectedSkill);
         } else writeUiState({ phase: "idle", last: "", skill: "", route: "" });
-        return `🔬 BOUND-VERIFIED '${verified.result}' for ${possessionId} · adapter ${verified.verification.adapter_id} · manifest ${verified.verification.manifest_sha256.slice(0, 12)}… · event ${recorded.event_id}`;
+        // The agent reads this string and learns from it, so it must not say "helped" when the
+        // target was already correct. Artifact truth and procedural credit are reported apart.
+        const head = verified.procedural_credit
+          ? `🔬 BOUND-VERIFIED 'helped'`
+          : verified.artifact_verified
+            ? `🔬 ARTIFACT-VERIFIED · no procedural credit`
+            : `🔬 BOUND-VERIFIED 'harmed'`;
+        const why = verified.procedural_credit ? "" : ` · ${verified.reason}`;
+        return `${head} for ${possessionId} · adapter ${verified.verification.adapter_id} · manifest ${verified.verification.manifest_sha256.slice(0, 12)}… · event ${recorded.event_id}${why}`;
       } catch (error: any) {
         return `🚫 verification refused — ${String(error?.message || error)}`;
       }

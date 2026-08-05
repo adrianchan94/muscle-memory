@@ -514,8 +514,11 @@ function appendPossessionEvent(input: PossessionEvent, mode: "caller" | "instrum
       if (!decision.verification || !clean.verification || !isStoredVerificationReceiptBound(decision.verification, clean.verification, decision.possession_id, decision.event_id)) {
         throw new Error("verified outcome is not bound to the possession decision and stored manifest");
       }
-      const shouldHelp = clean.verification.matched;
-      if ((shouldHelp && clean.result !== "helped") || (!shouldHelp && clean.result !== "harmed")) {
+      // The receipt decides the result class, not the caller. A match without procedural credit
+      // is neutral: the artifact is right, but the prescription did not make it so.
+      const expectedResult = !clean.verification.matched ? "harmed"
+        : clean.verification.procedural_credit ? "helped" : "neutral";
+      if (clean.result !== expectedResult) {
         throw new Error("verified outcome result does not match the instrument receipt");
       }
     }
@@ -723,7 +726,9 @@ export function summarizePossessions(events: PossessionEvent[], integrity: Ledge
       if (outcome.result === "helped" && creditable) { helpfulInterventions++; good = true; }
       else if (outcome.result === "helped") { neutralInterventions++; if (boundVerified) verifiedNeutralDecisions++; }
       if (outcome.result === "harmed") harmfulInterventions++;
-      if (outcome.result === "neutral") neutralInterventions++;
+      // Neutral arrives two ways: the instrument derived it (artifact right, nothing caused),
+      // or a helped claim was demoted above. Both are neutral; only the bound ones are verified.
+      if (outcome.result === "neutral") { neutralInterventions++; if (boundVerified) verifiedNeutralDecisions++; }
     } else {
       if (outcome.result === "succeeded_unaided") {
         successfulAbstentions++;

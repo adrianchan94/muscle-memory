@@ -77,11 +77,18 @@ test("A · a pre-existing correct target is artifact-verified but earns no proce
   });
   const decision = openBoundDecision("repair-success");
   const verified = verifyExactFilePossession(decision);
-  expect(verified).toMatchObject({ result: "helped", evidence_tier: "verified" });
+  expect(verified).toMatchObject({
+    result: "neutral",             // artifact is right, but the prescription did not make it so
+    evidence_tier: "verified",     // the instrument still derived this - provenance is intact
+    artifact_verified: true,
+    procedural_credit: false,
+  });
+  expect(verified.reason).toContain("already matched before the prescription");
   expect(verified.verification).toMatchObject({
     adapter_id: EXACT_FILE_ADAPTER_ID,
     task_id: "repair-success",
     matched: true,
+    procedural_credit: false,   // the target was already correct at registration
   });
 
   recordInstrumentVerifiedOutcome({
@@ -102,7 +109,7 @@ test("A · a pre-existing correct target is artifact-verified but earns no proce
     unboundVerifiedDowngraded: 0,
     helpfulInterventions: 0,
   });
-  expect(summary.lastPlay).toMatchObject({ evidence: "bound_verified", result: "helped" });
+  expect(summary.lastPlay).toMatchObject({ evidence: "bound_verified", result: "neutral" });
   const card = buildShareCardPayload(summary, { period: "all_time" });
   expect(card).toMatchObject({
     period: "EARLY TAPE",
@@ -216,6 +223,7 @@ test("a structurally plausible forged receipt is rejected by the instrument boun
       manifest_sha256: task.manifestSha256,
       artifact_sha256: sha("repaired\n"),
       matched: true,
+      procedural_credit: true,
       verified_at: 250,
     },
   } as any)).toThrow("instrument-owned receipt");
@@ -243,6 +251,7 @@ test("manifest tampering after decision binding fails closed", () => {
     root_identity_sha256: task.task.root_identity_sha256,
     target_rel: "target.txt",
     expected_sha256: sha("repaired but forged\n"),
+    baseline_sha256: task.task.baseline_sha256,
   }));
   chmodSync(task.path, 0o444);
   expect(() => verifyExactFilePossession(decision)).toThrow("manifest hash mismatch");

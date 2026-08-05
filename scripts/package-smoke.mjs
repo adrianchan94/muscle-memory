@@ -130,12 +130,19 @@ import { join } from "node:path";
 const bundlePath = ${JSON.stringify(installedBundle)};
 const mod = await import(pathToFileURL(bundlePath).href + "?smoke=" + Date.now());
 const activate = mod.default;
+// Verified evidence requires an instrument key, and a fresh consumer machine has none.
+// Mint one explicitly so the smoke proves the real signed path instead of silently degrading.
+try { mod.__mm.initInstrumentKey({ keyPath: process.env.MM_INSTRUMENT_KEY_FILE, stateDir: process.env.MM_STATE_DIR }); } catch (error) { console.error("instrument init failed:", error?.message); }
 const registered = { tools: [], commands: [], permissions: [], events: [] };
+const handlers = {};
+const fire = (name, event) => { for (const fn of handlers[name] || []) { try { fn(event); } catch { /* observation must never break the stream */ } } };
 const toolDefs = new Map();
 const commandDefs = new Map();
 const letta = {
   capabilities: { tools: true, commands: true, permissions: true, ui: { panels: true }, events: { tools: true, lifecycle: true, turns: true, llm: true, compact: true } },
-  events: { on(name) { registered.events.push(name); return () => {}; } },
+  // Keep the handlers: procedural credit now requires an instrument-observed Skill invocation,
+  // and the only honest way to smoke that is to drive the runtime's own event stream.
+  events: { on(name, fn) { registered.events.push(name); (handlers[name] ||= []).push(fn); return () => {}; } },
   tools: { register(def) { registered.tools.push(def.name); toolDefs.set(def.name, def); return () => {}; } },
   commands: { register(def) { registered.commands.push(def.id); commandDefs.set(def.id, def); return () => {}; } },
   permissions: { register(def) { registered.permissions.push(def.id); return () => {}; } },
@@ -171,6 +178,9 @@ const possessionId = String(prescribed).match(/possession: ([a-z0-9._:-]+)/i)?.[
 // the transition happens HERE - after the prescription, before verification - so the
 // verified outcome reflects an actual change rather than a file that was already correct
 writeFileSync(join(workspace, "target.txt"), "repaired\\n");
+// ...and the prescribed skill actually runs, witnessed by the runtime rather than asserted by us
+fire("tool_start", { toolName: "Skill", toolCallId: "smoke-call-1", args: { skill: "recovering-failed-exact-match-edits" } });
+fire("tool_end", { toolName: "Skill", toolCallId: "smoke-call-1", status: "success", output: "applied" });
 const verification = possessionId ? await toolDefs.get("verify_agent_possession").run({ args: { possession_id: possessionId } }) : "missing possession";
 const lightweight = await toolDefs.get("muscle_memory_prescribe").run({
   args: { gap_observed: true, task: "exact-match file edit failed because target text was stale" },
@@ -192,6 +202,7 @@ console.log(JSON.stringify({ ...registered, rating: String(rating), registeredVe
     env: {
       ...process.env,
       MM_STATE_DIR: join(runtimeRoot, "state"),
+      MM_INSTRUMENT_KEY_FILE: join(runtimeRoot, "instrument", "muscle-memory.key"),
       MM_GLOBAL_SKILLS_DIR: join(runtimeRoot, "global"),
       MM_EXACT_FILE_ROOT: join(runtimeRoot, "workspace"),
       MEMORY_DIR: join(runtimeRoot, "memory"),
