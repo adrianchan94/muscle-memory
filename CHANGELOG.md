@@ -20,6 +20,15 @@ All notable changes to `@adrianchan94/muscle-memory`. Format loosely follows [Ke
 - Binds the packed-artifact test to the shipped `package.json` version instead of a hard-coded literal that rots on each candidate bump.
 - Corrects a stale roster assertion that demanded the zero-signal disclosure footer even when nothing was hidden; the shipped behaviour deliberately suppresses `hidden: 0` as noise.
 
+### Fixed — privacy
+- The publish sanitizer hardcoded the author's local username and personal name into the shipped package in order to redact them. Those literals are removed. Operator identity is derived at runtime from `userInfo()` and git config, which already ran on the next line — so redaction now covers **every** user instead of one, and no personal handle ships to consumers.
+
+### Added — research instrument kit
+- `docs/research/STUDY-CONTRACT.md` — the eight fields every measurement carries, and the three-level reproducibility table (package reproducible · minimal fixture reproducible · full program auditable but not publicly reproducible).
+- `docs/research/protocol.schema.json` — machine-checkable preregistration requiring exact model identifier, provider and date, sampling parameters, system-prompt hash, tool schema hash, and verifier version.
+- `docs/research/fixtures/four-events/run.mjs` — deterministic, no-provider fixture separating presence, prescription, execution, and verified outcome. Permanently labelled: it demonstrates the instrument, it does not reproduce the sealed findings.
+- `CITATION.cff` — cites the research record under the title *Knowing Is Not Doing*.
+
 ### Research surface alias remap
 - Canonical live research URL is now `https://muscle-memory-v1-research.vercel.app/` (report title: *Knowing Is Not Doing…*; product name unchanged). `muscle-memory-story.vercel.app` remains a temporary alias to the same production deploy. July (H) history stays on the superseded deployment URL.
 

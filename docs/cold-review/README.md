@@ -23,6 +23,8 @@ These two names are distinct and must not be merged.
 | `VERIFY-REPRODUCTION.md` | Deterministic commands to reproduce every hash and gate yourself |
 | `REVIEW-CHECKLIST.md` | The verdict format we are asking you to return |
 
+The research instrument kit is at [`../research/`](../research/README.md): the study contract, the preregistration schema, and a deterministic fixture you can run in under a second.
+
 Both JSON files are **generated**, not hand-written. Regenerate them with:
 
 ```bash
@@ -38,8 +40,8 @@ Both scripts exit non-zero if their embedded assertions fail.
 |---|---|
 | Version | `1.0.0-rc.3` |
 | Commit | see `VERIFY-REPRODUCTION.md` (frozen SHA) |
-| Packed tarball sha256 | `c68e29d28fc6efe802f8f26ed55c9f491317e9c9e59a9f98ff076f94e6a8ff7e` |
-| Tarball bytes | `249342` |
+| Packed tarball sha256 | `99b2a80c1b3696e202d7464abf81b28d551f72e594c89804769760bb6fbcd9e3` |
+| Tarball bytes | `249413` |
 | Bundled entry sha256 | `6a3ab91243780550088e2417c4b56012ee3f5cb60484156d2d2997148a24e60e` |
 
 The tarball is **not committed** to this repository. Reproduce it with `npm pack` — see `VERIFY-REPRODUCTION.md`.

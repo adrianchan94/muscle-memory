@@ -83,7 +83,7 @@ That is the whole install. A fresh agent then sees **three tools** — `muscle_m
 
 The npm identity is **`@adrianchan94/muscle-memory`**, but it is **not published**; this is a release candidate. See the [RC3 release notes](./docs/RELEASE-NOTES-v1.0.0-rc.3.md) and [cold-review kit](./docs/cold-review/README.md) for the gates.
 
-[Research record](https://muscle-memory-v1-research.vercel.app/) · [RC3 release notes](./docs/RELEASE-NOTES-v1.0.0-rc.3.md) · [Agent guide](./MOD.md) · [Provenance](#source-ownership-and-lineage) · [Security](./SECURITY.md) · [Contributing](./CONTRIBUTING.md)
+[Research record](https://muscle-memory-v1-research.vercel.app/) · [Research kit](./docs/research/README.md) · [RC3 release notes](./docs/RELEASE-NOTES-v1.0.0-rc.3.md) · [Agent guide](./MOD.md) · [Provenance](#source-ownership-and-lineage) · [Security](./SECURITY.md) · [Contributing](./CONTRIBUTING.md)
 
 ![muscle-memory live demo](./demo.gif)
 

@@ -35,8 +35,8 @@ wc -c  < adrianchan94-muscle-memory-1.0.0-rc.3.tgz
 Expected:
 
 ```
-c68e29d28fc6efe802f8f26ed55c9f491317e9c9e59a9f98ff076f94e6a8ff7e
-249342
+99b2a80c1b3696e202d7464abf81b28d551f72e594c89804769760bb6fbcd9e3
+249413
 ```
 
 > `npm pack` is byte-stable for a fixed file set and fixed contents. If your bytes differ, check `npm --version` first, then report the delta.

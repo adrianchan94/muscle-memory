@@ -70,7 +70,10 @@ export function sanitizeForPublish(body: string): { sanitized: string; replaceme
   sub("local-path", /\/Users\/[A-Za-z0-9._-]+/g, "<local path>");
   sub("agent-memfs", /(?:~\/)?\.letta\/(?:lc-local-backend\/memfs\/)?agents?\/[A-Za-z0-9._/-]+/g, "<agent memfs>");
   sub("agent-id", /\bagent-[a-f0-9]{6,}(?:-[a-f0-9]+)+\b/g, "<agent id>");
-  sub("user", /\b(?:localuser|private-user|chan2saucy|adrianchan|adrian chan)\b/gi, "<user>");
+  // Generic placeholders only. Real operator identity is derived at runtime on the next
+  // line, which covers every user rather than a hardcoded few — and keeps the author's
+  // personal handles out of the published package.
+  sub("user", /\b(?:localuser|private-user)\b/gi, "<user>");
   for (const id of runtimeUserIdentifiers()) sub("user", new RegExp(`\\b${escapeRegExp(id)}\\b`, "gi"), "<user>");
   for (const id of runtimePrivateAgentIdentifiers()) sub("agent", new RegExp(`\\b${escapeRegExp(id)}\\b`, "gi"), "<agent>");
   sub("project", /\b(?:ProjectX|ExampleCorp)\b/g, "<project>");

@@ -1530,7 +1530,7 @@ function sanitizeForPublish(body) {
   sub("local-path", /\/Users\/[A-Za-z0-9._-]+/g, "<local path>");
   sub("agent-memfs", /(?:~\/)?\.letta\/(?:lc-local-backend\/memfs\/)?agents?\/[A-Za-z0-9._/-]+/g, "<agent memfs>");
   sub("agent-id", /\bagent-[a-f0-9]{6,}(?:-[a-f0-9]+)+\b/g, "<agent id>");
-  sub("user", /\b(?:localuser|private-user|chan2saucy|adrianchan|adrian chan)\b/gi, "<user>");
+  sub("user", /\b(?:localuser|private-user)\b/gi, "<user>");
   for (const id of runtimeUserIdentifiers())
     sub("user", new RegExp(`\\b${escapeRegExp(id)}\\b`, "gi"), "<user>");
   for (const id of runtimePrivateAgentIdentifiers())
