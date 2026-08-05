@@ -10,16 +10,16 @@
   ],
   "tarball": {
     "name": "adrianchan94-muscle-memory-1.0.0-rc.3.tgz",
-    "sha256": "c7bb9ee4201845c551f6accc0acb73ddd7d20a07854bdd2218e4b627f176fba2",
-    "bytes": 268356,
-    "npmReportedSize": 268356,
-    "npmReportedUnpackedSize": 929942,
+    "sha256": "b595722ba7d166f23e811e73927a5104230220cf6c546a9e98449909a54b499e",
+    "bytes": 269103,
+    "npmReportedSize": 269103,
+    "npmReportedUnpackedSize": 932390,
     "fileCount": 23
   },
   "bundle": {
     "path": "mods/index.bundled.mjs",
-    "committedSha256": "115978dd53605a865b93857d1ed9542e3b87f3f547beca8b2d21fe133bfe3c83",
-    "rebuiltFromSourceSha256": "115978dd53605a865b93857d1ed9542e3b87f3f547beca8b2d21fe133bfe3c83",
+    "committedSha256": "f49574e42bc0341dfd18a4e8689bc693bb4004876d23b4edd3d57c54dc7bb0c8",
+    "rebuiltFromSourceSha256": "f49574e42bc0341dfd18a4e8689bc693bb4004876d23b4edd3d57c54dc7bb0c8",
     "parity": true
   },
   "shippedFiles": [
@@ -40,8 +40,8 @@
     },
     {
       "path": "README.md",
-      "bytes": 43607,
-      "sha256": "d11ca47d397fe3ef2005374152adb3e9a53956fadcd5f0721544c38c78216def"
+      "bytes": 43757,
+      "sha256": "fc365cfcd99ef2da51ead2bf52f1a4f8e943242e4fdd22c87e84ec8a689f098f"
     },
     {
       "path": "mods/autopilot.ts",
@@ -75,13 +75,13 @@
     },
     {
       "path": "mods/index.bundled.mjs",
-      "bytes": 352716,
-      "sha256": "115978dd53605a865b93857d1ed9542e3b87f3f547beca8b2d21fe133bfe3c83"
+      "bytes": 353629,
+      "sha256": "f49574e42bc0341dfd18a4e8689bc693bb4004876d23b4edd3d57c54dc7bb0c8"
     },
     {
       "path": "mods/index.ts",
-      "bytes": 108419,
-      "sha256": "c63243a39587d4901ae7bf2a672cd15729e580cc3769fad91fb4633d6e5cbf97"
+      "bytes": 109804,
+      "sha256": "fad2d40e717c834d72485dd334f53eb2e1af595cf0ad732d61ab62cc2c708ac4"
     },
     {
       "path": "mods/instrument.ts",

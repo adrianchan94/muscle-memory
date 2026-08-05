@@ -183,6 +183,9 @@ of these, you have the wrong bytes and the review does not count:
 | \`66c0522c…\` | **superseded product tarball — attribution could be moved by a ledger edit. Do not review it.** |
 | \`ad573568…\` | superseded archive built on those bytes |
 | \`3bdaff3e…\` | superseded archive from the attribution cut, voided in the edit that supersedes it |
+| \`c7bb9ee4…\` | **superseded product tarball — MM_REFLECT=staged could silently retire a skill, and the documented instrument-init command did not exist. Do not review it.** |
+| \`4387c4ce…\` | superseded archive built on those bytes |
+| \`5d3d3e4d…\`, \`eb7a7fa8…\` | superseded commits from the attribution cut |
 | \`452e663e…\`, \`bffb648d…\`, \`f64dd50b…\` | superseded commits from the evidence-integrity v2 cut |
 | \`9d5093eb…\`, \`c4186c2a…\`, \`a527e649…\` | superseded commits from the docs-honesty cut |
 
