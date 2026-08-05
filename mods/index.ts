@@ -69,6 +69,19 @@ export const __mm = { meshAgentLabel, initInstrumentKey, summarizePossessionLedg
   applySemanticEvidence, semanticSkillCandidates, syncSkillPassages, coachOnFailure, collectWins, renderWins };
 
 
+/**
+ * The ONLY way an automatic prune may happen. Retirement is never a side effect of reflection:
+ * `staged` must not mean quietly benched. Explicit user-initiated prune
+ * (`/muscle-memory lifecycle prune`) calls runAutonomousPrune directly and is not routed here.
+ *
+ * This exists as a single named choke point because the previous fix gated one of the two
+ * reflect hooks and the other survived review.
+ */
+function autoPruneIfEnabled(ctx: any): void {
+  if (process.env.MM_PRUNE !== "enabled") return;
+  try { runAutonomousPrune(ctx, { maxRetire: 1 }); } catch { /* prune must never break the app */ }
+}
+
 export default function activate(letta: any) {
   const disposers: Array<() => void> = [];
   let panel: any = null; // live scoreboard panel (assigned below; referenced by event handlers)
@@ -459,7 +472,7 @@ export default function activate(letta: any) {
           // never be quietly benched because a session ended. Real retirement requires an
           // explicit opt-in or an explicit lifecycle action, so this only surfaces advice.
           .then(() => {
-            if (process.env.MM_PRUNE === "enabled") runAutonomousPrune(ctx ?? { agentId: event?.agentId }, { maxRetire: 1 });
+            autoPruneIfEnabled(ctx ?? { agentId: event?.agentId });
             try { panel?.update(); } catch { /* */ }
           })
           .catch(() => { /* reflection/prune must never break the app */ });
@@ -487,7 +500,7 @@ export default function activate(letta: any) {
       } catch { return; }
       autoReflectInFlight = true;
       runReflectiveReview(ctx ?? { agentId: event?.agentId }, { mode: rfMode, semanticFn: semanticFnFor(event?.agentId ?? ctx?.agent?.id) })
-        .then(() => { runAutonomousPrune(ctx ?? { agentId: event?.agentId }, { maxRetire: 1 }); try { panel?.update(); } catch { /* */ } })
+        .then(() => { autoPruneIfEnabled(ctx ?? { agentId: event?.agentId }); try { panel?.update(); } catch { /* */ } })
         .catch(() => { /* reflection must never break the app */ })
         .finally(() => { autoReflectInFlight = false; });
     }));

@@ -5676,6 +5676,13 @@ var __mm = {
   collectWins,
   renderWins
 };
+function autoPruneIfEnabled(ctx) {
+  if (process.env.MM_PRUNE !== "enabled")
+    return;
+  try {
+    runAutonomousPrune(ctx, { maxRetire: 1 });
+  } catch {}
+}
 function activate(letta) {
   const disposers = [];
   let panel = null;
@@ -6079,8 +6086,7 @@ STATUS · ${res.reason}`;
       const rfMode = process.env.MM_REFLECT;
       if (rfMode === "staged" || rfMode === "auto") {
         runReflectiveReview(ctx ?? { agentId: event?.agentId }, { mode: rfMode, semanticFn: semanticFnFor(event?.agentId ?? ctx?.agent?.id) }).then(() => {
-          if (process.env.MM_PRUNE === "enabled")
-            runAutonomousPrune(ctx ?? { agentId: event?.agentId }, { maxRetire: 1 });
+          autoPruneIfEnabled(ctx ?? { agentId: event?.agentId });
           try {
             panel?.update();
           } catch {}
@@ -6103,7 +6109,7 @@ STATUS · ${res.reason}`;
       }
       autoReflectInFlight = true;
       runReflectiveReview(ctx ?? { agentId: event?.agentId }, { mode: rfMode, semanticFn: semanticFnFor(event?.agentId ?? ctx?.agent?.id) }).then(() => {
-        runAutonomousPrune(ctx ?? { agentId: event?.agentId }, { maxRetire: 1 });
+        autoPruneIfEnabled(ctx ?? { agentId: event?.agentId });
         try {
           panel?.update();
         } catch {}

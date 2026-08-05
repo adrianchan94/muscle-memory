@@ -102,11 +102,38 @@ test("claim: an unmanaged skill is never retired by muscle-memory", () => {
   expect(existsSync(join(dir, "SKILL.md"))).toBe(true);
 });
 
-test("claim: the conversation-close hook does not retire unless MM_PRUNE is enabled", () => {
-  // The P0 itself. Asserted at the call site rather than in the docs: index.ts must gate the
-  // prune call behind an explicit opt-in, so `staged` can never mean quietly benched.
+test("claim: NO automatic path can retire without the explicit opt-in", () => {
+  // The previous version of this test regex-matched a single hook. Two reflect hooks call prune;
+  // I gated one, the other survived, and this test passed anyway — a class-killer that checked
+  // one instance of its own class. It now enumerates EVERY call site mechanically.
   const src = readFileSync(join(import.meta.dir, "..", "mods", "index.ts"), "utf8");
-  const hook = /rfMode === "staged" \|\| rfMode === "auto"[\s\S]{0,900}?runAutonomousPrune/.exec(src)?.[0] ?? "";
-  expect(hook).toContain("runAutonomousPrune");
-  expect(hook).toMatch(/MM_PRUNE === "enabled"/);
+  const lines = src.split("\n");
+
+  // The single sanctioned choke point, and the one explicit user-initiated command.
+  const gate = lines.findIndex((l) => l.includes("function autoPruneIfEnabled"));
+  expect(gate).toBeGreaterThan(-1);
+  expect(lines.slice(gate, gate + 4).join("\n")).toMatch(/MM_PRUNE !== "enabled"/);
+
+  const ungated: string[] = [];
+  lines.forEach((line, i) => {
+    if (!/\brunAutonomousPrune\s*\(/.test(line)) return;
+    if (i >= gate && i < gate + 6) return;                       // the gate's own body
+    const context = lines.slice(Math.max(0, i - 6), i + 1).join("\n");
+    const userInitiated = /a\.action === "prune"/.test(context); // explicit command, documented
+    if (!userInitiated) ungated.push(`${i + 1}: ${line.trim().slice(0, 90)}`);
+  });
+  expect(ungated).toEqual([]);
+});
+
+test("claim: every reflect hook routes prune through the gate, not directly", () => {
+  const src = readFileSync(join(import.meta.dir, "..", "mods", "index.ts"), "utf8");
+  // Both hooks exist and both must call the choke point.
+  for (const hook of ["conversation_close", "turn_end"]) expect(src).toContain(hook);
+  const reflectBlocks = [...src.matchAll(/runReflectiveReview\([\s\S]{0,400}?\.then\(\(\) => \{([\s\S]{0,200}?)\}\)/g)]
+    .map((m) => m[1]!);
+  expect(reflectBlocks.length).toBeGreaterThan(0);
+  for (const block of reflectBlocks) {
+    if (!block.includes("Prune") && !block.includes("prune")) continue;
+    expect(block).toContain("autoPruneIfEnabled");
+  }
 });
