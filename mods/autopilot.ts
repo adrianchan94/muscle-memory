@@ -379,7 +379,7 @@ export function pickUpdateTarget<T extends { name: string; score: number; matche
 }
 
 
-// ── COMPOUNDS-TRULY safety layer (from Kev's preserve-update lane): an update must never destroy a
+// ── COMPOUNDS-TRULY safety layer (preserve-update lane): an update must never destroy a
 // proven skill's core, and ambiguous overlap must refuse autonomous create (anti-bloat). ──
 export function isAmbiguousExistingRoute<T extends { name: string; score: number; matched: number }>(matches: T[], threshold = 18): boolean {
   const top = matches[0], second = matches[1];
@@ -853,7 +853,7 @@ export async function runReflectiveReview(ctx: any, config: { mode?: "staged" | 
       const verb = graduate ? "graduated" : (res.action === "update" ? "staged update to" : "staged");
       const summary = `${verb} '${res.name}' (${res.action === "update" ? "update-first" : "new"}, ${ev.convs} sessions/${ev.items} signals)`;
       appendUiEvent({ phase, summary, skill: res.name, action: res.action, route: res.updateTarget ? `update ${res.updateTarget}` : "create" });
-      appendMeshFeed({ type: phase, skill: res.name, route: graduate ? "GRADUATE" : res.action.toUpperCase(), signals: ev.items }); // cross-agent feed (see Mack + Kev distilling)
+      appendMeshFeed({ type: phase, skill: res.name, route: graduate ? "GRADUATE" : res.action.toUpperCase(), signals: ev.items }); // cross-agent feed (see peer agents distilling)
       markHandledReflect(sig, routeKey);
       appendUiEvent({ phase: "evidence_manifest_written", summary: "wrote evidence manifest" });
       if (ev.rejected.length) appendUiEvent({ phase: "noise_rejected", summary: `rejected ${ev.rejected.length} env-noise items` });

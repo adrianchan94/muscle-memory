@@ -493,7 +493,7 @@ export default function activate(letta: any) {
       setLivePanel(panel); // enable LIVE re-render on every state change
       // SELF-HEAL on (re)load: a reflect cannot survive a reload, so any transient phase persisted here
       // is necessarily stale (interrupted mid-author). Reset it to idle so the panel never opens stuck on
-      // "✍️ writing skill…" (the hour-long freeze Adrian hit 2026-06-27). Then repaint immediately.
+      // "✍️ writing skill…" (guards the hour-long freeze observed 2026-06-27). Then repaint immediately.
       try {
         const s = readUiState();
         if (["reviewing", "routing", "writing", "shaping", "checking", "saving", "testing", "earned", "learned", "updated", "rotation", "benched", "done"].includes(String(s?.phase || ""))) {
@@ -535,7 +535,7 @@ export default function activate(letta: any) {
         }
         if (sub === "squad") {
           const feed = loadMeshFeed(10);
-          return { type: "output", output: feed.length ? "💾 squad distillations (cross-agent):\n" + renderMeshFeed(feed).map((l) => `  ${l}`).join("\n") : "(no squad distillations yet — Mack + Kev appear here as they distill)" };
+          return { type: "output", output: feed.length ? "💾 squad distillations (cross-agent):\n" + renderMeshFeed(feed).map((l) => `  ${l}`).join("\n") : "(no squad distillations yet — other agents sharing this feed appear here as they distill)" };
         }
         if (sub === "prescribe") {
           const hasGap = String(argv?.[1] || "").toLowerCase() === "--gap";

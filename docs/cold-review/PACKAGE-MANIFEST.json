@@ -10,23 +10,23 @@
   ],
   "tarball": {
     "name": "adrianchan94-muscle-memory-1.0.0-rc.3.tgz",
-    "sha256": "00f094c2d1f40df8b7d3ab5e859a3c8741a611d618b731451fca53cefd3b494b",
-    "bytes": 249888,
-    "npmReportedSize": 249888,
-    "npmReportedUnpackedSize": 866092,
+    "sha256": "1a7b35a0947f16aeb547aa1598932bfdac27ef20cc663f76d1e4c79875050a13",
+    "bytes": 250335,
+    "npmReportedSize": 250335,
+    "npmReportedUnpackedSize": 867737,
     "fileCount": 21
   },
   "bundle": {
     "path": "mods/index.bundled.mjs",
-    "committedSha256": "cc76f41c850bde26b13c6e909ecdbbaf11d386822d50ca96b6f47ae7dd745c27",
-    "rebuiltFromSourceSha256": "cc76f41c850bde26b13c6e909ecdbbaf11d386822d50ca96b6f47ae7dd745c27",
+    "committedSha256": "a9e4ef52a12a4b530637d2ece586c8270371f57adafc5406bb6a3fb7dfb54576",
+    "rebuiltFromSourceSha256": "a9e4ef52a12a4b530637d2ece586c8270371f57adafc5406bb6a3fb7dfb54576",
     "parity": true
   },
   "shippedFiles": [
     {
       "path": "CHANGELOG.md",
-      "bytes": 25658,
-      "sha256": "6b3d37df746170930d839d911174143db6cde671eead33d91c36e539ddbc4676"
+      "bytes": 26832,
+      "sha256": "8930e603004629db45f32d0f25cc0c3f6c4d57f321161946751c452c5038778d"
     },
     {
       "path": "LICENSE",
@@ -40,18 +40,18 @@
     },
     {
       "path": "README.md",
-      "bytes": 42669,
-      "sha256": "f04d7632697266e77ee0537f2a209bcf7afa40c07721fa9cdb0642b6358a4726"
+      "bytes": 43095,
+      "sha256": "08a526c11ec42ae53d6b42bb1070774f4e383fbacdbc59b6f892e7fcb603f699"
     },
     {
       "path": "mods/autopilot.ts",
-      "bytes": 74678,
-      "sha256": "8dc59e7eff3821b2b2167a9313c53ae08c1ddef691adeb10f18ee2d010d09007"
+      "bytes": 74668,
+      "sha256": "bea4acd0554b3b0df41509087717b26a01b93af7984dfc6bab0192df3c290785"
     },
     {
       "path": "mods/core.ts",
-      "bytes": 37191,
-      "sha256": "0270f05cd2d7ffdd554b60c72c1988e1ae4d9d019d0de98df23cb66428b01a86"
+      "bytes": 37201,
+      "sha256": "1302f8caaf814c55ba278f006084e170482029016f9fd02a1700a60dd6c4d396"
     },
     {
       "path": "mods/detect.ts",
@@ -75,13 +75,13 @@
     },
     {
       "path": "mods/index.bundled.mjs",
-      "bytes": 332066,
-      "sha256": "cc76f41c850bde26b13c6e909ecdbbaf11d386822d50ca96b6f47ae7dd745c27"
+      "bytes": 332086,
+      "sha256": "a9e4ef52a12a4b530637d2ece586c8270371f57adafc5406bb6a3fb7dfb54576"
     },
     {
       "path": "mods/index.ts",
-      "bytes": 106555,
-      "sha256": "8b575d94f4963cc29e8534cfe61569a9a2f6a07c6bda90b2181c25aa2f7a7e3c"
+      "bytes": 106580,
+      "sha256": "437b42def663287c941a43c2e0e3f8e89674add2a4c59058bdec19a9bb653792"
     },
     {
       "path": "mods/lifecycle.ts",

@@ -110,7 +110,9 @@ const manifest = {
   files: {},
 };
 
-const archiveName = "mm-v1-rc3-cold-review-20260805.tar.gz";
+// Derived from the version, not a baked-in date: a reseal on a later day must not
+// inherit a filename that misstates when it was sealed.
+const archiveName = `mm-v${pkg.version}-cold-review.tar.gz`;
 
 // ── 5b · the brief is GENERATED from the derived values, never hand-written ──
 const brief = `# Cold review — Muscle Memory \`${pkg.version}\`
@@ -158,6 +160,9 @@ of these, you have the wrong bytes and the review does not count:
 2. Verify its sha256 matches the table above **before** extracting.
 3. Extract it and read \`kit/START-HERE.md\`, then \`kit/MANIFEST.json\`.
 4. Work offline and read-only. Do not push, comment, or contact anyone.
+   The snapshot is a content export (\`git archive\`), so it carries no git history. Diff-checking
+   it against a clone is content-level only; history verification is done by comparing the frozen
+   commit SHA on GitHub. No git bundle is included, deliberately.
 5. Return the verdict block from \`docs/cold-review/REVIEW-CHECKLIST.md\` inside the snapshot.
 
 **The archive must be attached with this brief.** A review performed against the PR head without

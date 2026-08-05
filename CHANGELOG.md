@@ -22,6 +22,11 @@ All notable changes to `@adrianchan94/muscle-memory`. Format loosely follows [Ke
 
 ### Fixed — privacy
 - The publish sanitizer hardcoded the author's local username and personal name into the shipped package in order to redact them. Those literals are removed. Operator identity is derived at runtime from `userInfo()` and git config, which already ran on the next line — so redaction now covers **every** user instead of one, and no personal handle ships to consumers.
+- A cold review found operator names in **consumer-visible runtime output**: the empty squad feed told every user that two named individuals appear there as they distill. Replaced with generic product language, and four developer comments naming individuals were removed. `package.json` author/contributors and `LICENSE` keep their names — that is what those fields are for.
+- Adds `test/consumer-surface-privacy.test.ts`, which runs against the **packed artifact**: no operator name may ship outside sanctioned authorship metadata, the squad empty state is driven through the real command path and asserted name-free, and no relative link in the packed README may point outside the tarball. Verified to fail on all five pre-fix offenders.
+
+### Fixed — npm README links
+- Six relative links in the README pointed at files the package deliberately excludes (`docs/`, `SECURITY.md`, `CONTRIBUTING.md`, `demo.gif`), so they were dead for anyone reading the packaged README. Rewritten to tag-stable absolute GitHub URLs, which resolve regardless of how a registry renders relative paths. `./MOD.md` stays relative because it ships. The git-install route was never affected.
 
 ### Added — research instrument kit
 - `docs/research/STUDY-CONTRACT.md` — the eight fields every measurement carries, and the three-level reproducibility table (package reproducible · minimal fixture reproducible · full program auditable but not publicly reproducible).

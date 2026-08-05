@@ -530,7 +530,7 @@ export const AUTOPILOT_STATE = join(STATE_DIR, "autopilot-state.json");
 // ════════════════════════════════════════════════════════════════════════════
 // v3.3 — HERMES-VISIBLE UI: surface compact, FINISHED self-improvement summaries
 // (not chain-of-thought) via a Letta panel + events ledger. No transcript hack —
-// only the supported openPanel + command APIs. Adrian: "let me SEE it distilling."
+// only the supported openPanel + command APIs — distillation must be visible while it happens.
 // ════════════════════════════════════════════════════════════════════════════
 export const UI_EVENTS = join(STATE_DIR, "ui-events.jsonl");
 
@@ -563,7 +563,7 @@ export function readUiState(): Record<string, any> { try { return existsSync(UI_
 export function loadUiEvents(n = 8): UiEvent[] { if (!existsSync(UI_EVENTS)) return []; const out: UiEvent[] = []; for (const l of readFileSync(UI_EVENTS, "utf8").trim().split("\n")) { if (!l) continue; try { out.push(JSON.parse(l)); } catch { /* */ } } return out.slice(-n); }
 
 
-// CROSS-AGENT MESH FEED — shared so the panel shows BOTH Mack (local) + Kev (cloud) distilling.
+// CROSS-AGENT MESH FEED — shared so the panel shows both local and cloud agents distilling.
 // Best-effort; never breaks reflect. Redacted (skill name + route + counts only).
 export const MESH_FEED = process.env.MM_MESH_FEED
   || (process.env.MM_STATE_DIR ? join(STATE_DIR, "mesh-skill-feed.jsonl") : join(homedir(), ".local", "state", "mesh-skill-feed.jsonl"));

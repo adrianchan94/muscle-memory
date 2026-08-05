@@ -81,11 +81,11 @@ letta install git:github.com/adrianchan94/muscle-memory
 
 That is the whole install. A fresh agent then sees **three tools** — `muscle_memory_prescribe`, `muscle_memory_close`, and a bounded read — and an idle status line, `💾 muscle-memory · N skills · H helped`. Mutation, lifecycle, ratings, verification, and diagnostics stay hidden until you set `MM_ADVANCED=on`. The memory system should not eat the context it is trying to improve.
 
-The npm identity is **`@adrianchan94/muscle-memory`**, but it is **not published**; this is a release candidate. See the [RC3 release notes](./docs/RELEASE-NOTES-v1.0.0-rc.3.md) and [cold-review kit](./docs/cold-review/README.md) for the gates.
+The npm identity is **`@adrianchan94/muscle-memory`**, but it is **not published**; this is a release candidate. See the [RC3 release notes](https://github.com/adrianchan94/muscle-memory/blob/v1.0.0-rc.3/docs/RELEASE-NOTES-v1.0.0-rc.3.md) and [cold-review kit](https://github.com/adrianchan94/muscle-memory/blob/v1.0.0-rc.3/docs/cold-review/README.md) for the gates.
 
-[Research record](https://muscle-memory-v1-research.vercel.app/) · [Research kit](./docs/research/README.md) · [RC3 release notes](./docs/RELEASE-NOTES-v1.0.0-rc.3.md) · [Agent guide](./MOD.md) · [Provenance](#source-ownership-and-lineage) · [Security](./SECURITY.md) · [Contributing](./CONTRIBUTING.md)
+[Research record](https://muscle-memory-v1-research.vercel.app/) · [Research kit](https://github.com/adrianchan94/muscle-memory/blob/v1.0.0-rc.3/docs/research/README.md) · [RC3 release notes](https://github.com/adrianchan94/muscle-memory/blob/v1.0.0-rc.3/docs/RELEASE-NOTES-v1.0.0-rc.3.md) · [Agent guide](./MOD.md) · [Provenance](#source-ownership-and-lineage) · [Security](https://github.com/adrianchan94/muscle-memory/blob/v1.0.0-rc.3/SECURITY.md) · [Contributing](https://github.com/adrianchan94/muscle-memory/blob/v1.0.0-rc.3/CONTRIBUTING.md)
 
-![muscle-memory live demo](./demo.gif)
+![muscle-memory live demo](https://github.com/adrianchan94/muscle-memory/raw/v1.0.0-rc.3/demo.gif)
 
 <sub>Demo GIF is a repository review artifact and is excluded from the packed release.</sub>
 

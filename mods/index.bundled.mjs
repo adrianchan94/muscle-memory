@@ -5725,7 +5725,7 @@ STATUS · ${res.reason}`;
           const feed = loadMeshFeed(10);
           return { type: "output", output: feed.length ? `\uD83D\uDCBE squad distillations (cross-agent):
 ` + renderMeshFeed(feed).map((l) => `  ${l}`).join(`
-`) : "(no squad distillations yet — Mack + Kev appear here as they distill)" };
+`) : "(no squad distillations yet — other agents sharing this feed appear here as they distill)" };
         }
         if (sub === "prescribe") {
           const hasGap = String(argv?.[1] || "").toLowerCase() === "--gap";
