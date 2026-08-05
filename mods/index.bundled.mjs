@@ -4527,13 +4527,20 @@ function claimBearingVerdict(decision, outcome) {
   if (!sameRow || !sameInstrumentEvent) {
     return { verified: false, proceduralCredit: false, downgrade: "evidence_transplanted" };
   }
+  const attributedSkill = String(payload.skill ?? "");
+  const attributedResult = String(payload.result_class ?? "");
+  const skillDisagrees = !!decision.skill && attributedSkill !== decision.skill;
+  const resultDisagrees = !!outcome.result && !!attributedResult && attributedResult !== outcome.result;
+  if (skillDisagrees || resultDisagrees) {
+    return { verified: false, proceduralCredit: false, downgrade: "attribution_mismatch" };
+  }
   const namedInvocation = String(payload.invocation_receipt_id ?? "").trim();
   if (namedInvocation) {
     const owned = loadInvocations().some((row) => row.invocation_id === namedInvocation && row.possession_id === decision.possession_id);
     if (!owned)
       return { verified: false, proceduralCredit: false, downgrade: "evidence_transplanted" };
   }
-  return { verified: true, proceduralCredit: verdict.proceduralCredit, proceduralReason: verdict.proceduralReason };
+  return { verified: true, proceduralCredit: verdict.proceduralCredit, proceduralReason: verdict.proceduralReason, attributedSkill };
 }
 function summarizePossessions(events, integrity = cleanIntegrity()) {
   const decisions = events.filter((event) => event.type === "decision");
@@ -4571,6 +4578,7 @@ function summarizePossessions(events, integrity = cleanIntegrity()) {
   let judgedGood = 0;
   let unboundVerifiedDowngraded = 0;
   let transplantDemoted = 0;
+  let attributionMismatch = 0;
   let verifiedNeutralDecisions = 0;
   let prescribedEvaluated = 0;
   for (const decision of decisions) {
@@ -4611,6 +4619,8 @@ function summarizePossessions(events, integrity = cleanIntegrity()) {
       unboundVerifiedDowngraded++;
     if (verdict.downgrade === "evidence_transplanted")
       transplantDemoted++;
+    if (verdict.downgrade === "attribution_mismatch")
+      attributionMismatch++;
     let good = false;
     if (decision.action === "prescribe") {
       prescribedEvaluated++;
@@ -4727,6 +4737,7 @@ function summarizePossessions(events, integrity = cleanIntegrity()) {
     judgedGoodDecisions: judgedGood,
     unboundVerifiedDowngraded,
     transplantDemoted,
+    attributionMismatch,
     verifiedNeutralDecisions,
     decisionEfficiencyPct: pct(goodDecisions, scoredDecisions),
     verifiedEfficiencyPct: pct(verifiedGood, verifiedDecisions),
@@ -5737,8 +5748,9 @@ function activate(letta) {
       helped++;
       if (outcome.evidence_tier !== "verified" || !decision.verification || !outcome.verification)
         continue;
-      if (claimBearingVerdict(decision, outcome).verified)
-        provenNames.add(decision.skill);
+      const verdict = claimBearingVerdict(decision, outcome);
+      if (verdict.verified)
+        provenNames.add(verdict.attributedSkill || decision.skill);
     }
     return { total: active.size, proven: provenNames.size, provenNames: [...provenNames].sort(), helped };
   };

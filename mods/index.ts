@@ -124,7 +124,9 @@ export default function activate(letta: any) {
       // Qualifying closed helped prescriptions only — not ratings, uses, abstentions, or proof claims.
       helped++;
       if (outcome.evidence_tier !== "verified" || !decision.verification || !outcome.verification) continue;
-      if (claimBearingVerdict(decision, outcome).verified) provenNames.add(decision.skill);
+      // The jersey goes to the skill the SIGNATURE names, never the unsigned row field.
+      const verdict = claimBearingVerdict(decision, outcome);
+      if (verdict.verified) provenNames.add(verdict.attributedSkill || decision.skill);
     }
     return { total: active.size, proven: provenNames.size, provenNames: [...provenNames].sort(), helped };
   };

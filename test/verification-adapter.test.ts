@@ -98,7 +98,7 @@ test("A · a pre-existing correct target is artifact-verified but earns no proce
     ts: 300,
     type: "outcome",
     ...verified,
-  });
+  }, verified.evidence_context);
 
   const summary = summarizePossessionLedger();
   expect(summary).toMatchObject({
@@ -139,7 +139,7 @@ test("adapter determines a verified negative when the artifact does not match", 
     ts: 300,
     type: "outcome",
     ...verified,
-  });
+  }, verified.evidence_context);
   expect(summarizePossessionLedger()).toMatchObject({
     verifiedDecisions: 1,
     verifiedGoodDecisions: 0,
@@ -447,7 +447,7 @@ test("decision binding rejects wrong task class, late registration, and replayed
     ts: 400,
     type: "outcome",
     ...verified,
-  });
+  }, verified.evidence_context);
   const second = verifyExactFilePossession(valid);
   expect(() => recordInstrumentVerifiedOutcome({
     schema: "mm.possession.v1",

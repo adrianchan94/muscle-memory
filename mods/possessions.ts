@@ -40,7 +40,10 @@ export type EvidenceDowngradeReason =
   | "legacy_unsigned" | "missing_signature" | "bad_signature" | "key_unavailable" | "unknown_key"
   // An authentic signature lifted off a DIFFERENT possession and pasted onto this row. Its own
   // reason because a reviewer must be able to see credit theft as distinct from a lost key.
-  | "evidence_transplanted";
+  | "evidence_transplanted"
+  // The signature was valid but the unsigned row disagrees with it about WHO earned the credit
+  // or WHAT the result was. A valid signature on a mislabelled row is a false jersey.
+  | "attribution_mismatch";
 
 /** Why an authenticated row still earned no procedural credit. Artifact truth and causation are
  *  separate questions: a target that was already correct proves nothing about the skill. */
@@ -261,6 +264,8 @@ export type PossessionSummary = {
   unboundVerifiedDowngraded: number;
   /** Authentic evidence found on a row it does not describe — credit theft, counted separately. */
   transplantDemoted: number;
+  /** Signature valid, but the row disagreed about who or what earned it. */
+  attributionMismatch: number;
   verifiedNeutralDecisions: number;
   decisionEfficiencyPct: number | null;
   verifiedEfficiencyPct: number | null;
@@ -654,7 +659,7 @@ export function pendingPossessionViews(events: PossessionEvent[]): SafePossessio
 export function claimBearingVerdict(
   decision: { verification?: unknown; possession_id: string; event_id: string },
   outcome: { evidence_tier?: string; verification?: unknown; evidence?: { payload?: Record<string, unknown>; signature?: unknown } },
-): { verified: boolean; proceduralCredit: boolean; downgrade?: EvidenceDowngradeReason; proceduralReason?: ProceduralDenialReason } {
+): { verified: boolean; proceduralCredit: boolean; downgrade?: EvidenceDowngradeReason; proceduralReason?: ProceduralDenialReason; attributedSkill?: string } {
   if (outcome.evidence_tier !== "verified") return { verified: false, proceduralCredit: false };
 
   const key = currentInstrumentKey();
@@ -685,6 +690,18 @@ export function claimBearingVerdict(
   if (!sameRow || !sameInstrumentEvent) {
     return { verified: false, proceduralCredit: false, downgrade: "evidence_transplanted" };
   }
+
+  // ATTRIBUTION. The payload is signed; decision.skill and outcome.result are not. A ledger-only
+  // edit of either leaves the signature valid while every agent-facing surface — roster, proven
+  // names, status line — credits the wrong skill or the wrong outcome. Authenticated identity
+  // wins, and any disagreement refuses rather than displays.
+  const attributedSkill = String(payload.skill ?? "");
+  const attributedResult = String(payload.result_class ?? "");
+  const skillDisagrees = !!decision.skill && attributedSkill !== decision.skill;
+  const resultDisagrees = !!outcome.result && !!attributedResult && attributedResult !== outcome.result;
+  if (skillDisagrees || resultDisagrees) {
+    return { verified: false, proceduralCredit: false, downgrade: "attribution_mismatch" };
+  }
   // The invocation named in the payload must also belong to THIS possession. Without this a
   // signature could name a real invocation that happened under someone else's work.
   const namedInvocation = String(payload.invocation_receipt_id ?? "").trim();
@@ -696,7 +713,7 @@ export function claimBearingVerdict(
   // `verified` is about PROVENANCE, not about whether the artifact matched. A verified negative
   // is still instrument-derived evidence and must count as verified; whether it matched decides
   // the result class, not the tier. Conflating the two suppressed genuine negatives.
-  return { verified: true, proceduralCredit: verdict.proceduralCredit, proceduralReason: verdict.proceduralReason };
+  return { verified: true, proceduralCredit: verdict.proceduralCredit, proceduralReason: verdict.proceduralReason, attributedSkill };
 }
 
 /** Derive score from explicit exposures and closed outcomes. Usage and pending rows never become wins. */
@@ -735,6 +752,7 @@ export function summarizePossessions(events: PossessionEvent[], integrity: Ledge
   let judgedGood = 0;
   let unboundVerifiedDowngraded = 0;
   let transplantDemoted = 0;
+  let attributionMismatch = 0;
   let verifiedNeutralDecisions = 0;
   let prescribedEvaluated = 0;
 
@@ -769,6 +787,7 @@ export function summarizePossessions(events: PossessionEvent[], integrity: Ledge
     const boundVerified = verdict.verified;
     if (outcome.evidence_tier === "verified" && !boundVerified) unboundVerifiedDowngraded++;
     if (verdict.downgrade === "evidence_transplanted") transplantDemoted++;
+    if (verdict.downgrade === "attribution_mismatch") attributionMismatch++;
     let good = false;
 
     if (decision.action === "prescribe") {
@@ -884,6 +903,7 @@ export function summarizePossessions(events: PossessionEvent[], integrity: Ledge
     judgedGoodDecisions: judgedGood,
     unboundVerifiedDowngraded,
     transplantDemoted,
+    attributionMismatch,
     verifiedNeutralDecisions,
     decisionEfficiencyPct: pct(goodDecisions, scoredDecisions),
     verifiedEfficiencyPct: pct(verifiedGood, verifiedDecisions),

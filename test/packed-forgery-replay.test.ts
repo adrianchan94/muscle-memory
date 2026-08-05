@@ -518,3 +518,31 @@ Object.assign(out, score());
   expect(r.refused, JSON.stringify(r)).toBe(1);
   expect(r.vg).toBe(0);
 }, 90_000);
+
+test("attribution · a ledger edit cannot move the jersey to another skill", () => {
+  // The signature covers payload.skill, but roster and provenNames read the UNSIGNED
+  // decision.skill. Editing that one field left the signature valid while every agent-facing
+  // surface credited a skill that never ran — a false proven jersey with real cryptography
+  // behind it. Authenticated identity now wins, and disagreement refuses outright.
+  const r = attack(`
+await register("t1", "target.txt");
+const pid = await prescribe("t1");
+const cid = "c-attr";
+fire("tool_start", { toolName: "Skill", toolCallId: cid, args: { skill: "recovering-failed-exact-match-edits" } });
+writeFileSync(join(W, "target.txt"), "repaired" + NL);
+fire("tool_end", { toolName: "Skill", toolCallId: cid, status: "success", output: "ok" });
+await verify(pid);
+const clean = mm.summarizePossessionLedger();
+out.honestVg = clean.verifiedGoodDecisions;
+// ledger-only mutation: relabel who earned it. Signature untouched and still valid.
+const rows = readFileSync(LEDGER, "utf8").trim().split(NL).map(JSON.parse);
+for (const row of rows) if (row.type === "decision") row.skill = "some-other-skill";
+writeFileSync(LEDGER, rows.map((x) => JSON.stringify(x)).join(NL) + NL);
+const after = mm.summarizePossessionLedger();
+out.afterVg = after.verifiedGoodDecisions;
+out.attributionMismatch = after.attributionMismatch ?? 0;
+`);
+  expect(r.honestVg, JSON.stringify(r)).toBe(1);
+  expect(r.afterVg, JSON.stringify(r)).toBe(0);          // no credit survives a relabel
+  expect(r.attributionMismatch).toBeGreaterThan(0);      // and the attempt is visible
+}, 90_000);
