@@ -46,7 +46,7 @@ The research demonstrates bounded effects in tested tool-use tasks. It does not 
 - Historical reference candidate: `1.0.0-rc.2`, product tarball `e2b9c4a1…`, cold-review archive v6.
 - New owner candidate: `1.0.0-rc.3`.
   - packed tarball sha256 `00f094c2d1f40df8b7d3ab5e859a3c8741a611d618b731451fca53cefd3b494b` · 249888 B
-  - bundled entry sha256 `6a3ab91243780550088e2417c4b56012ee3f5cb60484156d2d2997148a24e60e`
+  - bundled entry sha256: see `docs/cold-review/PACKAGE-MANIFEST.json` → `bundle.committedSha256` (derived at generation time, never restated by hand)
   - minted from the packed file set (`MOD.md`, `CHANGELOG.md`, `README.md`, `LICENSE`, `mods`) after the review bytes settled. Any further edit to those paths invalidates this hash and requires a re-mint.
   - awaiting independent custody confirmation; not yet cold-reviewed.
 - RC3 requires fresh package gates, packed-consumer smoke, cold review, and independent custody. It does not inherit RC2/v6 qualification by similarity.

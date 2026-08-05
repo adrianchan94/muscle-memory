@@ -9,7 +9,9 @@ CANDIDATE
 EXACT BYTES
   packed tarball     00f094c2d1f40df8b7d3ab5e859a3c8741a611d618b731451fca53cefd3b494b
   tarball bytes      249888
-  bundled entry      6a3ab91243780550088e2417c4b56012ee3f5cb60484156d2d2997148a24e60e
+  bundled entry      see PACKAGE-MANIFEST.json -> bundle.committedSha256
+                     (derived, never restated by hand; a hand-copied bundle hash
+                      already went stale once and was caught in custody review)
   packed file set    MOD.md, CHANGELOG.md, README.md, LICENSE, mods/   (21 files)
 
   The tarball is NOT committed. Rebuild it with `npm ci && npm run build && npm pack`
