@@ -177,6 +177,9 @@ of these, you have the wrong bytes and the review does not count:
 | \`9e7b7668…\` | superseded archive previously placed on the Desktop |
 | \`6bd385b0…\`, \`39057acc…\` | superseded archives from the void-ledger completion reseals |
 | \`cc9241d2…\`, \`3fbfa9f7…\`, \`5e516367…\`, \`82e9b16a…\` | superseded archives from the docs-honesty cut |
+| \`778c6c59…\` | **superseded product tarball — vulnerable to evidence transplant, forged invocation, and pre-decision window. Do not review it.** |
+| \`a30a5735…\` | superseded archive built on those vulnerable bytes |
+| \`d0293f72…\` | superseded commit — the head before the evidence-integrity v2 cut |
 | \`9d5093eb…\`, \`c4186c2a…\`, \`a527e649…\` | superseded commits from the docs-honesty cut |
 
 The cold-review archive is a gzip of a tar and carries timestamps, so **the archive sha is not
