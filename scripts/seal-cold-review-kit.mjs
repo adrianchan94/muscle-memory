@@ -189,6 +189,7 @@ of these, you have the wrong bytes and the review does not count:
 | \`b595722b…\` | **superseded product tarball — the turn_end reflect hook could still auto-retire without the opt-in. Do not review it.** |
 | \`1dc93fa0…\` | superseded archive built on those bytes |
 | \`182d67a2…\` | superseded archive from the prune-gate cut, voided in the edit that supersedes it |
+| \`9ffda0cf…\` | superseded archive — its README restated a void product sha as current; voided in the edit that supersedes it |
 | \`36731473…\`, \`d8eb6788…\`, \`6a2b3536…\` | superseded commits from the claim-honesty cut |
 | \`452e663e…\`, \`bffb648d…\`, \`f64dd50b…\` | superseded commits from the evidence-integrity v2 cut |
 | \`9d5093eb…\`, \`c4186c2a…\`, \`a527e649…\` | superseded commits from the docs-honesty cut |
