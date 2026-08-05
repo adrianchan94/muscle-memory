@@ -26,7 +26,7 @@ EXACT BYTES
 
 FROZEN COMMIT
   branch             release/muscle-memory-v1
-  frozen commit      9d5093eb6560016d0745df47b913ca0ef192a84a
+  frozen commit      c4186c2a199e09a04bf9ef8f2f2c709e549b15e7
 
   To confirm you are on it:
     git rev-parse HEAD          # must equal the frozen commit above
@@ -41,8 +41,10 @@ GATES ON THE FROZEN TREE
   package smoke                 PASS, privatePathHits []
 
   CI (ubuntu-latest) for this exact frozen commit:
-    https://github.com/adrianchan94/muscle-memory/actions/runs/30996457269
-    https://github.com/adrianchan94/muscle-memory/actions/runs/30996455983
+    Not restated here — see the sealed archive's MANIFEST.json, field: ci.
+    To look them up yourself:
+      gh run list --branch <branch> --json headSha,conclusion,url \
+        --jq '.[] | select(.headSha=="<FROZEN_SHA>")'
 
 GENERATED EVIDENCE (regenerate and diff)
   node scripts/dump-package-manifest.mjs   -> PACKAGE-MANIFEST.json

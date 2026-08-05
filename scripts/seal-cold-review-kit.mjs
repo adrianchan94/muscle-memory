@@ -118,7 +118,10 @@ const manifest = {
 // publish blocker regardless of runtime quality.
 {
   const { emitFreezeDocs } = await import("./emit-freeze-docs.mjs");
-  const out = emitFreezeDocs({ manifest, ciUrls, frozenCommit });
+  // The freeze record is derived from the PACKAGE manifest (shipped files, bundle hash),
+  // not from the kit manifest being assembled here.
+  const packageManifest = JSON.parse(readFileSync(join(root, "docs", "cold-review", "PACKAGE-MANIFEST.json"), "utf8"));
+  const out = emitFreezeDocs({ manifest: packageManifest, frozenCommit });
   console.error(`freeze docs regenerated: ${out.fileCount} packed files · ${out.counts.pass} pass / ${out.counts.fail} fail`);
 }
 

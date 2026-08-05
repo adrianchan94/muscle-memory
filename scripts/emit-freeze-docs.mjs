@@ -37,7 +37,7 @@ export function runTestCounts() {
   return { pass, fail, files: Number.isFinite(files) ? files : null };
 }
 
-export function emitFreezeDocs({ manifest, ciUrls = [], frozenCommit = git("rev-parse", "HEAD"), testCounts }) {
+export function emitFreezeDocs({ manifest, frozenCommit = git("rev-parse", "HEAD"), testCounts }) {
   const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
   const tarSha = manifest.tarball.sha256;
   const tarBytes = manifest.tarball.bytes;
@@ -56,9 +56,16 @@ export function emitFreezeDocs({ manifest, ciUrls = [], frozenCommit = git("rev-
   if (mintedSha !== tarSha) throw new Error(`freeze docs: minted ${mintedSha} does not match manifest ${tarSha}`);
 
   const counts = testCounts ?? runTestCounts();
-  const ciBlock = ciUrls.length
-    ? ciUrls.map((u) => `    ${u}`).join("\n")
-    : "    (no completed runs observed for this commit at seal time)";
+  // CI run IDs are deliberately NOT inlined here. This file is committed, so any commit that
+  // writes a run ID into it changes the head — and the inlined ID then names the previous commit,
+  // not the one being reviewed. That mismatch already voided a review. The authoritative IDs for
+  // the exact frozen commit live in the sealed kit MANIFEST (field: ci), which is written outside
+  // the snapshot and therefore cannot go stale. Keeping them out also makes this file
+  // deterministic, so sealing twice does not dirty the tree.
+  const ciBlock = `    Not restated here — see the sealed archive's MANIFEST.json, field: ci.
+    To look them up yourself:
+      gh run list --branch <branch> --json headSha,conclusion,url \\
+        --jq '.[] | select(.headSha=="<FROZEN_SHA>")'`;
 
   const freeze = `MUSCLE MEMORY — COLD REVIEW FREEZE RECORD
 =========================================
