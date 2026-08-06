@@ -54,19 +54,25 @@ Legend — **Reach**: `red-checked` = disabling the named defence turns the scen
 | T20 | Packed bundle differs from source; forgery/replay on shipped bytes | `packed-forgery-replay` (14) | **behaviour** | runs against the packed artifact |
 | T21 | Smoke passes without the documented init path | `package-smoke` + K4 | **red-checked** by sabotage | bogus subcommand ⇒ smoke fails |
 
-## Known gaps — not covered, not claimed
+## Residual threats — V1.1, explicitly NOT claimed by V1 G2
 
-| Gap | Why it matters |
-|---|---|
-| Instrument **key rotation** retiring old claims while keeping the product working | rotation is the recovery path after key compromise; untested |
-| A **drifted target** — artifact moves away from expected between registration and closeout | distinguishes a real repair from coincidence |
-| **Sealed-manifest rewrite** after binding | the seal is only as good as its refusal to be re-cut |
-| A **failed skill call** counted as an invocation | inflates exposure counts |
-| A target **already correct** at registration earning credit | the "no procedural credit" claim |
-| Ledger behaviour at **scale** (thousands of rows) | integrity checks are O(n) reads |
+Mack co-signed these as **residual for V1.1**. V1's G2 makes **no claim** about them, and the
+launch packet lists them under residual threats. They are recorded here, beside the coverage,
+because an absence you have to go looking for is an absence that gets forgotten.
+
+| Residual threat | Status | Why it matters |
+|---|---|---|
+| Instrument **key rotation** retiring old claims while keeping the product working | residual V1.1 | rotation is the recovery path after key compromise; untested |
+| A **drifted target** — artifact moves away from expected between registration and closeout | residual V1.1 | distinguishes a real repair from coincidence |
+| **Sealed-manifest rewrite** after binding | residual V1.1 | the seal is only as good as its refusal to be re-cut |
+| A **failed skill call** counted as an invocation | residual V1.1 | inflates exposure counts |
+| A target **already correct** at registration earning credit | residual V1.1 | the "no procedural credit" claim |
+| Ledger behaviour at **scale** (thousands of rows) | residual V1.1 | integrity checks are O(n) reads |
 
 These are the honest remainder. They are named here so the absence is visible in the same document
 that lists the coverage, rather than living in someone's memory.
+
+**V1 G2 FULL does not cover these six.** Any claim that reads otherwise is wrong.
 
 ## Rules this map enforces
 

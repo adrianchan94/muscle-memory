@@ -226,8 +226,20 @@ test("class: the threat map stays in step with the suites it indexes", () => {
   }
   // Reach must be declared, and the honest gaps must stay visible in the same document.
   expect(map).toMatch(/red-checked/);
-  expect(map).toMatch(/Known gaps/i);
+  expect(map).toMatch(/Residual\s+threats/i);
   // And nobody quotes the dead numbering again. Whitespace-tolerant on purpose: markdown wraps,
   // and this is the third line-naive regex I have written against wrapped prose in one session.
   expect(map).toMatch(/S-numbered\s+continuity\s+is\s+dead/);
+});
+
+test("class: the launch packet lists the residual threats V1 does not claim", () => {
+  const claims = readFileSync(new URL("../docs/cold-review/CLAIMS-AND-LIMITATIONS.md", import.meta.url), "utf8");
+  // Mack co-signed these as residual for V1.1. A launch packet that omits them would be claiming
+  // coverage we explicitly do not have.
+  for (const t of ["key rotation", "drifted target", "sealed-manifest rewrite", "failed skill call", "already correct", "scale"]) {
+    expect(claims.toLowerCase(), `residual threat '${t}' missing from the claims doc`).toContain(t.toLowerCase());
+  }
+  const map = readFileSync(new URL("../docs/cold-review/THREAT-MAP.md", import.meta.url), "utf8");
+  expect((map.match(/residual V1\.1/g) || []).length, "every gap row must carry its residual status").toBe(6);
+  expect(map).toMatch(/V1 G2 FULL does not cover these six/);
 });

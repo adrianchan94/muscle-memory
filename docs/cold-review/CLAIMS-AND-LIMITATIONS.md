@@ -75,3 +75,22 @@ were true of the manual path; only the first is true of the whole system.
 
 A reviewer should read the default as load-bearing: off means no autonomous loop reaches the
 shared catalog without a human first opting in.
+
+## Residual threats — what the security dogfood does NOT cover
+
+The G2 security dogfood is indexed by `docs/cold-review/THREAT-MAP.md`, which lists 21 threat
+classes, the scenario exercising each, and — deliberately — the **reach** of that scenario, so a
+reviewer can see which greens are red-checked and which merely assert observable behaviour.
+
+Six threats are **residual for V1.1** and are **not claimed** by V1:
+
+1. instrument **key rotation** retiring old claims while keeping the product working;
+2. a **drifted target** — the artifact moving away from expected between registration and closeout;
+3. **sealed-manifest rewrite** after binding;
+4. a **failed skill call** counted as an invocation;
+5. a target **already correct** at registration earning procedural credit;
+6. **ledger behaviour at scale** (thousands of rows).
+
+The historical S-numbered security suite is gone: its source lived only in ephemeral storage and
+was deleted. No number from it is quoted anywhere, and the current suites make no continuity
+claim to it. What replaced it is smaller, in the repo, and honest about its reach.
