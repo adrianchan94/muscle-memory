@@ -286,8 +286,14 @@ test("class: every skill-dir accessor resolves through the guarded layer", () =>
 // So these use a /tmp-rooted shelf deliberately, and they exercise success, not just refusal.
 
 test("claim: a legitimate support-file write SUCCEEDS on a non-canonical shelf root", () => {
-  const root = mkdtempSync("/tmp/mm-noncanon-");
-  expect(realpathSync(root)).not.toBe(root); // the precondition the old fixtures never had
+  // Build the non-canonical root EXPLICITLY rather than borrowing a host quirk. My first version
+  // used /tmp and asserted realpath differs — true on macOS, false on Linux CI, so the test that
+  // exists to prove "compare like with like" was itself host-dependent. Same family of
+  // assumption as the defect it guards.
+  const real = mkdtempSync(join(tmpdir(), "mm-noncanon-real-"));
+  const root = join(mkdtempSync(join(tmpdir(), "mm-noncanon-link-")), "via-link");
+  symlinkSync(real, root);
+  expect(realpathSync(root)).not.toBe(root); // now guaranteed on every platform
   const shelf = join(root, "skills");
   const name = "real-skill";
   mkdirSync(join(shelf, name), { recursive: true });
@@ -301,7 +307,9 @@ test("claim: a legitimate support-file write SUCCEEDS on a non-canonical shelf r
 });
 
 test("claim: the escape is still refused on that same non-canonical root", () => {
-  const root = mkdtempSync("/tmp/mm-noncanon-esc-");
+  const real = mkdtempSync(join(tmpdir(), "mm-noncanon-esc-real-"));
+  const root = join(mkdtempSync(join(tmpdir(), "mm-noncanon-esc-link-")), "via-link");
+  symlinkSync(real, root);
   const shelf = join(root, "skills");
   const name = "real-skill";
   mkdirSync(join(shelf, name), { recursive: true });
