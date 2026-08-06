@@ -40,8 +40,8 @@ Both scripts exit non-zero if their embedded assertions fail.
 |---|---|
 | Version | `1.0.0-rc.3` |
 | Commit | see `VERIFY-REPRODUCTION.md` (frozen SHA) |
-| Packed tarball sha256 | `f7f8d8d2b0237cabc2390bd9278765db81c6e7349be19fb4d0d8aa5156aa3133` |
-| Tarball bytes | `272477` |
+| Packed tarball sha256 | `800c24b9080cd4539cae63087a76bf99d151e917e5da21fd5beaa2ff5d990160` |
+| Tarball bytes | `272874` |
 | Bundled entry sha256 | see `PACKAGE-MANIFEST.json` → `bundle.committedSha256` (derived, not restated) |
 
 The tarball is **not committed** to this repository. Reproduce it with `npm pack` — see `VERIFY-REPRODUCTION.md`.
