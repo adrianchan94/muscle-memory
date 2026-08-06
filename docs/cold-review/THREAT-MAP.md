@@ -55,7 +55,7 @@ Legend — **Reach**: `red-checked` = disabling the named defence turns the scen
 | T21 | Smoke passes without the documented init path | `package-smoke` + K4 | **red-checked** by sabotage | bogus subcommand ⇒ smoke fails |
 | T22 | `SKILL.md` itself is a symlink to an external file | `packed-containment-vectors` · symlinked skill file | **red-checked** (`resolveSkillFile`) | asserted through the load tool AND the library; four prior fixes stopped at the directory and this is one level down |
 | T23 | Publish resolves the source by hand and ships external content | `packed-containment-vectors` · symlinked source → catalog | **behaviour** — asserts the security **outcome** | the invariant is that external content never appears in the catalog, whatever the refusal wording |
-| T24 | A labelled `*_secret` assignment evades the detector | `packed-containment-vectors` · `client_secret` | **red-checked** (`SECRET_LABEL_RE`) | `\bsecret` cannot match inside `client_secret` — `_` is a word character |
+| T24 | A labelled `*_secret` assignment evades the detector or survives sanitisation | `packed-containment-vectors` · `client_secret` | **red-checked** ×2 (`SECRET_LABEL_RE` blocks; sanitiser redacts) | `\bsecret` cannot match inside `client_secret` — `_` is a word character |
 | T25 | A symlinked `_retired` root moves an active skill outside the shelf | `packed-containment-vectors` · retire quarantine | **red-checked** (retire root lstat) | a deletion dressed as a reversible quarantine; the skill must remain on the shelf |
 
 ## Residual threats — V1.1, explicitly NOT claimed by V1 G2

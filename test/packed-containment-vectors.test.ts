@@ -267,6 +267,10 @@ out.redacted = !san.sanitized.includes("ordinarySecret12345");
   // \\bsecret never matches inside client_secret because _ is a word character. That is the most
   // common real-world shape of the thing the scanner claims to block.
   expect(r.blocked, `client_secret assignment not blocked: ${r.issues}`).toBe(true);
+  // Blocked AND redacted. The scanner already refuses to publish these, so nothing reaches the
+  // catalog either way — but a value that survives sanitisation can still surface in a staged
+  // preview or a diff, and "the other gate catches it" is how single points of failure are built.
+  expect(r.redacted, "sanitizeForPublish must redact the value, not lean on the scanner").toBe(true);
 });
 
 test("packed · a symlinked _retired root refuses the quarantine move", () => {

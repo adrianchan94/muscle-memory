@@ -78,6 +78,18 @@ export function sanitizeForPublish(body: string): { sanitized: string; replaceme
   for (const id of runtimePrivateAgentIdentifiers()) sub("agent", new RegExp(`\\b${escapeRegExp(id)}\\b`, "gi"), "<agent>");
   sub("project", /\b(?:ProjectX|ExampleCorp)\b/g, "<project>");
   sub("provider-env", /\b(?:ZAI|Z_AI|OPENAI|ANTHROPIC|GLM|MORPH|KIMI|MINIMAX|GEMINI|XAI)_API_KEY\b/g, "PROVIDER_API_KEY");
+  // Defence in depth for the labelled-secret shape. The scanner already refuses to publish these,
+  // so nothing reaches the catalog either way — but a value that survives sanitisation can still
+  // be shown in a staged preview or a diff, and "the other gate catches it" is how single points
+  // of failure get built. Redact the VALUE, keep the key visible so the author can see what was
+  // hit.
+  s = s.replace(
+    /((?:^|[^A-Za-z0-9])[A-Za-z0-9_.-]*(?:secret|passwd|password|token|api[_-]?key)[A-Za-z0-9_.-]*\s*[:=]\s*)(["']?)([^\s"'<>]{6,})\2/gi,
+    (m, head, quote, value) => {
+      if (!replacements.some((r) => r.from === value)) replacements.push({ kind: "labelled-secret", from: value, to: "<redacted>" });
+      return `${head}${quote}<redacted>${quote}`;
+    },
+  );
   return { sanitized: s, replacements };
 }
 
