@@ -11,7 +11,7 @@
 //
 // Each test below is written to fail on the shipped bytes first.
 import { afterEach, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, symlinkSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, symlinkSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { writeSupportFile, removeSupportFile, readSkill, writeSkill, listSkillNames } from "../mods/core";
@@ -271,4 +271,62 @@ test("class: every skill-dir accessor resolves through the guarded layer", () =>
   // Enumeration must not offer a symlinked entry as a skill in the first place.
   const ls = src.match(/export function listSkillNames[\s\S]{0,400}?\n/)?.[0] ?? "";
   expect(ls).toMatch(/lstatSync|resolveSkillDir|isSymbolicLink/);
+});
+
+// ── 6 · containment must not refuse the legitimate case ────────────────────────
+// Grok's P1, and an S13-shaped coverage gap in MY tests. assertContained realpath'd the root and
+// then measured a LEXICAL path against it, so wherever the shelf sits under a symlinked prefix
+// — /tmp -> /private/tmp on macOS is the ordinary case, not an attack — every legitimate write
+// computed a relative path like ../../../../tmp/... and was refused.
+//
+// The suite stayed green with the defect live for two reasons, both mine:
+//   1. every fixture used tmpdir(), which on macOS is already canonical (/var/folders/...), and
+//   2. no containment test ever called writeSupportFile on the GREEN path — they only asserted
+//      that attacks were refused. A guard that refuses everything passes tests like that.
+// So these use a /tmp-rooted shelf deliberately, and they exercise success, not just refusal.
+
+test("claim: a legitimate support-file write SUCCEEDS on a non-canonical shelf root", () => {
+  const root = mkdtempSync("/tmp/mm-noncanon-");
+  expect(realpathSync(root)).not.toBe(root); // the precondition the old fixtures never had
+  const shelf = join(root, "skills");
+  const name = "real-skill";
+  mkdirSync(join(shelf, name), { recursive: true });
+  writeFileSync(join(shelf, name, "SKILL.md"), "---\nname: real-skill\n---\nbody");
+  process.env.MM_AGENT_SKILLS_DIR = shelf;
+
+  const written = writeSupportFile(name, "references/notes.md", "legit", { agentId: "a" } as any);
+  expect(readFileSync(written, "utf8")).toBe("legit");
+  // and it must land INSIDE the shelf, not merely somewhere
+  expect(realpathSync(written).startsWith(realpathSync(shelf))).toBe(true);
+});
+
+test("claim: the escape is still refused on that same non-canonical root", () => {
+  const root = mkdtempSync("/tmp/mm-noncanon-esc-");
+  const shelf = join(root, "skills");
+  const name = "real-skill";
+  mkdirSync(join(shelf, name), { recursive: true });
+  writeFileSync(join(shelf, name, "SKILL.md"), "---\nname: real-skill\n---\nbody");
+  const evil = join(root, "evil_dir");
+  mkdirSync(evil);
+  writeFileSync(join(evil, "notes.md"), "not ours");
+  symlinkSync(evil, join(shelf, name, "references"));
+  process.env.MM_AGENT_SKILLS_DIR = shelf;
+
+  let w = "", r = "";
+  try { writeSupportFile(name, "references/pwned.md", "x", { agentId: "a" } as any); } catch (e) { w = String(e); }
+  try { removeSupportFile(name, "references/notes.md", { agentId: "a" } as any); } catch (e) { r = String(e); }
+  expect(w).toMatch(/containment|symlink/i);
+  expect(r).toMatch(/containment|symlink/i);
+  expect(existsSync(join(evil, "pwned.md"))).toBe(false);
+  expect(readFileSync(join(evil, "notes.md"), "utf8")).toBe("not ours");
+});
+
+test("class: containment compares like with like — never a canonical root against a lexical path", () => {
+  const src = readFileSync(new URL("../mods/core.ts", import.meta.url), "utf8");
+  const fn = src.match(/export function assertContained[\s\S]*?(?=\nexport )/)?.[0] ?? "";
+  expect(fn).toBeTruthy();
+  // The relative() call must take both operands from one frame. `relative(base, full)` with a
+  // realpath'd base and a raw full is the exact defect.
+  expect(fn).not.toMatch(/relative\(base,\s*full\)/);
+  expect(fn).toMatch(/relative\(resolve\([^)]*\),\s*resolve\([^)]*\)\)/);
 });

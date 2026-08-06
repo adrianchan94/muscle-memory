@@ -1,6 +1,6 @@
 // muscle-memory · core module (split from index.ts — behavior-preserving).
 import { appendFileSync, copyFileSync, lstatSync, mkdirSync, readFileSync, existsSync, writeFileSync, readdirSync, renameSync, rmSync, realpathSync } from "node:fs";
-import { join, dirname, relative, isAbsolute, sep } from "node:path";
+import { join, dirname, relative, isAbsolute, resolve, sep } from "node:path";
 import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 import { commandTemplate, correlateOutcomes, fingerprint, inferOutcomes } from "./detect";
@@ -547,7 +547,15 @@ export function skillDirOf(name: string, ctx?: any): string | null { return scan
  */
 export function assertContained(root: string, full: string): void {
   const base = realpathSync(root);
-  const rel = relative(base, full);
+  // Compare LIKE WITH LIKE. This realpath'd the root and then measured a lexical `full` against
+  // it, so on any host where the shelf sits under a symlinked prefix — /tmp -> /private/tmp on
+  // macOS is the ordinary case, not an attack — every legitimate write computed a relative path
+  // like ../../../../tmp/... and was refused. Fail-closed, but closed on the wrong people.
+  //
+  // Take the relative path in one consistent frame (lexical, both sides normalised), then walk
+  // the canonical base. The symlink refusals below are unchanged: this fixes who gets measured,
+  // not what counts as an escape.
+  const rel = relative(resolve(root), resolve(full));
   if (!rel || rel.startsWith("..") || isAbsolute(rel)) throw new Error(`containment: '${rel || full}' escapes the skill root`);
   let cur = base;
   for (const seg of rel.split(sep)) {

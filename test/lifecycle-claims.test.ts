@@ -205,3 +205,14 @@ test("class: the MM_PUBLISH=auto carve-out is documented, defaults off, and stil
   const desc = idx.match(/approve: \{ type: "boolean"[^}]*\}/)?.[0] ?? "";
   expect(desc).toMatch(/MM_PUBLISH=auto/);
 });
+
+test("class: no tool description claims blanket no-approval while hosting publish", () => {
+  const idx = readFileSync(new URL("../mods/index.ts", import.meta.url), "utf8");
+  const reg = idx.slice(idx.indexOf('name: "muscle_memory_lifecycle_run"'));
+  const desc = reg.slice(0, reg.indexOf("\n      parameters"));
+  // The tool hosts publish, which writes outside the agent's own shelf. A description that
+  // advertises "no-approval, safe, reversible" for the whole tool is the words disagreeing with
+  // the bytes again — the same class as a stale sha, one layer up.
+  expect(desc).not.toMatch(/no-approval, safe, reversible/);
+  expect(desc).toMatch(/approve: true/);
+});

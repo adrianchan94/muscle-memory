@@ -5,7 +5,7 @@ import { randomBytes as randomBytes2 } from "node:crypto";
 
 // mods/core.ts
 import { appendFileSync, copyFileSync, lstatSync, mkdirSync, readFileSync, existsSync, writeFileSync, readdirSync, renameSync, rmSync, realpathSync } from "node:fs";
-import { join, dirname, relative, isAbsolute, sep } from "node:path";
+import { join, dirname, relative, isAbsolute, resolve, sep } from "node:path";
 import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 if (false) {}
@@ -478,7 +478,7 @@ function skillDirOf(name, ctx) {
 }
 function assertContained(root, full) {
   const base = realpathSync(root);
-  const rel = relative(base, full);
+  const rel = relative(resolve(root), resolve(full));
   if (!rel || rel.startsWith("..") || isAbsolute(rel))
     throw new Error(`containment: '${rel || full}' escapes the skill root`);
   let cur = base;
@@ -2676,7 +2676,7 @@ async function consumeStreamBounded(stream) {
     } catch {}
     return out;
   })();
-  const timer = new Promise((resolve) => setTimeout(() => resolve(out), ms));
+  const timer = new Promise((resolve2) => setTimeout(() => resolve2(out), ms));
   return Promise.race([reader, timer]);
 }
 var HIDDEN_FORKS = new WeakMap;
@@ -3559,21 +3559,21 @@ import { dirname as dirname3, join as join7 } from "node:path";
 import { createHash as createHash2, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { chmodSync, existsSync as existsSync5, mkdirSync as mkdirSync5, readFileSync as readFileSync5, realpathSync as realpathSync2, statSync, writeFileSync as writeFileSync5 } from "node:fs";
 import { homedir as homedir2 } from "node:os";
-import { dirname as dirname2, join as join6, resolve, sep as sep2 } from "node:path";
+import { dirname as dirname2, join as join6, resolve as resolve2, sep as sep2 } from "node:path";
 function defaultInstrumentKeyPath(home = homedir2()) {
   return join6(home, ".letta", "instrument", "muscle-memory.key");
 }
 function resolveInstrumentKeyPath(opts = {}) {
   const env = opts.env ?? process.env;
   const override = String(env.MM_INSTRUMENT_KEY_FILE || "").trim();
-  return override ? resolve(override) : defaultInstrumentKeyPath(opts.home ?? homedir2());
+  return override ? resolve2(override) : defaultInstrumentKeyPath(opts.home ?? homedir2());
 }
 function isInsideStateDir(candidate, stateDir) {
   const real = (p) => {
     try {
       return realpathSync2(p);
     } catch {
-      return resolve(p);
+      return resolve2(p);
     }
   };
   const key = real(candidate);
@@ -3835,7 +3835,7 @@ import {
   writeFileSync as writeFileSync6
 } from "node:fs";
 import { createHash as createHash3, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
-import { isAbsolute as isAbsolute2, join as join8, relative as relative2, resolve as resolve2, sep as sep3 } from "node:path";
+import { isAbsolute as isAbsolute2, join as join8, relative as relative2, resolve as resolve3, sep as sep3 } from "node:path";
 var EXACT_FILE_ADAPTER_ID = "mm.exact-file-sha256.v1";
 var VERIFICATION_TASK_SCHEMA = "mm.verification-task.exact-file.v1";
 var VERIFICATION_BINDING_SCHEMA = "mm.verification-binding.v1";
@@ -3928,7 +3928,7 @@ function configuredRoot() {
 }
 function resolveTarget(root, targetRel, requireFile) {
   assertTargetRel(targetRel);
-  const lexical = resolve2(root, targetRel);
+  const lexical = resolve3(root, targetRel);
   const lexicalRel = relative2(root, lexical);
   if (!lexicalRel || lexicalRel.startsWith("..") || isAbsolute2(lexicalRel))
     throw new Error("target_rel escapes the trusted root");
@@ -7329,7 +7329,7 @@ EVIDENCE · ${judged} judged · ${verified} verified · ${proven ? "proven" : "s
       }));
       disposers.push(letta.tools.register({
         name: "muscle_memory_lifecycle_run",
-        description: "muscle-memory autonomous lifecycle (no-approval, safe, reversible): reflect (distill a skill from your work), graduate (promote a staged skill → active shelf), publish (mirror a skill → shared Custom Skills catalog), prune (retire stale/unused skills). This is the full self-improvement loop. Broad/manual skill edits → muscle_memory_skill_write; preview → reflect_plan in muscle_memory_skill_read.",
+        description: "muscle-memory autonomous lifecycle. reflect (distill a skill from your work), graduate (promote a staged skill → active shelf) and prune (retire stale/unused skills) are reversible and need no approval. publish (mirror a skill → shared Custom Skills catalog) is the exception: it writes outside your own shelf, so it requires approve: true unless the operator has set MM_PUBLISH=auto. This is the full self-improvement loop. Broad/manual skill edits → muscle_memory_skill_write; preview → reflect_plan in muscle_memory_skill_read.",
         parameters: lifecycleParams,
         requiresApproval: false,
         async run(ctx) {

@@ -1454,7 +1454,7 @@ export default function activate(letta: any) {
 
     disposers.push(letta.tools.register({
       name: "muscle_memory_lifecycle_run",
-      description: "muscle-memory autonomous lifecycle (no-approval, safe, reversible): reflect (distill a skill from your work), graduate (promote a staged skill → active shelf), publish (mirror a skill → shared Custom Skills catalog), prune (retire stale/unused skills). This is the full self-improvement loop. Broad/manual skill edits → muscle_memory_skill_write; preview → reflect_plan in muscle_memory_skill_read.",
+      description: "muscle-memory autonomous lifecycle. reflect (distill a skill from your work), graduate (promote a staged skill → active shelf) and prune (retire stale/unused skills) are reversible and need no approval. publish (mirror a skill → shared Custom Skills catalog) is the exception: it writes outside your own shelf, so it requires approve: true unless the operator has set MM_PUBLISH=auto. This is the full self-improvement loop. Broad/manual skill edits → muscle_memory_skill_write; preview → reflect_plan in muscle_memory_skill_read.",
       parameters: lifecycleParams,
       requiresApproval: false,
       async run(ctx: any) { return lifecycleRun(ctx); },
