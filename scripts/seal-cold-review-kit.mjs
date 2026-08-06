@@ -194,6 +194,8 @@ of these, you have the wrong bytes and the review does not count:
 | \`2be903e2…\` | superseded archive — it carries the unsafe 3809055b product; voided in the edit that supersedes it |
 | \`05459e2f…\` | superseded PRODUCT tarball — a skill directory that is itself a symlink escaped every accessor in these bytes (read leak and external overwrite); do not review them |
 | \`643ae262…\` | superseded archive — it carries the skill-dir-symlink-unsafe 05459e2f product; voided in the edit that supersedes it |
+| \`f7f8d8d2…\` | superseded PRODUCT tarball — containment measured a canonical root against a lexical path, so legitimate support-file writes on a symlinked shelf prefix were refused; do not review them |
+| \`bab0c587…\` | superseded archive — it carries the false-positive-containment f7f8d8d2 product; voided in the edit that supersedes it |
 | \`36731473…\`, \`d8eb6788…\`, \`6a2b3536…\` | superseded commits from the claim-honesty cut |
 | \`452e663e…\`, \`bffb648d…\`, \`f64dd50b…\` | superseded commits from the evidence-integrity v2 cut |
 | \`9d5093eb…\`, \`c4186c2a…\`, \`a527e649…\` | superseded commits from the docs-honesty cut |
