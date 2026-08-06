@@ -141,9 +141,12 @@ test("containment covers ALL skill file writes, not only the verification target
   // A string-only validator cannot see a symlinked segment. The real check must stat the
   // resolved path, and it must be reached by both the write and the remove path.
   expect(src).toMatch(/realpathSync|lstatSync/);
-  const guarded = [...src.matchAll(/export function (writeSupportFile|removeSupportFile)[\s\S]{0,700}?\n}/g)];
+  // Span to the next top-level export rather than a fixed char budget: a 700-char cap silently
+  // stopped matching writeSupportFile once its body grew, so the assertion covered one mutator
+  // instead of two and still passed.
+  const guarded = [...src.matchAll(/export function (writeSupportFile|removeSupportFile)\b[\s\S]*?(?=\nexport )/g)];
   expect(guarded.length).toBe(2);
-  for (const g of guarded) expect(g[0]).toMatch(/assertContained|realpathSync|lstatSync/);
+  for (const g of guarded) expect(g[0]).toMatch(/assertContained|resolveSkillFile|realpathSync|lstatSync/);
 });
 
 // ── 3 · no auto-graduate under staged ──────────────────────────────────────────
@@ -192,7 +195,10 @@ test("containment covers the READ path as well as the write path", () => {
   const rs = core.match(/export function readSkill[^\n]*/)?.[0] ?? "";
   // readSkill now reaches the name check through the directory resolver, which also proves the
   // segment is a real directory rather than a link out of the shelf.
-  expect(rs).toMatch(/resolveSkillDir/);
+  // Match the guard FAMILY, not one function name: readSkill now reaches the directory check
+  // through resolveSkillFile, which also refuses a symlinked SKILL.md. Hard-coding a single name
+  // made four of my structural assertions go red on a refactor that strengthened the product.
+  expect(rs).toMatch(/resolveSkillDir|resolveSkillFile/);
   expect(core).toMatch(/export function resolveSkillDir[\s\S]{0,400}?assertSafeSkillName/);
   // Every load entry point in the tool surface, not just the one that was reported.
   const idx = readFileSync(new URL("../mods/index.ts", import.meta.url), "utf8");
@@ -266,7 +272,7 @@ test("class: every skill-dir accessor resolves through the guarded layer", () =>
     // One-liners and block bodies both: take everything up to the next top-level export.
     const m = src.match(new RegExp(`export function ${fn}\\b[\\s\\S]*?(?=\\nexport )`));
     expect(m, `${fn} not found`).toBeTruthy();
-    expect(m![0], `${fn} does not resolve through the guard`).toMatch(/resolveSkillDir/);
+    expect(m![0], `${fn} does not resolve through the guard`).toMatch(/resolveSkillDir|resolveSkillFile/);
   }
   // Enumeration must not offer a symlinked entry as a skill in the first place.
   const ls = src.match(/export function listSkillNames[\s\S]{0,400}?\n/)?.[0] ?? "";

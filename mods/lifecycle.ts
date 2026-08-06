@@ -1,5 +1,5 @@
 // muscle-memory · lifecycle module (split from index.ts — behavior-preserving).
-import { mkdirSync, readFileSync, existsSync, writeFileSync, readdirSync, renameSync } from "node:fs";
+import { lstatSync, mkdirSync, readFileSync, existsSync, writeFileSync, readdirSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { Row, USAGE_PATH, appendMeshFeed, appendUiEvent, autonomousShelves, ensureDir, isManaged, listSkillNames, loadRows, readSkill, scanDirs, skillDesc, slug, writeUiState } from "./core";
 import { buildCrossConversationEvidence, detectRepairChains, isMatureRepairChain, stepSig } from "./detect";
@@ -39,7 +39,16 @@ export function retireManagedSkill(name: string, reason: string, ctx?: any, abso
   if (!isManaged(d, name)) throw new Error(`refusing to retire unmanaged skill '${name}'`);
   if (isPinned(name)) throw new Error(`'${name}' is pinned — unpin first (pin protects from retire, not from patch)`);
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  // Rocky's variant 4: a symlinked _retired root moves an active skill outside the shelf, which
+  // is a deletion dressed as a quarantine. Refuse the link before anything is renamed.
   const retiredRoot = join(d, "_retired");
+  try {
+    if (lstatSync(retiredRoot).isSymbolicLink()) {
+      throw new Error(`containment: '_retired' is a symlink — refusing to move '${name}' outside the shelf`);
+    }
+  } catch (e) {
+    if (String(e).includes("containment:")) throw e; // ENOENT is fine; a symlink is not
+  }
   mkdirSync(retiredRoot, { recursive: true });
   const target = join(retiredRoot, `${name}-${stamp}`);
   const forward = absorbedInto ? `absorbed_into: ${absorbedInto}\n` : "";

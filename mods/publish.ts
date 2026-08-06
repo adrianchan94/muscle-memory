@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { userInfo } from "node:os";
-import { globalSkillsDir, MM_TAG, PUBLISH_STAGED_DIR, appendMeshFeed, appendUiEvent, scanDirs, scanSkillContent, slug, writeUiState } from "./core";
+import { resolveSkillDir, resolveSkillFile, globalSkillsDir, MM_TAG, PUBLISH_STAGED_DIR, appendMeshFeed, appendUiEvent, scanDirs, scanSkillContent, slug, writeUiState } from "./core";
 import { lintSkillDraft, sotaQualityGaps } from "./gate";
 import { SEARCH_STOP } from "./autopilot";
 
@@ -216,9 +216,12 @@ export function catalogPrivacyScan(content: string): { ok: boolean; issues: stri
 export function publishSkillToCatalog(name: string, ctx?: any): string {
   const nm = slug(name);
   if (!nm) throw new Error("name required");
-  const d = scanDirs(ctx).find((x) => existsSync(join(x, nm, "SKILL.md")));
+  // Own-joins here were the hole: this resolved the shelf and the file by hand, so a symlinked
+  // skill dir or a symlinked SKILL.md put external content straight into the shared catalog.
+  // Every skill path in this module now goes through the containment resolvers.
+  const d = scanDirs(ctx).find((x) => { try { return existsSync(resolveSkillFile(x, nm)); } catch { return false; } });
   if (!d) throw new Error(`no active skill '${nm}'`);
-  const src = join(d, nm, "SKILL.md");
+  const src = resolveSkillFile(d, nm);
   if (!existsSync(src)) throw new Error(`no SKILL.md for '${nm}'`);
   const content = readFileSync(src, "utf8");
   const desc = (content.match(/^description:\s*(.+)$/im)?.[1] || "").trim();
@@ -233,13 +236,14 @@ export function publishSkillToCatalog(name: string, ctx?: any): string {
   // verbatim. sanitizeForPublish already existed for exactly this and was never on the write
   // path — so publish now emits the sanitized bytes, and says what it changed.
   const san = sanitizeForPublish(content);
-  const dstDir = join(globalSkillsDir(), nm);
+  const dstDir = resolveSkillDir(globalSkillsDir(), nm);
   mkdirSync(dstDir, { recursive: true });
+  const dstFile = resolveSkillFile(globalSkillsDir(), nm); // refuse a symlinked catalog entry
   const published = san.sanitized.includes(MM_TAG) ? san.sanitized : san.sanitized + `\n<!-- ${MM_TAG}: published ${new Date().toISOString().slice(0, 10)}; catalog=global -->\n`;
-  writeFileSync(join(dstDir, "SKILL.md"), published);
+  writeFileSync(dstFile, published);
   const redacted = san.replacements.length ? ` (redacted: ${san.replacements.map((r) => r.kind).join(", ")})` : "";
   appendUiEvent({ phase: "skill_published", summary: `published '${nm}' to custom skill catalog${redacted}`, skill: nm, action: "publish", route: "global-catalog" });
   appendMeshFeed({ type: "skill_published", skill: nm, route: "PUBLISH", signals: 0 });
   writeUiState({ phase: "rotation", skill: nm, last: `published '${nm}' to catalog`, route: "PUBLISH · catalog" });
-  return join(dstDir, "SKILL.md");
+  return dstFile;
 }

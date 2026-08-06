@@ -180,10 +180,23 @@ function resolveSkillDir(root, name) {
   }
   return full;
 }
-function readSkill(dir, name) {
-  const sd = resolveSkillDir(dir, name);
+function resolveSkillFile(root, name, file = "SKILL.md") {
+  const dir = resolveSkillDir(root, name);
+  const full = join(dir, file);
+  let st;
   try {
-    return readFileSync(join(sd, "SKILL.md"), "utf8");
+    st = lstatSync(full);
+  } catch {
+    return full;
+  }
+  if (st.isSymbolicLink())
+    throw new Error(`containment: '${name}/${file}' is a symlink — refusing`);
+  return full;
+}
+function readSkill(dir, name) {
+  const sf = resolveSkillFile(dir, name);
+  try {
+    return readFileSync(sf, "utf8");
   } catch {
     return "";
   }
@@ -198,10 +211,11 @@ function writeSkill(dir, name, content) {
   const sd = resolveSkillDir(dir, name);
   mkdirSync(sd, { recursive: true });
   resolveSkillDir(dir, name);
+  const target = resolveSkillFile(dir, name);
   const tmp = join(sd, ".SKILL.md.tmp");
   writeFileSync(tmp, content);
-  renameSync(tmp, join(sd, "SKILL.md"));
-  return join(sd, "SKILL.md");
+  renameSync(tmp, target);
+  return target;
 }
 var CATALOG_SYNC_DIR = join(STATE_DIR, "catalog-sync");
 var CATALOG_SYNC_BACKUP_DIR = join(CATALOG_SYNC_DIR, "backups");
@@ -415,10 +429,11 @@ var PUBLISH_STAGED_DIR = join(STATE_DIR, "publish-staged");
 var USAGE_PATH = join(STATE_DIR, "skill-usage.json");
 var NEOCORTEX_BLOCK = "muscle_memory";
 var SECRET_TOKEN_RE = /\b(?:(?:sk|pk|ghp|gho|ghu|ghs|xox[baprs])[-_][A-Za-z0-9]{12,}|sk-ant-[A-Za-z0-9-]{12,}|AKIA[0-9A-Z]{16}|AIza[A-Za-z0-9_-]{20,})\b/;
+var SECRET_LABEL_RE = /(?:^|[^A-Za-z0-9])[A-Za-z0-9_.-]*(?:secret|passwd|password|token|api[_-]?key)[A-Za-z0-9_.-]*\s*[:=]\s*["']?[^\s"'<>]{6,}/i;
 function scanSkillContent(content) {
   const c = String(content || "");
   const issues = [];
-  if (SECRET_TOKEN_RE.test(c) || /\b(?:authorization|api[_-]?key|secret|password)\s*[:=]\s*["']?[^\s"'<>]{6,}/i.test(c) || /-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(c))
+  if (SECRET_TOKEN_RE.test(c) || /\b(?:authorization|api[_-]?key|secret|password)\s*[:=]\s*["']?[^\s"'<>]{6,}/i.test(c) || SECRET_LABEL_RE.test(c) || /-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(c))
     issues.push("secret-looking credential");
   if (/\bcurl\b[^\n|]*\|\s*(?:sudo\s+)?(?:ba)?sh\b/i.test(c) || /\bwget\b[^\n|]*\|\s*(?:ba)?sh\b/i.test(c))
     issues.push("pipe-to-shell (curl|sh)");
@@ -513,7 +528,7 @@ function writeSupportFile(name, filePath, content, ctx) {
   const d = skillDirOf(name, ctx);
   if (!d)
     throw new Error(`no skill '${name}'`);
-  const full = join(d, name, filePath);
+  const full = resolveSkillFile(d, name, filePath);
   assertContained(join(d, name), full);
   mkdirSync(dirname(full), { recursive: true });
   assertContained(join(d, name), full);
@@ -1782,10 +1797,16 @@ function publishSkillToCatalog(name, ctx) {
   const nm = slug(name);
   if (!nm)
     throw new Error("name required");
-  const d = scanDirs(ctx).find((x) => existsSync2(join3(x, nm, "SKILL.md")));
+  const d = scanDirs(ctx).find((x) => {
+    try {
+      return existsSync2(resolveSkillFile(x, nm));
+    } catch {
+      return false;
+    }
+  });
   if (!d)
     throw new Error(`no active skill '${nm}'`);
-  const src = join3(d, nm, "SKILL.md");
+  const src = resolveSkillFile(d, nm);
   if (!existsSync2(src))
     throw new Error(`no SKILL.md for '${nm}'`);
   const content = readFileSync2(src, "utf8");
@@ -1798,21 +1819,22 @@ function publishSkillToCatalog(name, ctx) {
   if (!priv.ok)
     throw new Error(`privacy blocked: ${priv.issues.join("; ")}`);
   const san = sanitizeForPublish(content);
-  const dstDir = join3(globalSkillsDir(), nm);
+  const dstDir = resolveSkillDir(globalSkillsDir(), nm);
   mkdirSync2(dstDir, { recursive: true });
+  const dstFile = resolveSkillFile(globalSkillsDir(), nm);
   const published = san.sanitized.includes(MM_TAG) ? san.sanitized : san.sanitized + `
 <!-- ${MM_TAG}: published ${new Date().toISOString().slice(0, 10)}; catalog=global -->
 `;
-  writeFileSync2(join3(dstDir, "SKILL.md"), published);
+  writeFileSync2(dstFile, published);
   const redacted = san.replacements.length ? ` (redacted: ${san.replacements.map((r) => r.kind).join(", ")})` : "";
   appendUiEvent({ phase: "skill_published", summary: `published '${nm}' to custom skill catalog${redacted}`, skill: nm, action: "publish", route: "global-catalog" });
   appendMeshFeed({ type: "skill_published", skill: nm, route: "PUBLISH", signals: 0 });
   writeUiState({ phase: "rotation", skill: nm, last: `published '${nm}' to catalog`, route: "PUBLISH · catalog" });
-  return join3(dstDir, "SKILL.md");
+  return dstFile;
 }
 
 // mods/lifecycle.ts
-import { mkdirSync as mkdirSync3, readFileSync as readFileSync3, existsSync as existsSync3, writeFileSync as writeFileSync3, readdirSync as readdirSync2, renameSync as renameSync2 } from "node:fs";
+import { lstatSync as lstatSync2, mkdirSync as mkdirSync3, readFileSync as readFileSync3, existsSync as existsSync3, writeFileSync as writeFileSync3, readdirSync as readdirSync2, renameSync as renameSync2 } from "node:fs";
 import { join as join4 } from "node:path";
 function managedSkillUsage(name, rows = loadRows()) {
   const n = slug(name);
@@ -1851,6 +1873,14 @@ function retireManagedSkill(name, reason, ctx, absorbedInto, restrictDirs) {
     throw new Error(`'${name}' is pinned — unpin first (pin protects from retire, not from patch)`);
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const retiredRoot = join4(d, "_retired");
+  try {
+    if (lstatSync2(retiredRoot).isSymbolicLink()) {
+      throw new Error(`containment: '_retired' is a symlink — refusing to move '${name}' outside the shelf`);
+    }
+  } catch (e) {
+    if (String(e).includes("containment:"))
+      throw e;
+  }
   mkdirSync3(retiredRoot, { recursive: true });
   const target = join4(retiredRoot, `${name}-${stamp}`);
   const forward = absorbedInto ? `absorbed_into: ${absorbedInto}
@@ -3826,7 +3856,7 @@ import {
   constants,
   existsSync as existsSync7,
   fstatSync,
-  lstatSync as lstatSync2,
+  lstatSync as lstatSync3,
   mkdirSync as mkdirSync7,
   openSync,
   readFileSync as readFileSync7,
@@ -3937,7 +3967,7 @@ function resolveTarget(root, targetRel, requireFile) {
       throw new Error("verification target does not exist");
     return lexical;
   }
-  const lst = lstatSync2(lexical);
+  const lst = lstatSync3(lexical);
   if (lst.isSymbolicLink())
     throw new Error("verification target cannot be a symlink");
   const target = realpathSync3(lexical);

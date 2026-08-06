@@ -236,7 +236,24 @@ export function resolveSkillDir(root: string, name: string): string {
   return full;
 }
 
-export function readSkill(dir: string, name: string): string { const sd = resolveSkillDir(dir, name); try { return readFileSync(join(sd, "SKILL.md"), "utf8"); } catch { return ""; } }
+/**
+ * The FILE-level twin of `resolveSkillDir`. Resolving the directory proves the segment is a real
+ * directory; it says nothing about the file inside it. A real skill dir whose `SKILL.md` is a
+ * symlink to an external file made every reader return content the agent was never granted —
+ * the same escape one level down, which is exactly where the previous four fixes stopped looking.
+ *
+ * Refuse the link rather than only links that escape: skill files are content the agent owns.
+ */
+export function resolveSkillFile(root: string, name: string, file = "SKILL.md"): string {
+  const dir = resolveSkillDir(root, name);
+  const full = join(dir, file);
+  let st;
+  try { st = lstatSync(full); } catch { return full; } // not created yet
+  if (st.isSymbolicLink()) throw new Error(`containment: '${name}/${file}' is a symlink — refusing`);
+  return full;
+}
+
+export function readSkill(dir: string, name: string): string { const sf = resolveSkillFile(dir, name); try { return readFileSync(sf, "utf8"); } catch { return ""; } }
 
 export function skillDesc(dir: string, name: string): string { return (readSkill(dir, name).match(/description:\s*(.+)/)?.[1] || "").trim(); }
 
@@ -246,8 +263,9 @@ export function writeSkill(dir: string, name: string, content: string): string {
   const sd = resolveSkillDir(dir, name);
   mkdirSync(sd, { recursive: true });
   resolveSkillDir(dir, name); // mkdir may have followed a link planted mid-call
-  const tmp = join(sd, ".SKILL.md.tmp"); writeFileSync(tmp, content); renameSync(tmp, join(sd, "SKILL.md"));
-  return join(sd, "SKILL.md");
+  const target = resolveSkillFile(dir, name); // refuse a symlinked SKILL.md before we open or rename onto it
+  const tmp = join(sd, ".SKILL.md.tmp"); writeFileSync(tmp, content); renameSync(tmp, target);
+  return target;
 }
 
 export const CATALOG_SYNC_DIR = join(STATE_DIR, "catalog-sync");
@@ -476,10 +494,17 @@ export const NEOCORTEX_BLOCK = "muscle_memory";
 // missed AKIA/AIza/sk-ant real keys — found by the adversarial safety tests; hardened, not benchmark-tuned.
 export const SECRET_TOKEN_RE = /\b(?:(?:sk|pk|ghp|gho|ghu|ghs|xox[baprs])[-_][A-Za-z0-9]{12,}|sk-ant-[A-Za-z0-9-]{12,}|AKIA[0-9A-Z]{16}|AIza[A-Za-z0-9_-]{20,})\b/;
 
+/**
+ * `\bsecret` never matches inside `client_secret`, because `_` is a word character — so the most
+ * common real-world shape of the thing we claim to block sailed straight through. This catches a
+ * labelled assignment whose key CONTAINS secret/token/passwd anywhere, underscores and all.
+ */
+export const SECRET_LABEL_RE = /(?:^|[^A-Za-z0-9])[A-Za-z0-9_.-]*(?:secret|passwd|password|token|api[_-]?key)[A-Za-z0-9_.-]*\s*[:=]\s*["']?[^\s"'<>]{6,}/i;
+
 export function scanSkillContent(content: string): { ok: boolean; issues: string[] } {
   const c = String(content || "");
   const issues: string[] = [];
-  if (SECRET_TOKEN_RE.test(c) || /\b(?:authorization|api[_-]?key|secret|password)\s*[:=]\s*["']?[^\s"'<>]{6,}/i.test(c) || /-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(c)) issues.push("secret-looking credential");
+  if (SECRET_TOKEN_RE.test(c) || /\b(?:authorization|api[_-]?key|secret|password)\s*[:=]\s*["']?[^\s"'<>]{6,}/i.test(c) || SECRET_LABEL_RE.test(c) || /-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(c)) issues.push("secret-looking credential");
   if (/\bcurl\b[^\n|]*\|\s*(?:sudo\s+)?(?:ba)?sh\b/i.test(c) || /\bwget\b[^\n|]*\|\s*(?:ba)?sh\b/i.test(c)) issues.push("pipe-to-shell (curl|sh)");
   if (/\brm\s+-[rf]{1,2}\s+(?:["']?[~/]|\$HOME|\*)/.test(c)) issues.push("naked rm -rf on root/home/glob");
   if (/(?:^|[\s;&|])sudo\s+\S/i.test(c)) issues.push("sudo command");
@@ -576,7 +601,7 @@ export function writeSupportFile(name: string, filePath: string, content: string
   const v = validateSupportPath(filePath); if (!v.ok) throw new Error(v.reason);
   const sc = scanSupportFile(filePath, content); if (!sc.ok) throw new Error(`security: ${sc.issues.join("; ")}`);
   const d = skillDirOf(name, ctx); if (!d) throw new Error(`no skill '${name}'`);
-  const full = join(d, name, filePath);
+  const full = resolveSkillFile(d, name, filePath);
   assertContained(join(d, name), full);
   mkdirSync(dirname(full), { recursive: true });
   assertContained(join(d, name), full); // mkdir may have followed a link created mid-call

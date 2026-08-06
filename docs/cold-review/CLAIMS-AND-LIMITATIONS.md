@@ -78,7 +78,7 @@ shared catalog without a human first opting in.
 
 ## Residual threats — what the security dogfood does NOT cover
 
-The G2 security dogfood is indexed by `docs/cold-review/THREAT-MAP.md`, which lists 21 threat
+The G2 security dogfood is indexed by `docs/cold-review/THREAT-MAP.md`, which lists 25 threat
 classes, the scenario exercising each, and — deliberately — the **reach** of that scenario, so a
 reviewer can see which greens are red-checked and which merely assert observable behaviour.
 

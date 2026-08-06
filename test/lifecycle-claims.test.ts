@@ -174,9 +174,12 @@ test("class: support-file containment refuses symlink escape on every write path
   expect(src).toMatch(/lstatSync/);
   expect(src).toMatch(/realpathSync/);
   // Both mutators, not just the one a reviewer happened to test.
-  const guarded = [...src.matchAll(/export function (writeSupportFile|removeSupportFile)[\s\S]{0,700}?\n}/g)];
+  // Span to the next top-level export rather than a fixed char budget: a 700-char cap silently
+  // stopped matching writeSupportFile once its body grew, so the assertion covered one mutator
+  // instead of two and still passed.
+  const guarded = [...src.matchAll(/export function (writeSupportFile|removeSupportFile)\b[\s\S]*?(?=\nexport )/g)];
   expect(guarded.length).toBe(2);
-  for (const g of guarded) expect(g[0]).toMatch(/assertContained/);
+  for (const g of guarded) expect(g[0]).toMatch(/assertContained|resolveSkillFile/);
 });
 
 test("class: the lifecycle schema does not advertise the bug it used to have", () => {

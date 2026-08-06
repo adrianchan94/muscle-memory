@@ -204,3 +204,89 @@ out.names = mm.listSkillNames(process.env.MM_AGENT_SKILLS_DIR).sort();
   expect(r.wrote).toBe(true);
   expect(r.names).toEqual(["real-skill", "second-real-skill"]);
 });
+
+// ── v8 · the escape one level down: the FILE, not the directory ────────────────
+// Resolving the directory proves the segment is a real directory. It says nothing about the file
+// inside it. Four containment fixes stopped at the directory; Rocky went one level further.
+
+test("packed · a symlinked SKILL.md returns no external body, through the load tool", () => {
+  const s = seat(false);
+  const name = "real-skill";
+  mkdirSync(join(s.shelf, name), { recursive: true });
+  const external = join(s.home, "external.md");
+  writeFileSync(external, "EXTERNAL SECRET BODY");
+  symlinkSync(external, join(s.shelf, name, "SKILL.md"));
+
+  const r = drive(s, `
+const viaTool = JSON.stringify(await tools.get("muscle_memory_skill_read").run({ args: { action: "load", name: ${JSON.stringify(name)} } }));
+let libErr = "", got = "";
+try { got = mm.readSkill(process.env.MM_AGENT_SKILLS_DIR, ${JSON.stringify(name)}); } catch (e) { libErr = String(e); }
+out.toolLeaked = viaTool.includes("EXTERNAL SECRET BODY");
+out.libLeaked = got.includes("EXTERNAL SECRET BODY");
+out.libRefused = /containment|symlink/i.test(libErr);
+`);
+  expect(r.toolLeaked).toBe(false);
+  expect(r.libLeaked).toBe(false);
+  expect(r.libRefused).toBe(true);
+});
+
+test("packed · a symlinked source never puts external content in the shared catalog", () => {
+  const s = seat(false);
+  const name = "real-skill";
+  mkdirSync(join(s.shelf, name), { recursive: true });
+  const catalogDir = join(s.home, "global"); // drive() points MM_GLOBAL_SKILLS_DIR here
+  mkdirSync(catalogDir, { recursive: true });
+  const external = join(s.home, "external.md");
+  writeFileSync(external, "---\nname: real-skill\ndescription: Use when an exact-match edit fails and the anchor must be refreshed from source.\n---\n\n## When to use\n\nx\n\n## Procedure\n\n1. a\n\n## Verification\n\n- EXTERNAL SECRET BODY\n");
+  symlinkSync(external, join(s.shelf, name, "SKILL.md"));
+
+  const r = drive(s, `
+let err = "", published = "";
+try { published = String(mm.publishSkillToCatalog(${JSON.stringify(name)}, {})); } catch (e) { err = String(e); }
+out.err = err.slice(0, 140);
+out.published = published.slice(0, 200);
+`);
+  // Assert the SECURITY OUTCOME, not the refusal wording. Whether publish throws containment,
+  // throws "no active skill", or simply declines, the invariant is the same: external content
+  // must never appear in the shared catalog.
+  const entry = join(catalogDir, name, "SKILL.md");
+  const leaked = existsSync(entry) && readFileSync(entry, "utf8").includes("EXTERNAL SECRET BODY");
+  expect(leaked, `external body reached the catalog (err=${r.err} published=${r.published})`).toBe(false);
+});
+
+test("packed · a labelled *_secret assignment is blocked and redacted, not published verbatim", () => {
+  const s = seat(false);
+  const r = drive(s, `
+const body = 'client_secret="ordinarySecret12345"';
+const scan = mm.scanSkillContent("---" + String.fromCharCode(10) + "name: x" + String.fromCharCode(10) + "---" + String.fromCharCode(10) + body);
+out.blocked = !scan.ok;
+out.issues = (scan.issues || []).join("; ").slice(0, 80);
+const san = mm.sanitizeForPublish(body);
+out.redacted = !san.sanitized.includes("ordinarySecret12345");
+`);
+  // \\bsecret never matches inside client_secret because _ is a word character. That is the most
+  // common real-world shape of the thing the scanner claims to block.
+  expect(r.blocked, `client_secret assignment not blocked: ${r.issues}`).toBe(true);
+});
+
+test("packed · a symlinked _retired root refuses the quarantine move", () => {
+  const s = seat(false);
+  const name = "real-skill";
+  mkdirSync(join(s.shelf, name), { recursive: true });
+  // retire only touches MANAGED skills — without the provenance tag it refuses for an unrelated
+  // reason and the test proves nothing about containment.
+  writeFileSync(join(s.shelf, name, "SKILL.md"), "---\nname: real-skill\n---\nbody\n<!-- muscle-memory provenance: test -->\n");
+  const outside = join(s.home, "outside");
+  mkdirSync(outside, { recursive: true });
+  symlinkSync(outside, join(s.shelf, "_retired"));
+
+  const r = drive(s, `
+let err = "";
+try { mm.retireManagedSkill(${JSON.stringify(name)}, "test", {}); } catch (e) { err = String(e); }
+out.refused = /containment|symlink/i.test(err);
+out.err = err.slice(0, 100);
+`);
+  expect(r.refused, `retire should refuse a symlinked _retired: ${r.err}`).toBe(true);
+  // The active skill must still be on the shelf, not moved outside it.
+  expect(existsSync(join(s.shelf, name, "SKILL.md"))).toBe(true);
+});
