@@ -83,6 +83,9 @@ await mod.default({
 const out = {};
 ${body}
 console.log("@@" + JSON.stringify(out));
+// The mod leaves a handle open that keeps the loop alive ~12s after the work finishes. In a
+// long-lived host that is irrelevant; in a probe it turns a 2ms assertion into a 12s test.
+process.exit(0);
 `);
   const env = {
     ...process.env,
