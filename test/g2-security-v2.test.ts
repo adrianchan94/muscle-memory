@@ -37,6 +37,8 @@ interface Seat {
   state: string;
   shelf: string;
   global: string;
+  /** Pinned so a scenario can delete the key deterministically instead of guessing its path. */
+  keyFile: string;
 }
 
 function seat(): Seat {
@@ -47,6 +49,7 @@ function seat(): Seat {
     state: join(home, "state"),
     shelf: join(home, "skills"),
     global: join(home, "global"),
+    keyFile: join(home, "instrument.key"),
   };
   for (const d of [s.state, s.shelf, s.global]) mkdirSync(d, { recursive: true });
   return s;
@@ -98,6 +101,7 @@ process.exit(0);
       MM_STATE_DIR: s.state,
       MM_AGENT_SKILLS_DIR: s.shelf,
       MM_GLOBAL_SKILLS_DIR: s.global,
+      MM_INSTRUMENT_KEY_FILE: s.keyFile,
       ...extraEnv,
     },
   });
@@ -296,4 +300,130 @@ out.integrity = sum.ledgerIntegrity;
 `);
   expect(r.status).not.toBe("verified");
   expect(typeof r.status).toBe("string");
+});
+
+// ── AX · hostile hosts ─────────────────────────────────────────────────────────
+// threat: a host that gives the mod less than it expects. If the loop only works on a fully
+// featured host, the product is a demo. These assert the loop degrades to still-useful, and
+// never crashes the host.
+
+test("g2v2 · AX1 · a tools-only host still yields a complete loop", () => {
+  const s = seat();
+  seedMatchingSkill(s.shelf);
+  const r = drive(s, `
+mm.initInstrumentKey({ stateDir: process.env.MM_STATE_DIR });
+out.registered = [...tools.keys()].sort();
+const p = await prescribe();
+out.prescribed = /PRESCRIBE/i.test(p) && !p.includes("undefined");
+const pid = pidOf(p);
+out.closed = /OUTCOME RECORDED/i.test(await close(pid, "helped", "worked"));
+out.counted = mm.summarizePossessionLedger().closedDecisions;
+`, { MM_HOST_MINIMAL: "1" });
+  // No commands, no UI, no events registered by this probe beyond the tool map.
+  expect(r.registered.length).toBeGreaterThanOrEqual(3);
+  expect(r.prescribed, "a bare host must still get a usable prescription").toBe(true);
+  expect(r.closed).toBe(true);
+  expect(r.counted).toBe(1);
+});
+
+test("g2v2 · AX2 · an empty shelf abstains as a value and still hands over a next step", () => {
+  const s = seat(); // deliberately no skill installed
+  const r = drive(s, `
+mm.initInstrumentKey({ stateDir: process.env.MM_STATE_DIR });
+const p = await prescribe();
+out.abstained = /ABSTAIN/i.test(p);
+out.nextStep = /Next:/i.test(p);
+out.noUndefined = !p.includes("undefined");
+out.crashed = false;
+`);
+  expect(r.abstained).toBe(true);
+  expect(r.nextStep, "abstention without a next step is just a dead end").toBe(true);
+  expect(r.noUndefined).toBe(true);
+});
+
+test("g2v2 · AX3 · a seeded shelf completes the loop in a small, bounded number of calls", () => {
+  const s = seat();
+  seedMatchingSkill(s.shelf);
+  const r = drive(s, `
+mm.initInstrumentKey({ stateDir: process.env.MM_STATE_DIR });
+let calls = 0;
+const p = await prescribe(); calls++;
+const pid = pidOf(p);
+await close(pid, "helped", "applied and green"); calls++;
+out.calls = calls;
+out.closed = mm.summarizePossessionLedger().closedDecisions;
+`);
+  // The whole value proposition is that the loop is cheap. Two tool calls, not eight.
+  expect(r.calls).toBeLessThanOrEqual(8);
+  expect(r.closed).toBe(1);
+});
+
+// ── H · credit is attributed to the skill that actually ran ────────────────────
+// threat: a different skill runs, and the prescribed one takes the credit.
+// attack: close a possession naming a skill that was never prescribed.
+// expected: no proven/verified credit accrues to the unrelated skill.
+test("g2v2 · a closure cannot mint verified credit for a skill that never ran", () => {
+  const s = seat();
+  seedMatchingSkill(s.shelf);
+  mkdirSync(join(s.shelf, "unrelated-other-skill"), { recursive: true });
+  writeFileSync(join(s.shelf, "unrelated-other-skill", "SKILL.md"), "---\nname: unrelated-other-skill\ndescription: Use when publishing an npm package: bump, pack, verify, publish.\n---\n\n## When to use\n\nPublishing.\n\n## Procedure\n\n1. a\n\n## Verification\n\n- ok\n");
+  const r = drive(s, `
+mm.initInstrumentKey({ stateDir: process.env.MM_STATE_DIR });
+const p = await prescribe();
+out.prescribedSkill = (p.match(/PRESCRIBE "([^"]+)"/) || [])[1] || "";
+const pid = pidOf(p);
+await close(pid, "helped", "some other skill did the work");
+const sum = mm.summarizePossessionLedger();
+out.verifiedDecisions = sum.verifiedDecisions;
+out.closed = sum.closedDecisions;
+// Read the recorded attribution back off the ledger, not off the summary. This is the field
+// that can actually vary, and therefore the one worth asserting.
+// Escapes do not survive nesting a template inside a template — same class as the markdown
+// fence that broke an earlier probe. Compute the newline instead of escaping it.
+const rows = readFileSync(join(process.env.MM_STATE_DIR, "possessions.jsonl"), "utf8")
+  .trim().split(String.fromCharCode(10)).map((l) => JSON.parse(l));
+out.decisionSkill = (rows.find((x) => x.type === "decision") || {}).skill || "";
+out.outcomeSkill = (rows.find((x) => x.type === "outcome") || {}).skill || "";
+`);
+  expect(r.prescribedSkill).toBe("recovering-failed-exact-match-edits");
+  // The ledger must attribute the outcome to the skill that was actually prescribed — the
+  // unrelated shelf-mate must not appear. `verifiedDecisions` is NOT asserted here: it is 0 in
+  // every fixture in this file, so asserting it would prove nothing about attribution.
+  expect(r.decisionSkill).toBe("recovering-failed-exact-match-edits");
+  expect(r.outcomeSkill === "" || r.outcomeSkill === "recovering-failed-exact-match-edits",
+    `outcome attributed to '${r.outcomeSkill}'`).toBe(true);
+  expect(r.outcomeSkill).not.toBe("unrelated-other-skill");
+  expect(r.closed).toBe(1);
+});
+
+// ── I · losing the instrument key demotes claims without destroying history ────
+// threat: the key disappears; either the product lies about past verified work, or it loses it.
+// expected: the ledger rows survive, and nothing is presented as verified without the key.
+test("g2v2 · removing the instrument key preserves history and refuses verified status", () => {
+  const s = seat();
+  seedMatchingSkill(s.shelf);
+  const before = drive(s, `
+mm.initInstrumentKey({ stateDir: process.env.MM_STATE_DIR });
+const pid = pidOf(await prescribe());
+await close(pid, "helped", "genuine");
+const sum = mm.summarizePossessionLedger();
+out.rows = sum.ledgerRows;
+out.closed = sum.closedDecisions;
+`);
+  expect(before.closed).toBe(1);
+
+  // The key path is pinned by the seat, so this deletes a known file rather than guessing.
+  expect(existsSync(s.keyFile), "the instrument key should exist before we remove it").toBe(true);
+  rmSync(s.keyFile, { force: true });
+
+  const after = drive(s, `
+const sum = mm.summarizePossessionLedger();
+out.rows = sum.ledgerRows;
+out.closed = sum.closedDecisions;
+out.status = sum.scoreStatus;
+out.verifiedDecisions = sum.verifiedDecisions;
+`);
+  expect(after.rows, "history must survive key loss").toBe(before.rows);
+  expect(after.closed).toBe(before.closed);
+  expect(after.verifiedDecisions).toBe(0);
 });

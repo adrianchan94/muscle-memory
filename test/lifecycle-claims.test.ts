@@ -216,3 +216,18 @@ test("class: no tool description claims blanket no-approval while hosting publis
   expect(desc).not.toMatch(/no-approval, safe, reversible/);
   expect(desc).toMatch(/approve: true/);
 });
+
+test("class: the threat map stays in step with the suites it indexes", () => {
+  const map = readFileSync(new URL("../docs/cold-review/THREAT-MAP.md", import.meta.url), "utf8");
+  // The map is the spine of G2 now that S-numbered continuity is dead. If it stops naming the
+  // files it indexes, it has become decoration.
+  for (const suite of ["packed-containment-vectors", "g2-security-v2", "packed-forgery-replay", "package-smoke"]) {
+    expect(map, `threat map does not reference ${suite}`).toContain(suite);
+  }
+  // Reach must be declared, and the honest gaps must stay visible in the same document.
+  expect(map).toMatch(/red-checked/);
+  expect(map).toMatch(/Known gaps/i);
+  // And nobody quotes the dead numbering again. Whitespace-tolerant on purpose: markdown wraps,
+  // and this is the third line-naive regex I have written against wrapped prose in one session.
+  expect(map).toMatch(/S-numbered\s+continuity\s+is\s+dead/);
+});
