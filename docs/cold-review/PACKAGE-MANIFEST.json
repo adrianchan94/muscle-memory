@@ -10,16 +10,16 @@
   ],
   "tarball": {
     "name": "adrianchan94-muscle-memory-1.0.0-rc.3.tgz",
-    "sha256": "800c24b9080cd4539cae63087a76bf99d151e917e5da21fd5beaa2ff5d990160",
-    "bytes": 272874,
-    "npmReportedSize": 272874,
-    "npmReportedUnpackedSize": 944570,
+    "sha256": "503da362fcd1430a29d0ee9ffa83a765a1e885b2dc5efc26de51646cb1d74c7a",
+    "bytes": 273911,
+    "npmReportedSize": 273911,
+    "npmReportedUnpackedSize": 947805,
     "fileCount": 23
   },
   "bundle": {
     "path": "mods/index.bundled.mjs",
-    "committedSha256": "50e0f39893de83b4bbfecb5c4282428272fe9fa05e07826788e9d7c11262c54a",
-    "rebuiltFromSourceSha256": "50e0f39893de83b4bbfecb5c4282428272fe9fa05e07826788e9d7c11262c54a",
+    "committedSha256": "eb0f86d713ee27f61ef1a805dd9487794cdbde628f5001abf5851b6c58d6135a",
+    "rebuiltFromSourceSha256": "eb0f86d713ee27f61ef1a805dd9487794cdbde628f5001abf5851b6c58d6135a",
     "parity": true
   },
   "shippedFiles": [
@@ -50,8 +50,8 @@
     },
     {
       "path": "mods/core.ts",
-      "bytes": 42644,
-      "sha256": "824f448ec5ef920f606eb95d0847d11075d05bcf2b2be078b7ffb8ed3a712661"
+      "bytes": 44069,
+      "sha256": "fa518cadb717036312b6bb5b6c0a5687579142e74054a306d892f4fc2debc969"
     },
     {
       "path": "mods/detect.ts",
@@ -75,8 +75,8 @@
     },
     {
       "path": "mods/index.bundled.mjs",
-      "bytes": 357454,
-      "sha256": "50e0f39893de83b4bbfecb5c4282428272fe9fa05e07826788e9d7c11262c54a"
+      "bytes": 358360,
+      "sha256": "eb0f86d713ee27f61ef1a805dd9487794cdbde628f5001abf5851b6c58d6135a"
     },
     {
       "path": "mods/index.ts",
@@ -95,8 +95,8 @@
     },
     {
       "path": "mods/lifecycle.ts",
-      "bytes": 14447,
-      "sha256": "84d58e34280f6b42e9a4846374bf77b2f02d49defa793f5130485bb03a7c264c"
+      "bytes": 14929,
+      "sha256": "e3c16af2651c07581f68cdb67782cd7fbbd5b256c76ab36d626a653ef67ad538"
     },
     {
       "path": "mods/possessions.ts",
@@ -105,8 +105,8 @@
     },
     {
       "path": "mods/publish.ts",
-      "bytes": 18086,
-      "sha256": "9a1d77315bca9ba751d0eaf65c51907e9dc0268428f65de35786854b9e8346c7"
+      "bytes": 18508,
+      "sha256": "dd7a1b6ab583af3493977b790263ac8381c9fb79183fb4692551e9ad35ec53d8"
     },
     {
       "path": "mods/referee.ts",
