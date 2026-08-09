@@ -1,6 +1,9 @@
+import { createRequire } from "node:module";
+var __require = /* @__PURE__ */ createRequire(import.meta.url);
+
 // mods/index.ts
-import { mkdirSync as mkdirSync10, readFileSync as readFileSync12, existsSync as existsSync12, writeFileSync as writeFileSync10, readdirSync as readdirSync4 } from "node:fs";
-import { join as join14 } from "node:path";
+import { mkdirSync as mkdirSync11, readFileSync as readFileSync13, existsSync as existsSync13, writeFileSync as writeFileSync11, readdirSync as readdirSync4 } from "node:fs";
+import { join as join15 } from "node:path";
 import { randomBytes as randomBytes2 } from "node:crypto";
 
 // mods/core.ts
@@ -94,12 +97,12 @@ function loadRows(path = LOG_PATH) {
 }
 var MM_TAG = "muscle-memory provenance";
 var FIXTURE_SKILL_RE = /^ref-skill-/;
-function agentSkillsDir(ctx) {
+function agentSkillsDir(ctx2) {
   if (process.env.MM_AGENT_SKILLS_DIR)
     return process.env.MM_AGENT_SKILLS_DIR;
   if (process.env.MEMORY_DIR)
     return join(process.env.MEMORY_DIR, "skills");
-  const id = ctx?.agent?.id || ctx?.agentId;
+  const id = ctx2?.agent?.id || ctx2?.agentId;
   if (id) {
     const projected = join(homedir(), ".letta", "agents", id, "memory", "skills");
     if (existsSync(join(homedir(), ".letta", "agents", id, "memory")))
@@ -110,18 +113,34 @@ function agentSkillsDir(ctx) {
   }
   return globalSkillsDir();
 }
-function scanDirs(ctx) {
-  return [...new Set([agentSkillsDir(ctx), globalSkillsDir()])];
+function projectSkillsDir() {
+  try {
+    const d = join(process.cwd(), ".skills");
+    return existsSync(d) ? d : null;
+  } catch {
+    return null;
+  }
 }
-function skillShelves(ctx) {
-  const agent = agentSkillsDir(ctx);
+function environmentSkillsDir() {
+  try {
+    const d = process.env.LETTA_SKILLS_DIRECTORY;
+    return d && existsSync(d) ? d : null;
+  } catch {
+    return null;
+  }
+}
+function scanDirs(ctx2) {
+  return [...new Set([agentSkillsDir(ctx2), projectSkillsDir(), environmentSkillsDir(), globalSkillsDir()].filter((d) => !!d))];
+}
+function skillShelves(ctx2) {
+  const agent = agentSkillsDir(ctx2);
   const shelves = [{ name: "agent", dir: agent, writable: true, autonomous: true, priority: 20 }];
   if (globalSkillsDir() !== agent)
     shelves.push({ name: "global", dir: globalSkillsDir(), writable: false, autonomous: false, priority: 10 });
   return shelves;
 }
-function autonomousShelves(ctx) {
-  return skillShelves(ctx).filter((s) => s.autonomous).map((s) => s.dir);
+function autonomousShelves(ctx2) {
+  return skillShelves(ctx2).filter((s) => s.autonomous).map((s) => s.dir);
 }
 function slug(s) {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 64);
@@ -221,8 +240,8 @@ var CATALOG_SYNC_DIR = join(STATE_DIR, "catalog-sync");
 var CATALOG_SYNC_BACKUP_DIR = join(CATALOG_SYNC_DIR, "backups");
 var CATALOG_SYNC_META = ".mm-catalog-sync.json";
 var CATALOG_SYNC_BACKUPS_PER_SKILL = 3;
-function sourceAgentId(ctx) {
-  return String(ctx?.agent?.id || ctx?.agentId || process.env.AGENT_ID || "").trim() || null;
+function sourceAgentId(ctx2) {
+  return String(ctx2?.agent?.id || ctx2?.agentId || process.env.AGENT_ID || "").trim() || null;
 }
 function readCatalogSyncMeta(skill) {
   try {
@@ -346,18 +365,18 @@ function copySkillFolderFiltered(srcDir, target, meta) {
   writeFileSync(join(target, CATALOG_SYNC_META), JSON.stringify(meta, null, 2));
   return { copied, skipped };
 }
-function syncSkillToDesktopCatalog(name, ctx, opts = {}) {
+function syncSkillToDesktopCatalog(name, ctx2, opts = {}) {
   const nm = slug(name);
   if (!nm)
     return { status: "error", skill: nm, reason: "name required" };
-  const srcRoot = agentSkillsDir(ctx);
-  const srcDir = existsSync(join(srcRoot, nm, "SKILL.md")) ? join(srcRoot, nm) : scanDirs(ctx).filter((d) => d !== globalSkillsDir()).map((d) => join(d, nm)).find((d) => existsSync(join(d, "SKILL.md")));
+  const srcRoot = agentSkillsDir(ctx2);
+  const srcDir = existsSync(join(srcRoot, nm, "SKILL.md")) ? join(srcRoot, nm) : scanDirs(ctx2).filter((d) => d !== globalSkillsDir()).map((d) => join(d, nm)).find((d) => existsSync(join(d, "SKILL.md")));
   if (!srcDir)
     return { status: "missing", skill: nm, reason: "no agent skill to sync" };
   const target = join(globalSkillsDir(), nm);
   const srcSkill = join(srcDir, "SKILL.md");
   const dstSkill = join(target, "SKILL.md");
-  const sourceAgent = sourceAgentId(ctx);
+  const sourceAgent = sourceAgentId(ctx2);
   const targetMeta = readCatalogSyncMeta(nm);
   const targetAgent = targetMeta?.sourceAgent ?? null;
   if (srcDir === target)
@@ -453,7 +472,13 @@ function scanSkillContent(content) {
     issues.push("credential exfiltration pattern");
   if (/\beval\s*\(\s*(?:atob|Buffer\.from|decodeURIComponent|unescape)\s*\(/i.test(c) || /\bbase64\s+-d\b[^\n]*\|\s*(?:ba)?sh\b/i.test(c) || /\b(?:python3?|node|ruby|perl)\b[^\n]*\s-[ec]\b[^\n]*(?:atob|base64|exec\(|eval)/i.test(c))
     issues.push("obfuscated code execution");
-  return { ok: issues.length === 0, issues };
+  const distinct = Array.from(new Set(issues));
+  const severity = {
+    score: distinct.length,
+    tier: distinct.length >= 4 ? "high" : distinct.length >= 2 ? "medium" : distinct.length === 1 ? "low" : "none",
+    provenance: distinct
+  };
+  return { ok: issues.length === 0, issues, severity };
 }
 function scanSupportFile(path, content) {
   const issues = [...scanSkillContent(content).issues];
@@ -482,8 +507,8 @@ function validateSupportPath(filePath) {
     return { ok: false, reason: "dotfiles/segments blocked" };
   return { ok: true };
 }
-function skillDirOf(name, ctx) {
-  return scanDirs(ctx).find((d) => {
+function skillDirOf(name, ctx2) {
+  return scanDirs(ctx2).find((d) => {
     try {
       return existsSync(join(resolveSkillDir(d, name), "SKILL.md"));
     } catch {
@@ -518,14 +543,14 @@ function assertContained(root, full) {
     }
   }
 }
-function writeSupportFile(name, filePath, content, ctx) {
+function writeSupportFile(name, filePath, content, ctx2) {
   const v = validateSupportPath(filePath);
   if (!v.ok)
     throw new Error(v.reason);
   const sc = scanSupportFile(filePath, content);
   if (!sc.ok)
     throw new Error(`security: ${sc.issues.join("; ")}`);
-  const d = skillDirOf(name, ctx);
+  const d = skillDirOf(name, ctx2);
   if (!d)
     throw new Error(`no skill '${name}'`);
   const full = resolveSkillFile(d, name, filePath);
@@ -537,11 +562,11 @@ function writeSupportFile(name, filePath, content, ctx) {
   renameSync(tmp, full);
   return full;
 }
-function removeSupportFile(name, filePath, ctx) {
+function removeSupportFile(name, filePath, ctx2) {
   const v = validateSupportPath(filePath);
   if (!v.ok)
     throw new Error(v.reason);
-  const d = skillDirOf(name, ctx);
+  const d = skillDirOf(name, ctx2);
   if (!d)
     throw new Error(`no skill '${name}'`);
   const full = join(d, name, filePath);
@@ -555,8 +580,8 @@ function removeSupportFile(name, filePath, ctx) {
   return grave;
 }
 var STAGED_DIR = join(STATE_DIR, "staged");
-function createDedupeSurface(ctx) {
-  return [...new Set([...scanDirs(ctx), STAGED_DIR])];
+function createDedupeSurface(ctx2) {
+  return [...new Set([...scanDirs(ctx2), STAGED_DIR])];
 }
 var STAGED_RETIRED_DIR = join(STATE_DIR, "staged-retired");
 var AUTOPILOT_STATE = join(STATE_DIR, "autopilot-state.json");
@@ -1155,6 +1180,10 @@ function isDurableLesson(text) {
     return false;
   return true;
 }
+function isSafeExistingSkillName(name) {
+  const n = String(name ?? "").trim();
+  return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(n) && n.length <= 64;
+}
 function isValidSkillName(name) {
   const n = String(name ?? "").trim();
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(n) || n.length > 64)
@@ -1239,324 +1268,15 @@ function buildCrossConversationEvidence(rows) {
 `), convs, items: repairs.length + aps.length + topTmpl.length + high.length, rejected, signals };
 }
 // mods/gate.ts
-import { join as join2 } from "node:path";
-function dedupCheck(name, description, dirs = [globalSkillsDir()]) {
-  const words = new Set(description.toLowerCase().split(/\W+/).filter((w) => w.length > 3));
-  const overlapWith = (desc) => {
-    const dw = new Set(desc.toLowerCase().split(/\W+/).filter((w) => w.length > 3));
-    let inter = 0;
-    for (const w of words)
-      if (dw.has(w))
-        inter++;
-    return words.size ? inter / words.size : 0;
-  };
-  let worst = { name: "", overlap: 0 };
-  for (const dir of dirs) {
-    for (const n of listSkillNames(dir)) {
-      if (n === name)
-        return { dup: true, reason: `skill '${n}' already exists — patch it, don't duplicate`, name: n, overlap: 1 };
-      const overlap = overlapWith(skillDesc(dir, n));
-      if (overlap > worst.overlap)
-        worst = { name: n, overlap };
-    }
-    const retiredRoot = join2(dir, "_retired");
-    for (const rn of listSkillNames(retiredRoot)) {
-      const base = rn.replace(/-\d{4}-\d{2}-\d{2}T[\dZ.-]+$/, "");
-      if (base === name)
-        return { dup: true, reason: `retired skill '${base}' exists in quarantine (${retiredRoot}/${rn}) — restore it or absorb instead of recreating`, name: base, overlap: 1 };
-      const overlap = overlapWith(skillDesc(retiredRoot, rn));
-      if (overlap > 0.6)
-        return { dup: true, reason: `>60% description overlap with RETIRED skill '${base}' (${retiredRoot}/${rn}) — quarantined: restore/absorb instead of recreating a sibling`, name: base, overlap };
-    }
-  }
-  return { dup: worst.overlap > 0.6, reason: worst.overlap > 0.6 ? `>60% description overlap with '${worst.name}' — patch/absorb instead` : "", name: worst.name, overlap: worst.overlap };
-}
-function candidateName(c) {
-  const key = c.key.replace(/<[^>]+>/g, "").replace(/[(){}]/g, "").replace(/→/g, " to ");
-  const STOP = new Set(["str", "path", "url", "read", "write", "edit", "bash", "sh", "cd", "ls", "cat", "echo", "pwd", "true", "sleep", "mkdir", "amp"]);
-  const seen = new Set;
-  const words = key.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 1 && !STOP.has(w) && !seen.has(w) && seen.add(w));
-  const base = words.slice(0, 5).join("-") || (c.kind === "sequence" ? "recurring-workflow" : "recurring-command");
-  const name = words.length >= 2 || /ing$/.test(base) ? base : `${base}-workflow`;
-  return slug(name);
-}
-function candidateDescription(c) {
-  return `Use when repeating the observed ${c.kind} workflow '${c.key}' (${c.count} reps across ${c.convs} conversation${c.convs === 1 ? "" : "s"}${c.fixes ? `, ${c.fixes} error-recovery reps` : ""}); trigger on similar repeated tool-use, validation, or repair loops.`;
-}
-function draftSkillFromCandidate(c) {
-  const name = candidateName(c);
-  const description = candidateDescription(c);
-  const parts = c.key.split(/\s*→\s*/).filter(Boolean);
-  const steps = parts.length > 1 ? parts.map((s, i) => `${i + 1}. **${s}** — perform this step intentionally; adapt paths/args to the current repo/session.`).join(`
-`) : `1. **${c.key}** — run the recurring command/template only after confirming the current repo/session context.
-2. Inspect the output and capture the success/failure receipt.
-3. If it fails, patch the root cause and rerun the same validation once.`;
-  const recovery = c.fixes ? `
-## Failure recovery
-This pattern includes ${c.fixes} observed error-recovery rep${c.fixes === 1 ? "" : "s"}. Preserve the recovery loop:
+import { join as join10 } from "node:path";
 
-1. Treat the first failure as diagnostic signal, not random noise.
-2. Inspect the concrete error output.
-3. Patch the smallest root cause.
-4. Rerun the same validation command/tool before claiming fixed.
-` : "";
-  const body = `# ${name}
-
-This skill was drafted from repeated real tool-use captured by muscle-memory. Treat it as a starting playbook: refine after the next successful/failed use.
-
-## Trigger
-${description}
-
-## Observed pattern
-\`\`\`text
-${c.key}
-\`\`\`
-
-- Kind: ${c.kind}
-- Repetitions: ${c.count}
-- Conversation spread: ${c.convs}
-- Error-recovery reps: ${c.fixes}
-- Maturity score: ${c.maturity}
-
-## Procedure
-${steps}${recovery}
-## Verification
-- Capture the concrete command/tool output that proves the workflow succeeded.
-- If this touches files, inspect diff/status before claiming done.
-- If this changes a package/mod, bundle/import or run its package-local test.
-- If this is visual/frontend work, require visual receipts plus computed boxes, not presence-only proof.
-
-## Anti-bloat / refinement rule
-- Patch this skill in place when a step is too vague, stale, or misses a failure mode.
-- Do not create a duplicate skill for the same workflow; merge or absorb instead.
-- Retire/quarantine it if future usage shows it does not earn its context.
-`;
-  return { name, description, body };
-}
-function findCandidate(candidateKey) {
-  const { candidates } = detect(loadExperience());
-  if (!candidateKey)
-    return candidates[0];
-  return candidates.find((c) => c.key === candidateKey || c.key.includes(candidateKey));
-}
-function repairForCandidate(c) {
-  if (!c.fixes)
-    return;
-  const first = c.key.split(/\s*→\s*/)[0];
-  return detectRepairChains(loadExperience()).find((r) => r.trigger === first || r.verifyStep === first || c.key.includes(r.trigger) || c.key.includes(r.verifyStep));
-}
-function lintSkillDraft(d, opts = {}) {
-  const issues = [];
-  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(d.name))
-    issues.push("name must be lowercase-hyphen slug");
-  if (d.name.length > 64)
-    issues.push("name > 64 chars");
-  if (!d.description || d.description.length < 20)
-    issues.push("description too short");
-  if (!/\b(use when|trigger|when )/i.test(d.description))
-    issues.push("description must state WHEN to use (trigger phrase)");
-  if (d.description.length > 700)
-    issues.push("description > 700 chars (keep routing lean)");
-  const approxTokens = Math.ceil(d.body.length / 4);
-  if (approxTokens > 5000)
-    issues.push(`body ~${approxTokens} tokens > 5000 (decompose into references/)`);
-  if (!/##\s+procedure/i.test(d.body))
-    issues.push("body missing ## Procedure");
-  if (!/##\s+verification/i.test(d.body))
-    issues.push("body missing ## Verification");
-  if (opts.needsPitfalls && !/##\s+(pitfalls|failure recovery)/i.test(d.body))
-    issues.push("fix-pattern skill must include ## Pitfalls / Failure recovery");
-  return { ok: issues.length === 0, issues };
-}
-function sotaQualityGaps(d) {
-  const gaps = [];
-  const b = d.body;
-  const lc = b.toLowerCase();
-  const procedural = /##\s+(procedure|steps|workflow|method|pitfalls|failure recovery|recipe|how to)/i.test(b);
-  const fencedBodies = [...b.matchAll(/```[^\n]*\n([\s\S]*?)```/g)].map((m) => m[1]);
-  const concreteFence = fencedBodies.some((sample) => /(?:^|\s)(?:npm|npx|pnpm|yarn|bun|node|deno|python3?|pytest|jest|vitest|cargo|go|make|git|curl|letta|shopify|docker|kubectl)\b|(?:^|[\s"'`])[\w./-]+\.(?:ts|tsx|js|jsx|py|sh|rb|go|json|ya?ml|toml|liquid|md)\b|(?:^|\n)[+-]\s|[A-Za-z_$][\w$]*\s*(?:\(|=)|\b(?:return|if|for|while|class|function|const|let|def|import)\b/m.test(sample));
-  if (procedural && !concreteFence)
-    gaps.push("CONCRETENESS: add a fenced example with a real command, file, code fragment, or diff (show the exact correct fix, never hand-wave)");
-  if (/##\s+pitfalls/i.test(b)) {
-    const section = (b.split(/##\s+pitfalls[^\n]*\n/i)[1] || "").split(/\n##\s+/)[0] || "";
-    const sectionLc = section.toLowerCase();
-    const tells = (sectionLc.match(/\btell\b|\bsymptom\b|at-a-glance|the signal|you'll see|gives it away/g) || []).length;
-    const pitfalls = section.match(/^\s*(?:[-*]|\d+\.|###)\s/gm)?.length || 0;
-    if (pitfalls >= 2 && tells < Math.min(2, pitfalls))
-      gaps.push("DIAGNOSTIC TELLS: give each Pitfall a one-line TELL — the at-a-glance symptom/error-string that identifies that failure class");
-  }
-  const destructive = /\b(rm\s+-rf?|reset\s+--hard|force[- ]?push|git\s+push\s+--force|--force\b|drop\s+(table|database)|db[: ]?migrate|delete\s+from|truncate\b|mv\s+[^\n]*\/)/i.test(b);
-  const safeFirst = /\b(back\s?up|snapshot|stash|dry[- ]?run|--dry-run|--check|copy first|inspect|diff before|reversible|safety net|to a branch|tag first)\b/i.test(lc);
-  if (destructive && !safeFirst)
-    gaps.push("SAFE-FIRST: add an explicit non-destructive safety net (backup/snapshot/dry-run/inspect) as the first step before any destructive command");
-  const idMatches = b.match(/\b(agent-[a-f0-9-]{8,}|[A-Za-z0-9_]+\.com\/[A-Za-z0-9_./-]+|sk-[A-Za-z0-9]{6,})\b/g) || [];
-  if (idMatches.length >= 3)
-    gaps.push("GENERALITY: this reads as a one-off (hardcoded ids/paths) — generalize to a class-level rule and demote the specifics to a worked example");
-  return gaps;
-}
-function auditSkills(skills) {
-  const flagged = [];
-  const gapCounts = {};
-  for (const s of skills) {
-    const gaps = sotaQualityGaps({ name: s.name, description: s.description ?? "Use when relevant", body: s.body });
-    if (gaps.length) {
-      flagged.push({ name: s.name, gaps });
-      for (const g of gaps) {
-        const k = g.split(":")[0];
-        gapCounts[k] = (gapCounts[k] || 0) + 1;
-      }
-    }
-  }
-  return { total: skills.length, clean: skills.length - flagged.length, flagged, gapCounts };
-}
-function crossShelfDuplicates(entries) {
-  const byName = new Map;
-  for (const e of entries) {
-    const a = byName.get(e.name) || [];
-    a.push({ shelf: e.shelf, body: e.body });
-    byName.set(e.name, a);
-  }
-  const out = [];
-  const norm = (b) => hash(b.replace(/<!--[\s\S]*?-->/g, "").replace(/\s+/g, " ").trim());
-  for (const [name, copies] of byName) {
-    if (copies.length < 2)
-      continue;
-    const divergent = new Set(copies.map((c) => norm(c.body))).size > 1;
-    out.push({ name, shelves: [...new Set(copies.map((c) => c.shelf))], divergent });
-  }
-  return out;
-}
-function effectivenessVerdict(input) {
-  if (input.staleAntiPattern)
-    return { verdict: "retire_candidate", reason: "the failure it targeted keeps recurring — skill isn't working" };
-  if (input.uses === 0 && input.ageDays > 14)
-    return { verdict: "retire_candidate", reason: `0 uses in ${input.ageDays}d — not earning its context` };
-  if (input.uses === 0)
-    return { verdict: "review", reason: "no observed use yet — keep if newly created" };
-  return { verdict: "keep", reason: `used ${input.uses}×` };
-}
-function renderWorkedExamples(worked) {
-  if (!worked || !worked.length)
-    return "";
-  const items = worked.map((w) => {
-    const sym = w.errMsg ? `**symptom:** \`${w.errMsg.replace(/\s+/g, " ").slice(0, 180)}\`` : "**symptom:** (captured)";
-    const fix = w.fix ? `
-  \`\`\`diff
-${w.fix.split(`
-`).slice(0, 10).map((l) => "  " + l).join(`
-`)}
-  \`\`\`` : "";
-    return `- ${sym}${fix}`;
-  }).join(`
-`);
-  return `
-
-## Worked examples (real, redacted)
-Real symptom→fix pairs captured across sessions (credentials/paths scrubbed):
-${items}
-`;
-}
-function buildDiffFragment(args) {
-  const oldS = typeof args?.old_string === "string" ? args.old_string : "";
-  const newS = typeof args?.new_string === "string" ? args.new_string : typeof args?.content === "string" ? args.content : "";
-  if (!oldS && !newS)
-    return;
-  const o = redactFragment(oldS, 6, 200);
-  const n = redactFragment(newS, 6, 200);
-  const lines = [];
-  for (const l of o ? o.split(`
-`) : [])
-    lines.push(`- ${l}`);
-  for (const l of n ? n.split(`
-`) : [])
-    lines.push(`+ ${l}`);
-  const out = lines.join(`
-`).slice(0, 400);
-  return out || undefined;
-}
-function draftWithRepair(c, repair) {
-  if (!repair)
-    return draftSkillFromCandidate(c);
-  const workedMd = renderWorkedExamples(repair.worked);
-  const errTag = repair.errClass && repair.errClass !== "inferred-failure" ? repair.errClass : "";
-  const s = repair.convs === 1 ? "" : "s";
-  if (repair.generalized) {
-    const name2 = slug(`recovering-from-${repair.trigger}`).slice(0, 64);
-    const exs = ((repair.examples?.length) ? repair.examples : [repair.verifyStep]).slice(0, 4);
-    const exList = exs.map((e) => `\`${e}\``).join(", ");
-    const worked = exs.map((e) => `- \`${e}\` failed${errTag ? ` (\`${errTag}\`)` : ""} → edit the **source** to fix the cause → re-ran \`${e}\` → PASS`).join(`
-`);
-    const description2 = `Use when a test or script run fails (seen with ${exList}) — recover by editing the source and re-running the same command, never blind-retrying. Triggers on any fix-then-recheck loop, in any language.`;
-    const body2 = `# ${name2}
-
-A recovery discipline distilled from ${repair.count} real fix-then-recheck loops across ${repair.convs} session${s} (${exList}). The command differs by language; the discipline does not.
-
-## When to use
-- A test/script run fails (assertion, traceback, or wrong output) and you need to recover.
-- You're about to re-run a failed command unchanged, hoping it passes.
-- Any edit→re-run loop, regardless of language.
-
-## Procedure (decision guide)
-1. Re-run the exact failing command and READ the concrete error — assertion, traceback, or a wrong printed value.
-2. Do NOT blind-retry. Edit the **source** (not the test) for that specific error — smallest change first.
-3. Re-run the SAME command; confirm it passes (exit 0).
-4. Run it once more to rule out a flaky / state-dependent pass.
-
-## Worked examples (observed)
-\`\`\`text
-${worked}
-\`\`\`
-
-## Pitfalls (symptom → fix)
-- TELL: re-running a failed command unchanged → it stays red; nothing passes until the source changes.
-- TELL: exit code 0 but wrong output (e.g. \`go run\` prints the wrong value) → the failure is in stdout, not the exit code; assert on the value, not just the exit.
-- TELL: editing the test to force a green → fix the code the test exercises, not the assertion.
-
-## Verification
-- [ ] The failure reproduced before the fix (you saw the real error).
-- [ ] The same command passes after the fix (exit 0).
-- [ ] A second independent run also passes.`;
-    return { name: name2, description: description2, body: body2 + workedMd };
-  }
-  const verb = slug(repair.verifyStep) || slug(c.key) || "a-recurring-check";
-  const name = slug(`recovering-from-${verb}-failures`).slice(0, 64);
-  const description = `Use when \`${repair.verifyStep}\` fails${errTag ? ` (\`${errTag}\`)` : ""} — recover by applying \`${repair.fixStep}\` then re-running \`${repair.verifyStep}\`, never blind-retrying. Observed ${repair.count}× across ${repair.convs} session${s}.`;
-  const body = `# ${name}
-
-A recovery discipline distilled from ${repair.count} real \`${repair.verifyStep}\` fix-then-recheck loop${repair.count === 1 ? "" : "s"} across ${repair.convs} session${s}. The fix is known — apply it instead of re-deriving.
-
-## When to use
-- \`${repair.verifyStep}\` fails${errTag ? ` with \`${errTag}\`` : ""}, or any check→fix→recheck loop on it.
-- You're about to re-run \`${repair.verifyStep}\` unchanged after it failed.
-
-## Procedure (decision guide)
-1. Run \`${repair.verifyStep}\` and read the concrete error${errTag ? ` (expect \`${errTag}\`)` : ""}.
-2. Do NOT blind-retry. Apply the known fix: \`${repair.fixStep}\` — addressing that specific error.
-3. Re-run \`${repair.verifyStep}\` to confirm it passes (exit 0).
-4. Run once more to rule out a flaky pass.
-
-## Worked example (observed)
-\`\`\`text
-${repair.verifyStep} failed${errTag ? ` (${errTag})` : ""} → ${repair.fixStep} → re-ran ${repair.verifyStep} → PASS  (${repair.count}× / ${repair.convs} session${s})
-\`\`\`
-
-## Pitfalls (symptom → fix)
-- TELL: re-running \`${repair.verifyStep}\` unchanged → stays red; it won't pass until \`${repair.fixStep}\` is applied.
-- TELL: treating the first failure as noise → it's signal; the fix is known from ${repair.count} prior recoveries.
-
-## Verification
-- [ ] \`${repair.verifyStep}\` failed before the fix (real error seen).
-- [ ] \`${repair.verifyStep}\` passes after \`${repair.fixStep}\` (exit 0).
-- [ ] A second run also passes.`;
-  return { name, description, body: body + workedMd };
-}
 // mods/autopilot.ts
-import { mkdirSync as mkdirSync4, readFileSync as readFileSync4, existsSync as existsSync4, writeFileSync as writeFileSync4, renameSync as renameSync3 } from "node:fs";
-import { join as join5 } from "node:path";
+import { mkdirSync as mkdirSync9, readFileSync as readFileSync9, existsSync as existsSync9, writeFileSync as writeFileSync7, renameSync as renameSync3 } from "node:fs";
+import { join as join9 } from "node:path";
 
 // mods/publish.ts
 import { mkdirSync as mkdirSync2, readFileSync as readFileSync2, existsSync as existsSync2, writeFileSync as writeFileSync2 } from "node:fs";
-import { join as join3 } from "node:path";
+import { join as join2 } from "node:path";
 import { execFileSync } from "node:child_process";
 import { userInfo } from "node:os";
 var PUBLISH_SECRET_RES = [
@@ -1727,7 +1447,7 @@ function stageSanitizedPublish(skill) {
   const tier = publishTier(plan);
   if (plan.hardBlocks.length)
     return { staged: false, dir: "", plan, tier, reason: `blocked: ${plan.hardBlocks.join("; ")}` };
-  const dir = join3(PUBLISH_STAGED_DIR, slug(skill.name));
+  const dir = join2(PUBLISH_STAGED_DIR, slug(skill.name));
   try {
     mkdirSync2(dir, { recursive: true });
   } catch {}
@@ -1744,12 +1464,12 @@ ${Object.entries(meta).map(([k, v]) => `${k}: ${v}`).join(`
 ---
 
 ${plan.sanitizedPreview}`;
-  writeFileSync2(join3(dir, "SKILL.md"), body);
-  writeFileSync2(join3(dir, "PUBLISH-PLAN.json"), JSON.stringify({ skill: skill.name, tier, publishability: plan.publishability, recommended: plan.recommended, issues: plan.issues, replacements: plan.replacements, metadata: meta, staged_at: Date.now() }, null, 2));
+  writeFileSync2(join2(dir, "SKILL.md"), body);
+  writeFileSync2(join2(dir, "PUBLISH-PLAN.json"), JSON.stringify({ skill: skill.name, tier, publishability: plan.publishability, recommended: plan.recommended, issues: plan.issues, replacements: plan.replacements, metadata: meta, staged_at: Date.now() }, null, 2));
   return { staged: true, dir, plan, tier };
 }
 function approveStagedPublish(name, globalDir) {
-  const staged = join3(PUBLISH_STAGED_DIR, slug(name), "SKILL.md");
+  const staged = join2(PUBLISH_STAGED_DIR, slug(name), "SKILL.md");
   if (!existsSync2(staged))
     return { published: false, reason: "no staged copy — run `publish stage <skill>` first" };
   const body = readFileSync2(staged, "utf8");
@@ -1759,15 +1479,15 @@ function approveStagedPublish(name, globalDir) {
   const sec = scanSkillContent(body);
   if (!sec.ok)
     return { published: false, reason: `security: ${sec.issues.join("; ")}` };
-  const dst = join3(globalDir, slug(name));
+  const dst = join2(globalDir, slug(name));
   try {
     mkdirSync2(dst, { recursive: true });
   } catch {}
-  writeFileSync2(join3(dst, "SKILL.md"), body);
-  return { published: true, path: join3(dst, "SKILL.md") };
+  writeFileSync2(join2(dst, "SKILL.md"), body);
+  return { published: true, path: join2(dst, "SKILL.md") };
 }
 function publishVisibilityReceipt(name, globalDir) {
-  const p = join3(globalDir, slug(name), "SKILL.md");
+  const p = join2(globalDir, slug(name), "SKILL.md");
   return { exists: existsSync2(p), path: p, reloadHint: "run /reload (or restart the agent) so the skill index surfaces the new Custom Skill" };
 }
 function liveSkillVisible(name, agentId) {
@@ -1798,11 +1518,11 @@ function catalogPrivacyScan(content) {
     issues.push("private evidence reference");
   return { ok: issues.length === 0, issues: [...new Set(issues)] };
 }
-function publishSkillToCatalog(name, ctx) {
+function publishSkillToCatalog(name, ctx2) {
   const nm = slug(name);
   if (!nm)
     throw new Error("name required");
-  const d = scanDirs(ctx).find((x) => {
+  const d = scanDirs(ctx2).find((x) => {
     try {
       return existsSync2(resolveSkillFile(x, nm));
     } catch {
@@ -1838,16 +1558,1668 @@ function publishSkillToCatalog(name, ctx) {
   return dstFile;
 }
 
+// mods/engram.ts
+import { homedir as homedir3 } from "node:os";
+import { mkdirSync as mkdirSync8, writeFileSync as writeFileSync6, readFileSync as readFileSync8, existsSync as existsSync8 } from "node:fs";
+import { join as join8 } from "node:path";
+
 // mods/lifecycle.ts
-import { lstatSync as lstatSync2, mkdirSync as mkdirSync3, readFileSync as readFileSync3, existsSync as existsSync3, writeFileSync as writeFileSync3, readdirSync as readdirSync2, renameSync as renameSync2 } from "node:fs";
-import { join as join4 } from "node:path";
+import { lstatSync as lstatSync3, mkdirSync as mkdirSync7, readFileSync as readFileSync7, existsSync as existsSync7, writeFileSync as writeFileSync5, readdirSync as readdirSync2, renameSync as renameSync2 } from "node:fs";
+import { join as join7 } from "node:path";
+
+// mods/invocation.ts
+import { appendFileSync as appendFileSync2, existsSync as existsSync4, mkdirSync as mkdirSync4, readFileSync as readFileSync4 } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { dirname as dirname3, join as join4 } from "node:path";
+
+// mods/instrument.ts
+import { createHash as createHash2, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { chmodSync, existsSync as existsSync3, mkdirSync as mkdirSync3, readFileSync as readFileSync3, realpathSync as realpathSync2, statSync, writeFileSync as writeFileSync3 } from "node:fs";
+import { homedir as homedir2 } from "node:os";
+import { dirname as dirname2, join as join3, resolve as resolve2, sep as sep2 } from "node:path";
+function defaultInstrumentKeyPath(home = homedir2()) {
+  return join3(home, ".letta", "instrument", "muscle-memory.key");
+}
+function resolveInstrumentKeyPath(opts = {}) {
+  const env = opts.env ?? process.env;
+  const override = String(env.MM_INSTRUMENT_KEY_FILE || "").trim();
+  return override ? resolve2(override) : defaultInstrumentKeyPath(opts.home ?? homedir2());
+}
+function isInsideStateDir(candidate, stateDir) {
+  const real = (p) => {
+    try {
+      return realpathSync2(p);
+    } catch {
+      return resolve2(p);
+    }
+  };
+  const key = real(candidate);
+  const keyDir = real(dirname2(candidate));
+  const state = real(stateDir);
+  const under = (p) => p === state || p.startsWith(state + sep2);
+  return under(key) || under(keyDir);
+}
+function loadInstrumentKey(opts) {
+  const keyPath = opts.keyPath ?? resolveInstrumentKeyPath({ env: opts.env });
+  if (isInsideStateDir(keyPath, opts.stateDir))
+    return { available: false, reason: "key_inside_state_dir", keyPath };
+  if (!existsSync3(keyPath))
+    return { available: false, reason: "key_absent", keyPath };
+  const mode = statSync(keyPath).mode & 511;
+  if (mode !== 384)
+    return { available: false, reason: "key_permissions", keyPath, detail: mode.toString(8) };
+  const dirMode = statSync(dirname2(keyPath)).mode & 511;
+  if (dirMode & 63)
+    return { available: false, reason: "key_dir_permissions", keyPath, detail: dirMode.toString(8) };
+  const raw = readFileSync3(keyPath, "utf8").trim();
+  const [keyId, material] = raw.split(".");
+  if (!keyId || !material || !/^[a-z0-9]{8}$/.test(keyId))
+    return { available: false, reason: "key_malformed", keyPath };
+  return { available: true, keyId, secret: Buffer.from(material, "base64url"), keyPath };
+}
+function initInstrumentKey(opts) {
+  onKeyChanged();
+  const keyPath = opts.keyPath ?? resolveInstrumentKeyPath({ env: opts.env });
+  if (isInsideStateDir(keyPath, opts.stateDir)) {
+    throw new Error("refusing to create the instrument key inside the state directory; it must live outside the directory whose contents it authenticates");
+  }
+  const existing = loadInstrumentKey({ keyPath, stateDir: opts.stateDir });
+  if (existing.available)
+    return { created: false, keyId: existing.keyId, keyPath };
+  mkdirSync3(dirname2(keyPath), { recursive: true, mode: 448 });
+  chmodSync(dirname2(keyPath), 448);
+  const material = randomBytes(32);
+  const keyId = createHash2("sha256").update(material).digest("hex").slice(0, 8);
+  writeFileSync3(keyPath, `${keyId}.${material.toString("base64url")}
+`, { mode: 384 });
+  chmodSync(keyPath, 384);
+  return { created: true, keyId, keyPath };
+}
+function instrumentStatusLine(loaded) {
+  if (loaded.available)
+    return null;
+  if (loaded.reason === "key_inside_state_dir")
+    return "INSTRUMENT KEY REFUSED · key must not live inside the state directory · verified disabled (judged still works)";
+  if (loaded.reason === "key_absent")
+    return "INSTRUMENT UNAVAILABLE · run /muscle-memory instrument init · verified disabled (judged still works)";
+  return `INSTRUMENT KEY REFUSED · ${loaded.reason.replace(/_/g, " ")} · verified disabled (judged still works)`;
+}
+var noticeShown = false;
+var keyChangeListeners = [];
+function onInstrumentKeyChange(fn) {
+  keyChangeListeners.push(fn);
+}
+function onKeyChanged() {
+  noticeShown = false;
+  for (const fn of keyChangeListeners) {
+    try {
+      fn();
+    } catch {}
+  }
+}
+function instrumentSessionNotice(stateDir) {
+  if (noticeShown)
+    return null;
+  const line = instrumentStatusLine(loadInstrumentKey({ stateDir }));
+  if (!line)
+    return null;
+  noticeShown = true;
+  return line;
+}
+var EVIDENCE_FIELDS = [
+  "schema_version",
+  "key_id",
+  "nonce",
+  "timestamp",
+  "possession_id",
+  "decision_event_id",
+  "skill",
+  "task_id",
+  "task_class",
+  "manifest_sha256",
+  "baseline_sha256",
+  "baseline_captured_at",
+  "expected_sha256",
+  "final_sha256",
+  "invocation_receipt_id",
+  "verifier_id",
+  "verifier_version",
+  "target_rel",
+  "result_class"
+];
+function signInstrumentTuple(tuple, key) {
+  const bytes = Buffer.from(JSON.stringify(tuple, Object.keys(tuple).sort()), "utf8");
+  return `${key.keyId}:${createHmac("sha256", key.secret).update(bytes).digest("hex")}`;
+}
+function verifyInstrumentTuple(tuple, mac, key) {
+  if (typeof mac !== "string")
+    return false;
+  const expected = Buffer.from(signInstrumentTuple(tuple, key), "utf8");
+  const actual = Buffer.from(mac, "utf8");
+  return expected.length === actual.length && timingSafeEqual(actual, expected);
+}
+function canonicalEvidenceBytes(payload) {
+  if (!payload || typeof payload !== "object")
+    throw new Error("evidence payload must be an object");
+  const raw = payload;
+  if (Object.keys(raw).length !== EVIDENCE_FIELDS.length)
+    throw new Error("evidence payload field count mismatch");
+  const canonical = {};
+  for (const field of [...EVIDENCE_FIELDS].sort()) {
+    if (!(field in raw))
+      throw new Error(`evidence payload missing '${field}'`);
+    canonical[field] = raw[field];
+  }
+  return Buffer.from(JSON.stringify(canonical), "utf8");
+}
+function signEvidencePayload(payload, key) {
+  return createHmac("sha256", key.secret).update(canonicalEvidenceBytes(payload)).digest("hex");
+}
+function verifyEvidenceSignature(payload, signature, key) {
+  let expected;
+  try {
+    expected = Buffer.from(signEvidencePayload(payload, key), "hex");
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : "malformed payload" };
+  }
+  if (typeof signature !== "string" || !/^[a-f0-9]{64}$/i.test(signature))
+    return { ok: false, reason: "malformed signature" };
+  const actual = Buffer.from(signature, "hex");
+  if (actual.length !== expected.length)
+    return { ok: false, reason: "length mismatch" };
+  return timingSafeEqual(actual, expected) ? { ok: true } : { ok: false, reason: "signature mismatch" };
+}
+
+// mods/invocation.ts
+var INVOCATION_LOG_PATH = join4(STATE_DIR, "invocations.jsonl");
+var SCHEMA = "mm.invocation.v1";
+var SAFE = /^[a-z0-9][a-z0-9._:-]{0,127}$/i;
+function invocationTuple(e) {
+  return {
+    schema: e.schema,
+    invocation_id: e.invocation_id,
+    possession_id: e.possession_id,
+    decision_event_id: e.decision_event_id,
+    skill: e.skill,
+    call_id: e.call_id,
+    started_at: e.started_at,
+    ended_at: e.ended_at,
+    nonce: e.nonce
+  };
+}
+function instrumentKey() {
+  const loaded = loadInstrumentKey({ stateDir: STATE_DIR });
+  return loaded.available ? { keyId: loaded.keyId, secret: loaded.secret } : null;
+}
+var unauthenticatedInvocationsSeen = 0;
+var pending = new Map;
+function appendInvocation(event) {
+  const key = instrumentKey();
+  const signed = key ? { ...event, mac: signInstrumentTuple(invocationTuple(event), key) } : event;
+  mkdirSync4(dirname3(INVOCATION_LOG_PATH), { recursive: true });
+  appendFileSync2(INVOCATION_LOG_PATH, `${JSON.stringify(signed)}
+`, "utf8");
+}
+function loadInvocations() {
+  if (!existsSync4(INVOCATION_LOG_PATH))
+    return [];
+  const rows = [];
+  for (const line of readFileSync4(INVOCATION_LOG_PATH, "utf8").split(`
+`)) {
+    const text = line.trim();
+    if (!text)
+      continue;
+    try {
+      const raw = JSON.parse(text);
+      if (raw?.schema !== SCHEMA)
+        continue;
+      if (!SAFE.test(String(raw.possession_id ?? "")) || !SAFE.test(String(raw.invocation_id ?? "")))
+        continue;
+      const key = instrumentKey();
+      if (!key || !raw.mac || !verifyInstrumentTuple(invocationTuple(raw), raw.mac, key)) {
+        unauthenticatedInvocationsSeen++;
+        continue;
+      }
+      rows.push(raw);
+    } catch {}
+  }
+  return rows;
+}
+function anyQualifyingInvocation(opts) {
+  const rows = (opts.invocations ?? loadInvocations()).filter((row) => row.possession_id === opts.possessionId && row.decision_event_id === opts.decisionEventId && row.started_at >= opts.decisionAt && row.started_at >= opts.baselineAt && row.ended_at >= row.started_at && row.ended_at <= opts.verifiedAt);
+  return rows.length ? rows[0] : null;
+}
+function qualifyingInvocation(opts) {
+  const rows = (opts.invocations ?? loadInvocations()).filter((row) => row.possession_id === opts.possessionId && row.decision_event_id === opts.decisionEventId && row.skill === opts.skill && row.started_at >= opts.decisionAt && row.started_at >= opts.baselineAt && row.ended_at >= row.started_at && row.ended_at <= opts.verifiedAt);
+  return rows.length === 1 ? rows[0] : null;
+}
+function observeToolStart(event, now = Date.now()) {
+  if (String(event?.toolName ?? "") !== "Skill")
+    return;
+  const skill = String(event?.args?.skill ?? "");
+  const callId = String(event?.toolCallId ?? "");
+  if (!skill || !callId || !SAFE.test(callId))
+    return;
+  pending.set(callId, { skill, startedAt: now });
+  if (pending.size > 256) {
+    const first = pending.keys().next().value;
+    if (first !== undefined)
+      pending.delete(first);
+  }
+}
+function observeToolEnd(event, openPossessions, now = Date.now()) {
+  const callId = String(event?.toolCallId ?? "");
+  const started = callId ? pending.get(callId) : undefined;
+  if (!started)
+    return null;
+  pending.delete(callId);
+  const status = String(event?.status ?? "");
+  const ok = status ? status === "success" : event?.ok ?? !(event?.isError || event?.error);
+  if (!ok)
+    return null;
+  const matches = openPossessions.filter((row) => row.skill === started.skill);
+  if (matches.length !== 1)
+    return null;
+  const invocation = {
+    schema: SCHEMA,
+    invocation_id: `inv-${randomUUID()}`,
+    possession_id: matches[0].possession_id,
+    decision_event_id: matches[0].event_id,
+    skill: started.skill,
+    call_id: callId,
+    started_at: started.startedAt,
+    ended_at: now,
+    nonce: randomUUID()
+  };
+  appendInvocation(invocation);
+  return invocation;
+}
+
+// mods/possessions.ts
+import { createHash as createHash4 } from "node:crypto";
+import { appendFileSync as appendFileSync3, existsSync as existsSync6, mkdirSync as mkdirSync6, readFileSync as readFileSync6 } from "node:fs";
+import { dirname as dirname4, join as join6 } from "node:path";
+
+// mods/verification.ts
+import {
+  chmodSync as chmodSync2,
+  closeSync,
+  constants,
+  existsSync as existsSync5,
+  fstatSync,
+  lstatSync as lstatSync2,
+  mkdirSync as mkdirSync5,
+  openSync,
+  readFileSync as readFileSync5,
+  realpathSync as realpathSync3,
+  statSync as statSync2,
+  writeFileSync as writeFileSync4
+} from "node:fs";
+import { createHash as createHash3, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
+import { isAbsolute as isAbsolute2, join as join5, relative as relative2, resolve as resolve3, sep as sep3 } from "node:path";
+var EXACT_FILE_ADAPTER_ID = "mm.exact-file-sha256.v1";
+var VERIFICATION_TASK_SCHEMA = "mm.verification-task.exact-file.v1";
+var VERIFICATION_BINDING_SCHEMA = "mm.verification-binding.v1";
+var VERIFICATION_RECEIPT_SCHEMA = "mm.verification-receipt.v1";
+var VERIFICATION_TASK_DIR = join5(STATE_DIR, "verification-tasks");
+var ADAPTER_VERSION = "1";
+var ROOT_ID = "configured";
+var SAFE_SLUG = /^[a-z0-9][a-z0-9-]{0,79}$/;
+var SAFE_ID = /^[a-z0-9][a-z0-9._:-]{0,127}$/i;
+var SHA256 = /^[a-f0-9]{64}$/;
+var TASK_KEYS = new Set(["schema", "adapter_id", "adapter_version", "task_id", "task_class", "registered_at", "root_id", "root_identity_sha256", "target_rel", "expected_sha256", "baseline_sha256"]);
+var receiptCustody = new WeakSet;
+var BINDING_KEYS = new Set(["schema", "adapter_id", "adapter_version", "task_id", "task_class", "manifest_sha256"]);
+var RECEIPT_KEYS = new Set(["schema", "adapter_id", "adapter_version", "task_id", "task_class", "possession_id", "decision_event_id", "manifest_sha256", "artifact_sha256", "matched", "procedural_credit", "verified_at"]);
+function exactObject(input, keys, label) {
+  if (!input || typeof input !== "object" || Array.isArray(input))
+    throw new Error(`${label} must be an object`);
+  const raw = input;
+  for (const key of Object.keys(raw))
+    if (!keys.has(key))
+      throw new Error(`${label} has unexpected field '${key}'`);
+  for (const key of keys)
+    if (!(key in raw))
+      throw new Error(`${label} missing field '${key}'`);
+  return raw;
+}
+function normalizeVerificationBinding(input) {
+  const raw = exactObject(input, BINDING_KEYS, "verification binding");
+  if (raw.schema !== VERIFICATION_BINDING_SCHEMA || raw.adapter_id !== EXACT_FILE_ADAPTER_ID || raw.adapter_version !== ADAPTER_VERSION) {
+    throw new Error("verification binding identity mismatch");
+  }
+  assertSlug("verification task_id", raw.task_id);
+  assertSlug("verification task_class", raw.task_class);
+  assertSha("verification manifest_sha256", raw.manifest_sha256);
+  return { ...raw };
+}
+function normalizeInstrumentVerificationReceipt(input) {
+  const raw = exactObject(input, RECEIPT_KEYS, "verification receipt");
+  if (raw.schema !== VERIFICATION_RECEIPT_SCHEMA || raw.adapter_id !== EXACT_FILE_ADAPTER_ID || raw.adapter_version !== ADAPTER_VERSION) {
+    throw new Error("verification receipt identity mismatch");
+  }
+  assertSlug("verification task_id", raw.task_id);
+  assertSlug("verification task_class", raw.task_class);
+  assertId("verification possession_id", raw.possession_id);
+  assertId("verification decision_event_id", raw.decision_event_id);
+  assertSha("verification manifest_sha256", raw.manifest_sha256);
+  assertSha("verification artifact_sha256", raw.artifact_sha256);
+  if (typeof raw.matched !== "boolean")
+    throw new Error("verification matched must be boolean");
+  if (!Number.isSafeInteger(raw.verified_at) || Number(raw.verified_at) < 0)
+    throw new Error("verification verified_at must be a non-negative safe integer");
+  return { ...raw };
+}
+var hashBytes = (bytes) => createHash3("sha256").update(bytes).digest("hex");
+var rootIdentitySha256 = (root) => {
+  const st = statSync2(root);
+  return hashBytes(`${root}\x00${st.dev}\x00${st.ino}`);
+};
+var taskPath = (taskId) => join5(VERIFICATION_TASK_DIR, `${taskId}.json`);
+function assertSlug(label, value) {
+  if (typeof value !== "string" || !SAFE_SLUG.test(value))
+    throw new Error(`${label} must be a lowercase safe slug`);
+}
+function assertId(label, value) {
+  if (typeof value !== "string" || !SAFE_ID.test(value))
+    throw new Error(`${label} must be a bounded safe identifier`);
+}
+function assertSha(label, value) {
+  if (typeof value !== "string" || !SHA256.test(value))
+    throw new Error(`${label} must be a canonical lowercase SHA-256`);
+}
+function assertTargetRel(value) {
+  if (typeof value !== "string" || !value || value.length > 240)
+    throw new Error("target_rel must be a bounded relative path");
+  if (value.includes("\x00") || value.includes("\\") || isAbsolute2(value) || value.startsWith("./") || value.includes("//")) {
+    throw new Error("target_rel must be a canonical POSIX-style relative path");
+  }
+  const parts = value.split("/");
+  if (parts.some((part) => !part || part === "." || part === ".."))
+    throw new Error("target_rel cannot traverse or contain empty/dot segments");
+}
+function configuredRoot() {
+  const raw = String(process.env.MM_EXACT_FILE_ROOT || "").trim();
+  if (!raw || !isAbsolute2(raw))
+    throw new Error("MM_EXACT_FILE_ROOT must be configured as an absolute trusted root");
+  const root = realpathSync3(raw);
+  if (!statSync2(root).isDirectory())
+    throw new Error("MM_EXACT_FILE_ROOT must resolve to a directory");
+  return root;
+}
+function resolveTarget(root, targetRel, requireFile) {
+  assertTargetRel(targetRel);
+  const lexical = resolve3(root, targetRel);
+  const lexicalRel = relative2(root, lexical);
+  if (!lexicalRel || lexicalRel.startsWith("..") || isAbsolute2(lexicalRel))
+    throw new Error("target_rel escapes the trusted root");
+  if (!existsSync5(lexical)) {
+    if (requireFile)
+      throw new Error("verification target does not exist");
+    return lexical;
+  }
+  const lst = lstatSync2(lexical);
+  if (lst.isSymbolicLink())
+    throw new Error("verification target cannot be a symlink");
+  const target = realpathSync3(lexical);
+  if (target !== root && !target.startsWith(`${root}${sep3}`))
+    throw new Error("verification target resolves outside the trusted root");
+  if (!statSync2(target).isFile())
+    throw new Error("verification target must be a regular file");
+  return target;
+}
+function parseTaskBytes(bytes, path) {
+  let raw;
+  try {
+    raw = JSON.parse(bytes);
+  } catch {
+    throw new Error(`verification manifest is malformed: ${path}`);
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw))
+    throw new Error("verification manifest must be an object");
+  for (const key of Object.keys(raw))
+    if (!TASK_KEYS.has(key))
+      throw new Error(`verification manifest has unexpected field '${key}'`);
+  for (const key of TASK_KEYS)
+    if (!(key in raw))
+      throw new Error(`verification manifest missing field '${key}'`);
+  if (raw.schema !== VERIFICATION_TASK_SCHEMA)
+    throw new Error("verification manifest schema mismatch");
+  if (raw.adapter_id !== EXACT_FILE_ADAPTER_ID || raw.adapter_version !== ADAPTER_VERSION)
+    throw new Error("verification adapter identity mismatch");
+  if (raw.root_id !== ROOT_ID)
+    throw new Error("verification root identity mismatch");
+  assertSha("root_identity_sha256", raw.root_identity_sha256);
+  assertSlug("task_id", raw.task_id);
+  assertSlug("task_class", raw.task_class);
+  if (!Number.isSafeInteger(raw.registered_at) || Number(raw.registered_at) < 0)
+    throw new Error("registered_at must be a non-negative safe integer");
+  assertTargetRel(raw.target_rel);
+  assertSha("expected_sha256", raw.expected_sha256);
+  return raw;
+}
+function loadTask(taskId) {
+  assertSlug("task_id", taskId);
+  const path = taskPath(taskId);
+  if (!existsSync5(path))
+    throw new Error(`unknown verification task '${taskId}'`);
+  const mode = statSync2(path).mode & 511;
+  if ((mode & 146) !== 0)
+    throw new Error("verification manifest must remain read-only");
+  const bytes = readFileSync5(path, "utf8");
+  const task = parseTaskBytes(bytes, path);
+  if (task.task_id !== taskId)
+    throw new Error("verification manifest task_id mismatch");
+  return { task, path, bytes, manifestSha256: hashBytes(bytes) };
+}
+function createExactFileVerificationTask(input) {
+  assertSlug("task_id", input.taskId);
+  assertSlug("task_class", input.taskClass);
+  assertTargetRel(input.targetRel);
+  assertSha("expected_sha256", input.expectedSha256);
+  const registeredAt = input.registeredAt ?? Date.now();
+  if (!Number.isSafeInteger(registeredAt) || registeredAt < 0)
+    throw new Error("registeredAt must be a non-negative safe integer");
+  const root = configuredRoot();
+  const targetPath = resolveTarget(root, input.targetRel, true);
+  let baselineSha = null;
+  try {
+    baselineSha = hashBytes(readFileSync5(targetPath));
+  } catch {
+    baselineSha = null;
+  }
+  const task = {
+    schema: VERIFICATION_TASK_SCHEMA,
+    adapter_id: EXACT_FILE_ADAPTER_ID,
+    adapter_version: ADAPTER_VERSION,
+    task_id: input.taskId,
+    task_class: input.taskClass,
+    registered_at: registeredAt,
+    root_id: ROOT_ID,
+    root_identity_sha256: rootIdentitySha256(root),
+    target_rel: input.targetRel,
+    expected_sha256: input.expectedSha256,
+    baseline_sha256: baselineSha
+  };
+  const bytes = `${JSON.stringify(task)}
+`;
+  mkdirSync5(VERIFICATION_TASK_DIR, { recursive: true });
+  const path = taskPath(input.taskId);
+  writeFileSync4(path, bytes, { encoding: "utf8", flag: "wx", mode: 292 });
+  chmodSync2(path, 292);
+  const reread = readFileSync5(path, "utf8");
+  if (reread !== bytes)
+    throw new Error("verification manifest write custody mismatch");
+  return { path, manifestSha256: hashBytes(reread), task };
+}
+function bindExactFileVerificationTask(taskId) {
+  const { task, manifestSha256 } = loadTask(taskId);
+  return {
+    schema: VERIFICATION_BINDING_SCHEMA,
+    adapter_id: EXACT_FILE_ADAPTER_ID,
+    adapter_version: ADAPTER_VERSION,
+    task_id: task.task_id,
+    task_class: task.task_class,
+    manifest_sha256: manifestSha256
+  };
+}
+function isInstrumentVerificationReceipt(value) {
+  return !!value && typeof value === "object" && receiptCustody.has(value);
+}
+function isStoredVerificationReceiptBound(bindingInput, receiptInput, possessionId, decisionEventId) {
+  try {
+    const binding = normalizeVerificationBinding(bindingInput);
+    const receipt = normalizeInstrumentVerificationReceipt(receiptInput);
+    if (receipt.possession_id !== possessionId || receipt.decision_event_id !== decisionEventId)
+      return false;
+    if (binding.adapter_id !== receipt.adapter_id || binding.adapter_version !== receipt.adapter_version)
+      return false;
+    if (binding.task_id !== receipt.task_id || binding.task_class !== receipt.task_class)
+      return false;
+    if (binding.manifest_sha256 !== receipt.manifest_sha256)
+      return false;
+    const loaded = loadTask(binding.task_id);
+    const digestRelation = receipt.artifact_sha256 === loaded.task.expected_sha256;
+    return loaded.manifestSha256 === binding.manifest_sha256 && loaded.task.task_id === binding.task_id && loaded.task.task_class === binding.task_class && receipt.matched === digestRelation;
+  } catch {
+    return false;
+  }
+}
+function verifyExactFilePossession(decision) {
+  if (decision.action !== "prescribe" && decision.action !== "abstain")
+    throw new Error("unknown decision action");
+  const binding = decision.verification;
+  if (!binding)
+    throw new Error("possession has no pre-work verification binding");
+  if (binding.schema !== VERIFICATION_BINDING_SCHEMA || binding.adapter_id !== EXACT_FILE_ADAPTER_ID || binding.adapter_version !== ADAPTER_VERSION) {
+    throw new Error("possession verification binding is not the exact-file adapter");
+  }
+  const { task, manifestSha256 } = loadTask(binding.task_id);
+  {
+    const bound = loadPossessionEvents().filter((row) => row.type === "decision" && row.verification?.task_id === binding.task_id);
+    if (bound.some((row) => row.possession_id !== decision.possession_id)) {
+      throw new Error("verification task_id is already bound to a different possession");
+    }
+  }
+  if (manifestSha256 !== binding.manifest_sha256)
+    throw new Error("verification manifest hash mismatch after decision binding");
+  if (task.task_class !== binding.task_class || decision.task_class !== task.task_class)
+    throw new Error("verification task_class mismatch");
+  if (task.task_id !== binding.task_id)
+    throw new Error("verification task_id mismatch");
+  if (task.registered_at > decision.ts)
+    throw new Error("verification task must be registered before the decision");
+  const root = configuredRoot();
+  if (rootIdentitySha256(root) !== task.root_identity_sha256)
+    throw new Error("configured verification root changed after task registration");
+  const target = resolveTarget(root, task.target_rel, true);
+  if (typeof constants.O_NOFOLLOW !== "number" || constants.O_NOFOLLOW === 0) {
+    throw new Error("exact-file verification is unsupported on this platform: O_NOFOLLOW unavailable");
+  }
+  const fd = openSync(target, constants.O_RDONLY | constants.O_NOFOLLOW);
+  let bytes;
+  try {
+    const before = fstatSync(fd);
+    if (!before.isFile())
+      throw new Error("verification target must remain a regular file");
+    const openedReal = realpathSync3(target);
+    if (openedReal !== root && !openedReal.startsWith(`${root}${sep3}`))
+      throw new Error("verification target escaped the trusted root while opening");
+    const openedPathStat = statSync2(openedReal);
+    if (openedPathStat.dev !== before.dev || openedPathStat.ino !== before.ino)
+      throw new Error("verification target changed before hashing");
+    bytes = readFileSync5(fd);
+    const after = fstatSync(fd);
+    const afterReal = realpathSync3(target);
+    const afterPathStat = statSync2(afterReal);
+    if (afterReal !== openedReal || afterPathStat.dev !== after.dev || afterPathStat.ino !== after.ino || before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size || before.mtimeMs !== after.mtimeMs) {
+      throw new Error("verification target changed while hashing");
+    }
+  } finally {
+    closeSync(fd);
+  }
+  const artifactSha256 = hashBytes(bytes);
+  const matched = timingSafeEqual2(Buffer.from(artifactSha256, "hex"), Buffer.from(task.expected_sha256, "hex"));
+  const preExisting = task.baseline_sha256 !== null && task.baseline_sha256 === task.expected_sha256;
+  const verifiedAt = Date.now();
+  const invocation = decision.skill ? qualifyingInvocation({
+    possessionId: decision.possession_id,
+    decisionEventId: decision.event_id,
+    skill: decision.skill,
+    baselineAt: task.registered_at,
+    decisionAt: decision.ts,
+    verifiedAt
+  }) : null;
+  const abstained = decision.action === "abstain";
+  const anyInvocation = abstained ? anyQualifyingInvocation({
+    possessionId: decision.possession_id,
+    decisionEventId: decision.event_id,
+    baselineAt: 0,
+    decisionAt: 0,
+    verifiedAt: Number.MAX_SAFE_INTEGER
+  }) : null;
+  const abstentionCredit = abstained && matched && !preExisting && anyInvocation === null;
+  const proceduralCredit = abstained ? abstentionCredit : matched && !preExisting && invocation !== null;
+  const verification = {
+    schema: VERIFICATION_RECEIPT_SCHEMA,
+    adapter_id: EXACT_FILE_ADAPTER_ID,
+    adapter_version: ADAPTER_VERSION,
+    task_id: task.task_id,
+    task_class: task.task_class,
+    possession_id: decision.possession_id,
+    decision_event_id: decision.event_id,
+    manifest_sha256: manifestSha256,
+    artifact_sha256: artifactSha256,
+    matched,
+    procedural_credit: proceduralCredit,
+    verified_at: verifiedAt
+  };
+  receiptCustody.add(verification);
+  const result = abstained ? proceduralCredit ? "succeeded_unaided" : "failed_unaided" : !matched ? "harmed" : proceduralCredit ? "helped" : "neutral";
+  const reason = abstained ? !matched ? "exact-file SHA-256 did not match the bound manifest — the unaided attempt did not land" : proceduralCredit ? "exact-file SHA-256 was wrong at registration, matches the bound manifest now, and NO skill invocation was observed — instrument-derived successful abstention" : preExisting ? "exact-file SHA-256 matched the bound manifest, but the target already matched before the decision — nothing was accomplished unaided" : "exact-file SHA-256 matches now, but a skill invocation WAS observed inside this possession — this was not an unaided success" : !matched ? "exact-file SHA-256 did not match the bound manifest" : proceduralCredit ? "exact-file SHA-256 was wrong at registration and matches the bound manifest now" : preExisting ? "exact-file SHA-256 matched the bound manifest, but the target already matched before the prescription — artifact verified, no procedural credit" : "exact-file SHA-256 matches now, but no invocation of the prescribed skill was observed — artifact verified, no procedural credit";
+  return {
+    result,
+    evidence_tier: "verified",
+    reason,
+    evidence_ref: `adapter:${EXACT_FILE_ADAPTER_ID}:${manifestSha256}`,
+    verification,
+    artifact_verified: matched,
+    procedural_credit: proceduralCredit,
+    evidence_context: {
+      baselineSha256: task.baseline_sha256 ?? "",
+      baselineCapturedAt: task.registered_at,
+      invocationReceiptId: invocation?.invocation_id ?? "",
+      skill: decision.skill ?? ""
+    }
+  };
+}
+
+// mods/possessions.ts
+var POSSESSION_LEDGER_PATH = join6(STATE_DIR, "possessions.jsonl");
+var keyCache;
+function currentInstrumentKey() {
+  if (keyCache)
+    return keyCache;
+  const loaded = loadInstrumentKey({ stateDir: STATE_DIR });
+  keyCache = loaded.available ? { keyId: loaded.keyId, secret: loaded.secret } : null;
+  return keyCache;
+}
+onInstrumentKeyChange(() => {
+  keyCache = undefined;
+});
+var POSSESSION_SCHEMA = "mm.possession.v1";
+function authenticateStoredEvidence(input) {
+  const deny = (reason) => ({ authenticated: false, reason, artifactVerified: false, proceduralCredit: false, resultClass: "neutral" });
+  const payload = input.evidence?.payload;
+  if (!input.evidence || !payload)
+    return deny("legacy_unsigned");
+  if (!input.key)
+    return deny("key_unavailable");
+  if (payload.key_id !== input.key.keyId)
+    return deny("unknown_key");
+  if (input.evidence.signature === undefined)
+    return deny("missing_signature");
+  if (!verifyEvidenceSignature(payload, input.evidence.signature, input.key).ok)
+    return deny("bad_signature");
+  const artifactVerified = payload.final_sha256 === payload.expected_sha256;
+  const hadGap = payload.baseline_sha256 !== payload.expected_sha256;
+  const invoked = !!String(payload.invocation_receipt_id || "").trim();
+  const invocationAfterBaseline = input.invocationObservedAt === undefined || input.invocationObservedAt >= Number(payload.baseline_captured_at);
+  const abstained = input.decisionAction === "abstain";
+  let proceduralReason;
+  if (!hadGap)
+    proceduralReason = "no_gap_to_close";
+  else if (abstained) {
+    if (invoked || input.invocationObservedInPossession)
+      proceduralReason = "invocation_during_abstention";
+    else if (!artifactVerified)
+      proceduralReason = "artifact_mismatch";
+  } else if (!invoked)
+    proceduralReason = "no_observed_invocation";
+  else if (!invocationAfterBaseline)
+    proceduralReason = "invocation_precedes_baseline";
+  else if (!artifactVerified)
+    proceduralReason = "artifact_mismatch";
+  const proceduralCredit = proceduralReason === undefined;
+  const resultClass = abstained ? proceduralCredit ? String(payload.result_class) : "failed_unaided" : artifactVerified ? proceduralCredit ? String(payload.result_class) : "neutral" : invoked ? "harmed" : "neutral";
+  return { authenticated: true, artifactVerified, proceduralCredit, proceduralReason, resultClass };
+}
+var EFFICIENCY_CONTRACT = Object.freeze({
+  id: "mm.efficiency.v2",
+  numerator: "same_tier_helped_prescriptions + same_tier_successful_abstentions",
+  denominator: "same_tier_scored_evaluated_decisions",
+  neutralPolicy: "neutral_prescriptions_remain_in_denominator",
+  harmPolicy: "harmful_prescriptions_remain_in_denominator_and_report_separately",
+  verifiedPolicy: "agent_callers_cannot_self_award_verified; exact-file adapter binds pre-work manifest + instrument receipt",
+  earnedMinute: "same_tier_helped_prescription | same_tier_successful_abstention; useful routing decision, not literal skill invocation",
+  repeatCapPerTaskClass: 3,
+  minimumUniqueTaskClasses: 3,
+  minimumClosureRatePct: 80,
+  percentageDisplayThreshold: 10
+});
+var DECISION_ACTIONS = new Set(["prescribe", "abstain"]);
+var DECISION_ROUTES = new Set(["matched", "matched-semantic", "no-gap", "weak-match", "ambiguous", "negative-field", "no-safe-match"]);
+var DIFFICULTIES = new Set(["routine", "standard", "hard", "unknown"]);
+var OUTCOMES = new Set(["helped", "harmed", "neutral", "succeeded_unaided", "failed_unaided"]);
+var EVIDENCE_TIERS = new Set(["verified", "human_judged", "agent_judged"]);
+var LIFECYCLE_ACTIONS = new Set(["learn", "update", "graduate", "retire", "restore"]);
+var SAFE_ID2 = /^[a-z0-9][a-z0-9._:-]{0,127}$/i;
+var SAFE_SLUG2 = /^[a-z0-9][a-z0-9-]{0,79}$/;
+var emptyExclusions = () => ({
+  malformed_json: 0,
+  invalid_schema: 0,
+  unknown_enum: 0,
+  duplicate_event_id: 0,
+  duplicate_decision: 0,
+  orphan_outcome: 0,
+  duplicate_outcome: 0,
+  invalid_supersession: 0,
+  incompatible_outcome: 0
+});
+function assertSafeId(label, value) {
+  if (typeof value !== "string" || !SAFE_ID2.test(value))
+    throw new Error(`${label} must be a bounded safe identifier`);
+}
+function assertSafeSlug(label, value) {
+  if (typeof value !== "string" || !SAFE_SLUG2.test(value))
+    throw new Error(`${label} must be a lowercase slug, not raw task text`);
+}
+function compatible(action, result) {
+  return action === "prescribe" ? result === "helped" || result === "harmed" || result === "neutral" : result === "succeeded_unaided" || result === "failed_unaided";
+}
+function normalizeEvent(input, mode) {
+  if (!input || typeof input !== "object")
+    throw new Error("event must be an object");
+  const event = input;
+  if (event.schema !== POSSESSION_SCHEMA)
+    throw new Error(`schema must be ${POSSESSION_SCHEMA}`);
+  assertSafeId("event_id", event.event_id);
+  assertSafeId("possession_id", event.possession_id);
+  if (!Number.isFinite(event.ts) || event.ts < 0)
+    throw new Error("ts must be a non-negative number");
+  if (event.type === "decision") {
+    if (!DECISION_ACTIONS.has(event.action))
+      throw new Error("action must be prescribe|abstain");
+    if (!DECISION_ROUTES.has(event.route))
+      throw new Error("route is not a known decision route");
+    const difficulty = event.difficulty ?? "unknown";
+    if (!DIFFICULTIES.has(difficulty))
+      throw new Error("difficulty must be routine|standard|hard|unknown");
+    assertSafeSlug("task_class", event.task_class);
+    if (event.skill !== undefined)
+      assertSafeSlug("skill", event.skill);
+    if (event.action === "prescribe" && !event.skill)
+      throw new Error("prescribe decisions require a skill");
+    if (event.action === "abstain" && event.skill)
+      throw new Error("abstain decisions cannot inject a skill");
+    const verification = event.verification === undefined ? undefined : normalizeVerificationBinding(event.verification);
+    if (verification && verification.task_class !== event.task_class)
+      throw new Error("verification binding task_class must match the decision");
+    return {
+      schema: POSSESSION_SCHEMA,
+      event_id: event.event_id,
+      possession_id: event.possession_id,
+      ts: event.ts,
+      type: "decision",
+      agent: redactFragment(String(event.agent || "agent"), 1, 80),
+      model: redactFragment(String(event.model || "unknown"), 1, 120),
+      action: event.action,
+      task_class: event.task_class,
+      difficulty,
+      eligible: true,
+      gap_observed: event.gap_observed === true,
+      route: event.route,
+      ...event.skill ? { skill: event.skill } : {},
+      ...verification ? { verification } : {}
+    };
+  }
+  if (event.type === "outcome") {
+    if (!OUTCOMES.has(event.result))
+      throw new Error("result is not a known outcome");
+    if (!EVIDENCE_TIERS.has(event.evidence_tier))
+      throw new Error("evidence_tier is not known");
+    if (mode === "caller" && event.evidence_tier === "verified") {
+      throw new Error("instrument-derived verification is required; callers must use human_judged or agent_judged");
+    }
+    if (event.evidence_tier !== "verified" && event.verification !== undefined) {
+      throw new Error("judged outcomes cannot carry a verification receipt");
+    }
+    let verification;
+    if (event.evidence_tier === "verified" && event.verification !== undefined) {
+      verification = normalizeInstrumentVerificationReceipt(event.verification);
+    }
+    if (mode === "instrument") {
+      if (event.evidence_tier !== "verified" || !verification || !isInstrumentVerificationReceipt(event.verification)) {
+        throw new Error("instrument-owned receipt is required for verified append");
+      }
+    }
+    if (!String(event.reason || "").trim())
+      throw new Error("outcomes require a reason");
+    if (event.supersedes_event_id)
+      assertSafeId("supersedes_event_id", event.supersedes_event_id);
+    return {
+      schema: POSSESSION_SCHEMA,
+      event_id: event.event_id,
+      possession_id: event.possession_id,
+      ts: event.ts,
+      type: "outcome",
+      result: event.result,
+      evidence_tier: event.evidence_tier,
+      reason: redactFragment(String(event.reason), 4, 320),
+      ...event.evidence_ref ? { evidence_ref: redactFragment(String(event.evidence_ref), 2, 180) } : {},
+      ...event.supersedes_event_id ? { supersedes_event_id: event.supersedes_event_id } : {},
+      ...event.evidence ? { evidence: event.evidence } : {},
+      ...verification ? { verification } : {}
+    };
+  }
+  if (event.type === "lifecycle") {
+    if (!LIFECYCLE_ACTIONS.has(event.action))
+      throw new Error("lifecycle action is not known");
+    assertSafeSlug("skill", event.skill);
+    if (!String(event.reason || "").trim())
+      throw new Error("lifecycle events require a reason");
+    return {
+      schema: POSSESSION_SCHEMA,
+      event_id: event.event_id,
+      possession_id: event.possession_id,
+      ts: event.ts,
+      type: "lifecycle",
+      action: event.action,
+      skill: event.skill,
+      reason: redactFragment(String(event.reason), 4, 320)
+    };
+  }
+  throw new Error("type is not a known possession event");
+}
+function classifyNormalizationError(error, raw) {
+  const message = String(error?.message || error);
+  if (message.includes("schema"))
+    return "invalid_schema";
+  if (message.includes("action") || message.includes("route") || message.includes("difficulty") || message.includes("result") || message.includes("evidence_tier") || message.includes("type"))
+    return "unknown_enum";
+  return raw?.type === "decision" ? "unknown_enum" : "invalid_schema";
+}
+function inspectPossessionLedger() {
+  const rawText = existsSync6(POSSESSION_LEDGER_PATH) ? readFileSync6(POSSESSION_LEDGER_PATH, "utf8") : "";
+  const lines = rawText.split(`
+`).filter((line) => line.trim());
+  const exclusions = emptyExclusions();
+  const excludedPossessions = new Set;
+  const excludedDecisionPossessions = new Set;
+  const seenEventIds = new Set;
+  const events = [];
+  const decisions = new Map;
+  const activeOutcomes = new Map;
+  let malformedRows = 0;
+  let unknownEnumRows = 0;
+  for (const line of lines) {
+    let raw;
+    try {
+      raw = JSON.parse(line);
+    } catch {
+      malformedRows++;
+      exclusions.malformed_json++;
+      continue;
+    }
+    let event;
+    try {
+      event = normalizeEvent(raw, "read");
+    } catch (error) {
+      const reason = classifyNormalizationError(error, raw);
+      exclusions[reason]++;
+      if (reason === "unknown_enum")
+        unknownEnumRows++;
+      if (typeof raw?.possession_id === "string") {
+        excludedPossessions.add(raw.possession_id);
+        if (raw?.type === "decision")
+          excludedDecisionPossessions.add(raw.possession_id);
+      }
+      continue;
+    }
+    if (seenEventIds.has(event.event_id)) {
+      exclusions.duplicate_event_id++;
+      excludedPossessions.add(event.possession_id);
+      if (event.type === "decision" || decisions.has(event.possession_id))
+        excludedDecisionPossessions.add(event.possession_id);
+      continue;
+    }
+    seenEventIds.add(event.event_id);
+    if (event.type === "decision") {
+      if (decisions.has(event.possession_id)) {
+        exclusions.duplicate_decision++;
+        excludedPossessions.add(event.possession_id);
+        excludedDecisionPossessions.add(event.possession_id);
+        continue;
+      }
+      decisions.set(event.possession_id, event);
+      events.push(event);
+      continue;
+    }
+    if (event.type === "outcome") {
+      const decision = decisions.get(event.possession_id);
+      if (!decision) {
+        exclusions.orphan_outcome++;
+        excludedPossessions.add(event.possession_id);
+        continue;
+      }
+      if (!compatible(decision.action, event.result)) {
+        exclusions.incompatible_outcome++;
+        excludedPossessions.add(event.possession_id);
+        excludedDecisionPossessions.add(event.possession_id);
+        continue;
+      }
+      const active = activeOutcomes.get(event.possession_id);
+      if (active) {
+        if (!event.supersedes_event_id) {
+          exclusions.duplicate_outcome++;
+          excludedPossessions.add(event.possession_id);
+          excludedDecisionPossessions.add(event.possession_id);
+          continue;
+        }
+        if (event.supersedes_event_id !== active.event_id) {
+          exclusions.invalid_supersession++;
+          excludedPossessions.add(event.possession_id);
+          excludedDecisionPossessions.add(event.possession_id);
+          continue;
+        }
+      } else if (event.supersedes_event_id) {
+        exclusions.invalid_supersession++;
+        excludedPossessions.add(event.possession_id);
+        excludedDecisionPossessions.add(event.possession_id);
+        continue;
+      }
+      activeOutcomes.set(event.possession_id, event);
+      events.push(event);
+      continue;
+    }
+    events.push(event);
+  }
+  const excludedRows = Object.values(exclusions).reduce((sum, count) => sum + count, 0);
+  const blocked = excludedRows > 0;
+  return {
+    events,
+    integrity: {
+      blocked,
+      ledgerSha256: createHash4("sha256").update(rawText).digest("hex"),
+      rowCount: lines.length,
+      validRows: events.length,
+      malformedRows,
+      unknownEnumRows,
+      excludedRows,
+      excludedPossessionIds: [...excludedPossessions].sort(),
+      excludedDecisionPossessionIds: [...excludedDecisionPossessions].sort(),
+      orphanOutcomes: exclusions.orphan_outcome,
+      exclusionReasons: exclusions
+    }
+  };
+}
+function appendPossessionEvent(input, mode) {
+  const clean = normalizeEvent(input, mode);
+  const inspection = inspectPossessionLedger();
+  if (inspection.integrity.blocked)
+    throw new Error("ledger integrity is BLOCKED; repair custody before appending");
+  if (inspection.events.some((row) => row.event_id === clean.event_id))
+    throw new Error(`duplicate event_id '${clean.event_id}'`);
+  const decisions = inspection.events.filter((row) => row.type === "decision");
+  const outcomes = inspection.events.filter((row) => row.type === "outcome");
+  if (clean.type === "decision" && decisions.some((row) => row.possession_id === clean.possession_id)) {
+    throw new Error(`decision already exists for possession '${clean.possession_id}'`);
+  }
+  if (clean.type === "outcome") {
+    const decision = decisions.find((row) => row.possession_id === clean.possession_id);
+    if (!decision)
+      throw new Error(`cannot record orphan outcome for '${clean.possession_id}'`);
+    if (!compatible(decision.action, clean.result))
+      throw new Error(`result '${clean.result}' is incompatible with decision '${decision.action}'`);
+    if (clean.evidence_tier === "verified") {
+      if (!decision.verification || !clean.verification || !isStoredVerificationReceiptBound(decision.verification, clean.verification, decision.possession_id, decision.event_id)) {
+        throw new Error("verified outcome is not bound to the possession decision and stored manifest");
+      }
+      const expectedResult = decision.action === "abstain" ? clean.verification.matched && clean.verification.procedural_credit ? "succeeded_unaided" : "failed_unaided" : !clean.verification.matched ? "harmed" : clean.verification.procedural_credit ? "helped" : "neutral";
+      if (clean.result !== expectedResult) {
+        throw new Error("verified outcome result does not match the instrument receipt");
+      }
+    }
+    const active = outcomes.filter((row) => row.possession_id === clean.possession_id).at(-1);
+    if (active && !clean.supersedes_event_id)
+      throw new Error(`active outcome already exists for '${clean.possession_id}'`);
+    if (active && clean.supersedes_event_id !== active.event_id)
+      throw new Error("supersedes_event_id must bind the active outcome");
+    if (!active && clean.supersedes_event_id)
+      throw new Error("cannot supersede a missing outcome");
+  }
+  mkdirSync6(dirname4(POSSESSION_LEDGER_PATH), { recursive: true });
+  appendFileSync3(POSSESSION_LEDGER_PATH, `${JSON.stringify(clean)}
+`, "utf8");
+  return clean;
+}
+function recordPossessionEvent(input) {
+  return appendPossessionEvent(input, "caller");
+}
+function recordInstrumentVerifiedOutcome(input, context) {
+  const key = currentInstrumentKey();
+  const receipt = input.verification;
+  if (receipt && typeof receipt === "object" && receipt.procedural_credit === true) {
+    const decision = loadPossessionEvents().find((row) => row.type === "decision" && row.possession_id === input.possession_id);
+    if (!decision)
+      throw new Error("procedural credit requires a recorded decision for this possession");
+    if (decision.action === "abstain") {
+      const ran = anyQualifyingInvocation({
+        possessionId: input.possession_id,
+        decisionEventId: decision.event_id,
+        baselineAt: 0,
+        decisionAt: 0,
+        verifiedAt: Number.MAX_SAFE_INTEGER
+      });
+      if (ran)
+        throw new Error("abstention credit refused: an observed skill invocation is bound to this possession");
+      if (String(context?.invocationReceiptId ?? "").trim()) {
+        throw new Error("an abstention cannot name an invocation receipt; a named invocation is not an unaided success");
+      }
+    } else {
+      const namedId = String(context?.invocationReceiptId ?? "").trim();
+      if (!namedId)
+        throw new Error("procedural credit requires an observed invocation receipt id at the signing boundary");
+      const owned = loadInvocations().some((row) => row.invocation_id === namedId && row.possession_id === input.possession_id);
+      if (!owned)
+        throw new Error("procedural credit names an invocation that is not an authenticated observation of this possession");
+    }
+  }
+  if (key && receipt && typeof receipt === "object") {
+    const r = receipt;
+    const payload = {
+      schema_version: "mm.evidence.v1",
+      key_id: key.keyId,
+      nonce: `${input.possession_id}:${input.event_id}`,
+      timestamp: input.ts,
+      possession_id: input.possession_id,
+      decision_event_id: String(r.decision_event_id ?? ""),
+      skill: String(context?.skill ?? ""),
+      task_id: String(r.task_id ?? ""),
+      task_class: String(r.task_class ?? ""),
+      manifest_sha256: String(r.manifest_sha256 ?? ""),
+      baseline_sha256: String(context?.baselineSha256 ?? ""),
+      baseline_captured_at: Number(context?.baselineCapturedAt ?? 0),
+      expected_sha256: String(r.artifact_sha256 ?? ""),
+      final_sha256: r.matched ? String(r.artifact_sha256 ?? "") : "",
+      invocation_receipt_id: String(context?.invocationReceiptId ?? ""),
+      verifier_id: String(r.adapter_id ?? ""),
+      verifier_version: String(r.adapter_version ?? ""),
+      target_rel: String(r.target_rel ?? ""),
+      result_class: input.result
+    };
+    const signed = { ...input, evidence: { payload, signature: signEvidencePayload(payload, key) } };
+    return appendPossessionEvent(signed, "instrument");
+  }
+  return appendPossessionEvent(input, "instrument");
+}
+function loadPossessionEvents() {
+  return inspectPossessionLedger().events;
+}
+var pct = (good, total) => total ? Math.round(100 * good / total) : null;
+var cleanIntegrity = () => ({
+  blocked: false,
+  ledgerSha256: createHash4("sha256").update("").digest("hex"),
+  rowCount: 0,
+  validRows: 0,
+  malformedRows: 0,
+  unknownEnumRows: 0,
+  excludedRows: 0,
+  excludedPossessionIds: [],
+  excludedDecisionPossessionIds: [],
+  orphanOutcomes: 0,
+  exclusionReasons: emptyExclusions()
+});
+var safePossessionView = (decision, outcome) => ({
+  possessionId: decision.possession_id,
+  taskClass: decision.task_class,
+  difficulty: decision.difficulty ?? "unknown",
+  action: decision.action,
+  route: decision.route,
+  ...decision.skill ? { skill: decision.skill } : {},
+  openedAt: decision.ts,
+  ...outcome ? {
+    result: outcome.result,
+    evidence: claimBearingVerdict(decision, outcome).verified ? "bound_verified" : "judged"
+  } : { evidence: "none" }
+});
+function pendingPossessionViews(events) {
+  const outcomes = new Set(events.filter((event) => event.type === "outcome").map((event) => event.possession_id));
+  return events.filter((event) => event.type === "decision" && !outcomes.has(event.possession_id)).sort((a, b) => b.ts - a.ts).map((decision) => safePossessionView(decision));
+}
+function claimBearingVerdict(decision, outcome) {
+  if (outcome.evidence_tier !== "verified")
+    return { verified: false, proceduralCredit: false };
+  const key = currentInstrumentKey();
+  const abstained = decision.action === "abstain";
+  const ranAnyway = abstained && !!anyQualifyingInvocation({
+    possessionId: decision.possession_id,
+    decisionEventId: decision.event_id,
+    baselineAt: 0,
+    decisionAt: 0,
+    verifiedAt: Number.MAX_SAFE_INTEGER
+  });
+  const verdict = authenticateStoredEvidence({
+    evidence: outcome.evidence,
+    key,
+    decisionAction: abstained ? "abstain" : "prescribe",
+    invocationObservedInPossession: ranAnyway
+  });
+  if (!verdict.authenticated)
+    return { verified: false, proceduralCredit: false, downgrade: verdict.reason };
+  const structurallyBound = !!decision.verification && !!outcome.verification && isStoredVerificationReceiptBound(decision.verification, outcome.verification, decision.possession_id, decision.event_id);
+  if (!structurallyBound)
+    return { verified: false, proceduralCredit: false, downgrade: "bad_signature" };
+  const payload = outcome.evidence?.payload ?? {};
+  const receipt = outcome.verification;
+  if (receipt.procedural_credit !== undefined && typeof receipt.procedural_credit !== "boolean") {
+    return { verified: false, proceduralCredit: false, downgrade: "evidence_transplanted" };
+  }
+  const sameRow = String(payload.possession_id ?? "") === decision.possession_id && String(payload.decision_event_id ?? "") === decision.event_id;
+  const sameInstrumentEvent = String(payload.task_id ?? "") === String(receipt.task_id ?? "") && String(payload.manifest_sha256 ?? "") === String(receipt.manifest_sha256 ?? "") && String(payload.expected_sha256 ?? "") === String(receipt.artifact_sha256 ?? "");
+  if (!sameRow || !sameInstrumentEvent) {
+    return { verified: false, proceduralCredit: false, downgrade: "evidence_transplanted" };
+  }
+  const attributedSkill = String(payload.skill ?? "");
+  const attributedResult = String(payload.result_class ?? "");
+  const skillDisagrees = !!decision.skill && attributedSkill !== decision.skill;
+  const resultDisagrees = !!outcome.result && !!attributedResult && attributedResult !== outcome.result;
+  if (skillDisagrees || resultDisagrees) {
+    return { verified: false, proceduralCredit: false, downgrade: "attribution_mismatch" };
+  }
+  const namedInvocation = String(payload.invocation_receipt_id ?? "").trim();
+  if (namedInvocation) {
+    const owned = loadInvocations().some((row) => row.invocation_id === namedInvocation && row.possession_id === decision.possession_id);
+    if (!owned)
+      return { verified: false, proceduralCredit: false, downgrade: "evidence_transplanted" };
+  }
+  return { verified: true, proceduralCredit: verdict.proceduralCredit, proceduralReason: verdict.proceduralReason, attributedSkill };
+}
+function summarizePossessions(events, integrity = cleanIntegrity()) {
+  const decisions = events.filter((event) => event.type === "decision");
+  const activeOutcomes = new Map;
+  for (const event of events)
+    if (event.type === "outcome")
+      activeOutcomes.set(event.possession_id, event);
+  const excludedIds = new Set(integrity.excludedDecisionPossessionIds);
+  const repeatCounts = new Map;
+  const difficultyStrata = { routine: 0, standard: 0, hard: 0, unknown: 0 };
+  let evaluatedDecisions = 0;
+  let scoredDecisions = 0;
+  let repeatCappedDecisions = 0;
+  let prescriptionsIssued = 0;
+  let prescriptionsAdheredTo = 0;
+  let prescriptionsNeverInvoked = 0;
+  let prescriptionsUnclosed = 0;
+  let observedInterventions = 0;
+  let observedHelpfulInterventions = 0;
+  let observedHarmfulInterventions = 0;
+  let observedNeutralInterventions = 0;
+  let observedAbstentions = 0;
+  let observedSuccessfulAbstentions = 0;
+  let observedFailedAbstentions = 0;
+  let helpfulInterventions = 0;
+  let harmfulInterventions = 0;
+  let neutralInterventions = 0;
+  let successfulAbstentions = 0;
+  let failedAbstentions = 0;
+  let verifiedSuccessfulAbstentions = 0;
+  let verifiedEvaluatedAbstentions = 0;
+  let judgedSuccessfulAbstentions = 0;
+  let judgedFailedAbstentions = 0;
+  let judgedEvaluatedAbstentions = 0;
+  let judgedOnlyAbstentions = 0;
+  let interferenceAbstentions = 0;
+  let unaidedClaimsDemoted = 0;
+  let verifiedDecisions = 0;
+  let judgedDecisions = 0;
+  let verifiedGood = 0;
+  let judgedGood = 0;
+  let unboundVerifiedDowngraded = 0;
+  let transplantDemoted = 0;
+  let attributionMismatch = 0;
+  let verifiedNeutralDecisions = 0;
+  let prescribedEvaluated = 0;
+  const invocationsByPossession = new Set;
+  try {
+    for (const inv of loadInvocations()) {
+      if (inv && typeof inv.possession_id === "string")
+        invocationsByPossession.add(inv.possession_id);
+    }
+  } catch {}
+  for (const decision of decisions) {
+    const difficulty = decision.difficulty ?? "unknown";
+    difficultyStrata[difficulty]++;
+    if (excludedIds.has(decision.possession_id))
+      continue;
+    const outcome = activeOutcomes.get(decision.possession_id);
+    if (decision.action === "prescribe") {
+      prescriptionsIssued++;
+      const invoked = invocationsByPossession.has(decision.possession_id);
+      if (invoked)
+        prescriptionsAdheredTo++;
+      else
+        prescriptionsNeverInvoked++;
+      if (!outcome)
+        prescriptionsUnclosed++;
+    }
+    if (!outcome || !compatible(decision.action, outcome.result))
+      continue;
+    evaluatedDecisions++;
+    if (decision.action === "prescribe") {
+      observedInterventions++;
+      if (outcome.result === "helped")
+        observedHelpfulInterventions++;
+      if (outcome.result === "harmed")
+        observedHarmfulInterventions++;
+      if (outcome.result === "neutral")
+        observedNeutralInterventions++;
+    } else {
+      observedAbstentions++;
+      if (outcome.result === "succeeded_unaided")
+        observedSuccessfulAbstentions++;
+      if (outcome.result === "failed_unaided")
+        observedFailedAbstentions++;
+    }
+    const seen = repeatCounts.get(decision.task_class) || 0;
+    const scoreEligible = seen < EFFICIENCY_CONTRACT.repeatCapPerTaskClass;
+    repeatCounts.set(decision.task_class, seen + 1);
+    if (!scoreEligible) {
+      repeatCappedDecisions++;
+      continue;
+    }
+    scoredDecisions++;
+    const verdict = claimBearingVerdict(decision, outcome);
+    const boundVerified = verdict.verified;
+    if (outcome.evidence_tier === "verified" && !boundVerified)
+      unboundVerifiedDowngraded++;
+    if (verdict.downgrade === "evidence_transplanted")
+      transplantDemoted++;
+    if (verdict.downgrade === "attribution_mismatch")
+      attributionMismatch++;
+    let good = false;
+    if (decision.action === "prescribe") {
+      prescribedEvaluated++;
+      const creditable = !boundVerified || verdict.proceduralCredit;
+      if (outcome.result === "helped" && creditable) {
+        helpfulInterventions++;
+        good = true;
+      } else if (outcome.result === "helped") {
+        neutralInterventions++;
+        if (boundVerified)
+          verifiedNeutralDecisions++;
+      }
+      if (outcome.result === "harmed")
+        harmfulInterventions++;
+      if (outcome.result === "neutral") {
+        neutralInterventions++;
+        if (boundVerified)
+          verifiedNeutralDecisions++;
+      }
+    } else {
+      const abstentionCreditable = !boundVerified || verdict.proceduralCredit;
+      if (outcome.result === "succeeded_unaided" && abstentionCreditable) {
+        successfulAbstentions++;
+        good = true;
+      } else if (outcome.result === "succeeded_unaided") {
+        unaidedClaimsDemoted++;
+        failedAbstentions++;
+      } else {
+        failedAbstentions++;
+      }
+      if (boundVerified) {
+        verifiedEvaluatedAbstentions++;
+        if (good)
+          verifiedSuccessfulAbstentions++;
+      } else {
+        judgedEvaluatedAbstentions++;
+        judgedOnlyAbstentions++;
+        if (good)
+          judgedSuccessfulAbstentions++;
+        else
+          judgedFailedAbstentions++;
+      }
+    }
+    if (boundVerified) {
+      verifiedDecisions++;
+      if (good)
+        verifiedGood++;
+    } else {
+      judgedDecisions++;
+      if (good)
+        judgedGood++;
+    }
+  }
+  const lifecycle = events.filter((event) => event.type === "lifecycle");
+  const excludedDecisions = excludedIds.size;
+  const validDecisionIds = new Set(decisions.map((decision) => decision.possession_id));
+  const excludedDecisionRowsWithoutValidDecision = [...excludedIds].filter((id) => !validDecisionIds.has(id)).length;
+  difficultyStrata.unknown += excludedDecisionRowsWithoutValidDecision;
+  const openedDecisions = decisions.length + excludedDecisionRowsWithoutValidDecision;
+  const closedDecisions = evaluatedDecisions + excludedDecisions;
+  const pendingDecisions = Math.max(0, openedDecisions - closedDecisions);
+  const closureRatePct = pct(closedDecisions, openedDecisions);
+  const uniqueTaskClasses = new Set(decisions.map((decision) => decision.task_class)).size;
+  const pendingRows = decisions.filter((decision) => !excludedIds.has(decision.possession_id) && !activeOutcomes.has(decision.possession_id)).sort((a, b) => b.ts - a.ts);
+  const activityTs = (decision) => Math.max(decision.ts, activeOutcomes.get(decision.possession_id)?.ts ?? decision.ts);
+  const latestActivityDecision = [...decisions].sort((a, b) => activityTs(b) - activityTs(a))[0];
+  const latestPendingPossession = pendingRows[0] ? safePossessionView(pendingRows[0]) : null;
+  const lastPlay = latestActivityDecision ? safePossessionView(latestActivityDecision, activeOutcomes.get(latestActivityDecision.possession_id)) : null;
+  const goodDecisions = verifiedGood + judgedGood;
+  const contextsAvoided = verifiedSuccessfulAbstentions;
+  const blocked = integrity.blocked;
+  const incomplete = openedDecisions >= EFFICIENCY_CONTRACT.percentageDisplayThreshold && (closureRatePct ?? 0) < EFFICIENCY_CONTRACT.minimumClosureRatePct;
+  const exploratory = repeatCappedDecisions > 0 || uniqueTaskClasses < EFFICIENCY_CONTRACT.minimumUniqueTaskClasses || difficultyStrata.unknown > 0;
+  const scoreStatus = blocked ? "blocked" : incomplete ? "incomplete" : verifiedDecisions < EFFICIENCY_CONTRACT.percentageDisplayThreshold ? exploratory ? "exploratory" : "early_tape" : exploratory ? "exploratory" : "claim_eligible";
+  return {
+    metricContract: EFFICIENCY_CONTRACT.id,
+    percentageDisplayThreshold: EFFICIENCY_CONTRACT.percentageDisplayThreshold,
+    scoreStatus,
+    ledgerIntegrity: blocked ? "blocked" : "ok",
+    ledgerSha256: integrity.ledgerSha256,
+    ledgerRows: integrity.rowCount,
+    eligibleExposures: openedDecisions,
+    openedDecisions,
+    closedDecisions,
+    pendingDecisions,
+    excludedDecisions,
+    exclusionReasons: { ...integrity.exclusionReasons },
+    closureRatePct,
+    decisions: openedDecisions,
+    evaluatedDecisions,
+    scoredDecisions,
+    repeatCappedDecisions,
+    uniqueTaskClasses,
+    difficultyStrata,
+    goodDecisions,
+    prescribed: decisions.filter((event) => event.action === "prescribe").length,
+    abstained: decisions.filter((event) => event.action === "abstain").length,
+    prescriptionsIssued,
+    prescriptionsAdheredTo,
+    prescriptionsNeverInvoked,
+    prescriptionsUnclosed,
+    observedInterventions,
+    observedHelpfulInterventions,
+    observedHarmfulInterventions,
+    observedNeutralInterventions,
+    observedAbstentions,
+    observedSuccessfulAbstentions,
+    observedFailedAbstentions,
+    helpfulInterventions,
+    harmfulInterventions,
+    neutralInterventions,
+    successfulAbstentions,
+    failedAbstentions,
+    verifiedSuccessfulAbstentions,
+    verifiedEvaluatedAbstentions,
+    judgedSuccessfulAbstentions,
+    judgedFailedAbstentions,
+    judgedEvaluatedAbstentions,
+    judgedOnlyAbstentions,
+    contextsAvoided,
+    interferenceAbstentions,
+    unaidedClaimsDemoted,
+    verifiedDecisions,
+    verifiedGoodDecisions: verifiedGood,
+    judgedDecisions,
+    judgedGoodDecisions: judgedGood,
+    unboundVerifiedDowngraded,
+    transplantDemoted,
+    attributionMismatch,
+    verifiedNeutralDecisions,
+    decisionEfficiencyPct: pct(goodDecisions, scoredDecisions),
+    verifiedEfficiencyPct: pct(verifiedGood, verifiedDecisions),
+    judgedEfficiencyPct: pct(judgedGood, judgedDecisions),
+    restraintEfficiencyPct: pct(verifiedSuccessfulAbstentions, verifiedEvaluatedAbstentions),
+    harmRatePct: pct(harmfulInterventions, prescribedEvaluated),
+    skillsLearned: lifecycle.filter((event) => event.action === "learn" || event.action === "graduate").length,
+    skillsUpdated: lifecycle.filter((event) => event.action === "update").length,
+    skillsRetired: lifecycle.filter((event) => event.action === "retire").length,
+    skillsRestored: lifecycle.filter((event) => event.action === "restore").length,
+    latestPendingPossession,
+    lastPlay
+  };
+}
+function summarizePossessionLedger() {
+  const inspection = inspectPossessionLedger();
+  return summarizePossessions(inspection.events, inspection.integrity);
+}
+var claimBearingShareCustody = new WeakSet;
+var SHARE_KEYS = new Set([
+  "schema",
+  "metric_contract",
+  "score_status",
+  "percentage_display_threshold",
+  "period",
+  "statement",
+  "opened_decisions",
+  "closed_decisions",
+  "pending_decisions",
+  "excluded_decisions",
+  "closure_rate_pct",
+  "eligible_exposures",
+  "scored_exposures",
+  "repeat_capped_exposures",
+  "unique_task_classes",
+  "difficulty_strata",
+  "verified_good_decisions",
+  "verified_neutral_decisions",
+  "verified_evaluated_decisions",
+  "judged_good_decisions",
+  "judged_evaluated_decisions",
+  "verified_successful_abstentions",
+  "verified_evaluated_abstentions",
+  "judged_successful_abstentions",
+  "judged_failed_abstentions",
+  "judged_only_abstentions",
+  "helpful_interventions",
+  "harmful_interventions",
+  "neutral_interventions",
+  "ledger_integrity",
+  "exclusions",
+  "decision_efficiency_pct"
+]);
+var PERIODS = new Set(["EARLY TAPE", "LAST 7 DAYS", "LAST 30 DAYS", "SEASON", "ALL TIME"]);
+var SCORE_STATUSES = new Set(["blocked", "incomplete", "early_tape", "exploratory", "claim_eligible"]);
+var safePeriod = (value) => {
+  const normalized = String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (normalized === "last_7_days" || normalized === "this_week")
+    return "LAST 7 DAYS";
+  if (normalized === "last_30_days" || normalized === "this_month")
+    return "LAST 30 DAYS";
+  if (normalized === "season")
+    return "SEASON";
+  return "ALL TIME";
+};
+function shareStatement(card) {
+  if (card.score_status === "blocked")
+    return "ledger blocked · inspect integrity";
+  if (card.score_status === "incomplete")
+    return `${card.closed_decisions} of ${card.opened_decisions} possessions closed · incomplete tape`;
+  if (card.score_status === "claim_eligible" && card.decision_efficiency_pct !== undefined) {
+    return `${card.verified_good_decisions} of ${card.verified_evaluated_decisions} bound-verified good decisions · ${card.decision_efficiency_pct}%`;
+  }
+  if (card.verified_evaluated_decisions > 0)
+    return `${card.verified_good_decisions} of ${card.verified_evaluated_decisions} bound-verified good decisions · early tape`;
+  return `no bound-verified score · judged tape ${card.judged_good_decisions} of ${card.judged_evaluated_decisions}`;
+}
+var nonNegativeInt = (label, value) => {
+  if (!Number.isInteger(value) || Number(value) < 0)
+    throw new Error(`${label} must be a non-negative integer`);
+};
+function validateShareCardPayload(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input))
+    throw new Error("share payload must be an object");
+  const raw = input;
+  for (const key of Object.keys(raw))
+    if (!SHARE_KEYS.has(key))
+      throw new Error(`unexpected field '${key}'`);
+  for (const key of SHARE_KEYS)
+    if (key !== "decision_efficiency_pct" && !(key in raw))
+      throw new Error(`missing field '${key}'`);
+  if (raw.schema !== "mm.share-card.v1")
+    throw new Error("schema mismatch");
+  if (raw.metric_contract !== EFFICIENCY_CONTRACT.id)
+    throw new Error("metric_contract mismatch");
+  if (!SCORE_STATUSES.has(raw.score_status))
+    throw new Error("score_status mismatch");
+  if (!PERIODS.has(raw.period))
+    throw new Error("period is not allowlisted");
+  if (raw.percentage_display_threshold !== EFFICIENCY_CONTRACT.percentageDisplayThreshold)
+    throw new Error("percentage_display_threshold must match the metric contract");
+  if (raw.ledger_integrity !== "ok" && raw.ledger_integrity !== "blocked")
+    throw new Error("ledger_integrity mismatch");
+  const numeric = [
+    "percentage_display_threshold",
+    "opened_decisions",
+    "closed_decisions",
+    "pending_decisions",
+    "excluded_decisions",
+    "eligible_exposures",
+    "scored_exposures",
+    "repeat_capped_exposures",
+    "unique_task_classes",
+    "verified_good_decisions",
+    "verified_evaluated_decisions",
+    "judged_good_decisions",
+    "judged_evaluated_decisions",
+    "verified_successful_abstentions",
+    "verified_evaluated_abstentions",
+    "judged_successful_abstentions",
+    "judged_failed_abstentions",
+    "judged_only_abstentions",
+    "helpful_interventions",
+    "harmful_interventions",
+    "neutral_interventions"
+  ];
+  for (const key of numeric)
+    nonNegativeInt(key, raw[key]);
+  if (raw.closure_rate_pct !== null && (!Number.isInteger(raw.closure_rate_pct) || raw.closure_rate_pct < 0 || raw.closure_rate_pct > 100))
+    throw new Error("closure_rate_pct invalid");
+  if (raw.decision_efficiency_pct !== undefined && (!Number.isInteger(raw.decision_efficiency_pct) || raw.decision_efficiency_pct < 0 || raw.decision_efficiency_pct > 100))
+    throw new Error("decision_efficiency_pct invalid");
+  for (const key of DIFFICULTIES)
+    nonNegativeInt(`difficulty_strata.${key}`, raw.difficulty_strata?.[key]);
+  if (Object.keys(raw.difficulty_strata || {}).some((key) => !DIFFICULTIES.has(key)))
+    throw new Error("difficulty_strata unexpected field");
+  for (const key of Object.keys(emptyExclusions()))
+    nonNegativeInt(`exclusions.${key}`, raw.exclusions?.[key]);
+  if (Object.keys(raw.exclusions || {}).some((key) => !(key in emptyExclusions())))
+    throw new Error("exclusions unexpected field");
+  const claimBearing = raw.verified_evaluated_decisions > 0 || raw.verified_good_decisions > 0 || raw.decision_efficiency_pct !== undefined;
+  if (claimBearing && !claimBearingShareCustody.has(raw))
+    throw new Error("claim-bearing verified share payload must be constructed from the bound ledger summary");
+  const statusSaysBlocked = raw.score_status === "blocked";
+  const integritySaysBlocked = raw.ledger_integrity === "blocked";
+  if (statusSaysBlocked !== integritySaysBlocked)
+    throw new Error("score_status=blocked must exactly match ledger_integrity=blocked");
+  if (raw.opened_decisions !== raw.closed_decisions + raw.pending_decisions)
+    throw new Error("custody arithmetic mismatch: opened must equal closed + pending");
+  if (raw.eligible_exposures !== raw.opened_decisions)
+    throw new Error("custody arithmetic mismatch: eligible exposures must equal opened decisions");
+  if (raw.closed_decisions < raw.excluded_decisions)
+    throw new Error("custody arithmetic mismatch: excluded exceeds closed");
+  if (raw.scored_exposures + raw.repeat_capped_exposures !== raw.closed_decisions - raw.excluded_decisions)
+    throw new Error("custody arithmetic mismatch: scored + repeat-capped must equal evaluated closures");
+  if (raw.verified_evaluated_decisions + raw.judged_evaluated_decisions !== raw.scored_exposures)
+    throw new Error("custody arithmetic mismatch: evidence tiers must equal scored exposures");
+  if (raw.verified_good_decisions > raw.verified_evaluated_decisions || raw.judged_good_decisions > raw.judged_evaluated_decisions)
+    throw new Error("custody arithmetic mismatch: good decisions exceed same-tier evaluated decisions");
+  if (raw.verified_successful_abstentions > raw.verified_evaluated_abstentions)
+    throw new Error("custody arithmetic mismatch: verified abstention successes exceed evaluated abstentions");
+  if (raw.judged_successful_abstentions + raw.judged_failed_abstentions !== raw.judged_only_abstentions)
+    throw new Error("custody arithmetic mismatch: judged abstention outcomes must equal judged-only abstentions");
+  if (raw.verified_evaluated_abstentions > raw.verified_evaluated_decisions)
+    throw new Error("custody arithmetic mismatch: verified abstentions exceed verified evaluated decisions");
+  if (raw.verified_successful_abstentions > raw.verified_good_decisions)
+    throw new Error("custody arithmetic mismatch: verified successful abstentions exceed verified good decisions");
+  const verifiedHelpful = raw.verified_good_decisions - raw.verified_successful_abstentions;
+  const verifiedEvaluatedInterventions = raw.verified_evaluated_decisions - raw.verified_evaluated_abstentions;
+  if (verifiedHelpful < 0 || verifiedEvaluatedInterventions < 0)
+    throw new Error("custody arithmetic mismatch: verified abstentions exceed verified totals");
+  const verifiedHarmful = Math.max(0, verifiedEvaluatedInterventions - verifiedHelpful - (raw.verified_neutral_decisions ?? 0));
+  const judgedHelpful = raw.helpful_interventions - verifiedHelpful;
+  const judgedHarmful = raw.harmful_interventions - verifiedHarmful;
+  if (judgedHelpful < 0 || judgedHarmful < 0)
+    throw new Error("custody arithmetic mismatch: verified intervention counts exceed totals");
+  const judgedNeutral = raw.neutral_interventions - (raw.verified_neutral_decisions ?? 0);
+  if (judgedNeutral < 0)
+    throw new Error("custody arithmetic mismatch: verified neutral exceeds neutral total");
+  if (judgedHelpful + judgedHarmful + judgedNeutral + raw.judged_only_abstentions !== raw.judged_evaluated_decisions)
+    throw new Error("custody arithmetic mismatch: judged intervention and abstention outcomes must equal judged evaluated decisions");
+  if (raw.judged_good_decisions !== judgedHelpful + raw.judged_successful_abstentions)
+    throw new Error("custody arithmetic mismatch: judged good decisions must equal judged helped prescriptions + successful abstentions");
+  const difficultyTotal = Object.values(raw.difficulty_strata).reduce((sum, count) => sum + Number(count), 0);
+  if (difficultyTotal !== raw.opened_decisions)
+    throw new Error("custody arithmetic mismatch: difficulty strata must equal opened decisions");
+  const expectedClosure = raw.opened_decisions ? Math.round(100 * raw.closed_decisions / raw.opened_decisions) : null;
+  if (raw.closure_rate_pct !== expectedClosure)
+    throw new Error("custody arithmetic mismatch: closure rate does not match counts");
+  const exploratory = raw.repeat_capped_exposures > 0 || raw.unique_task_classes < EFFICIENCY_CONTRACT.minimumUniqueTaskClasses || raw.difficulty_strata.unknown > 0;
+  const incomplete = raw.opened_decisions >= EFFICIENCY_CONTRACT.percentageDisplayThreshold && (raw.closure_rate_pct ?? 0) < EFFICIENCY_CONTRACT.minimumClosureRatePct;
+  const claimEligible = raw.verified_evaluated_decisions >= EFFICIENCY_CONTRACT.percentageDisplayThreshold && !exploratory && !incomplete && !integritySaysBlocked;
+  const expectedStatus = integritySaysBlocked ? "blocked" : incomplete ? "incomplete" : claimEligible ? "claim_eligible" : exploratory ? "exploratory" : "early_tape";
+  if (raw.score_status !== expectedStatus)
+    throw new Error(`score_status mismatch: expected ${expectedStatus}`);
+  if (claimEligible) {
+    const expectedPct = pct(raw.verified_good_decisions, raw.verified_evaluated_decisions);
+    if (raw.decision_efficiency_pct !== expectedPct)
+      throw new Error("decision_efficiency_pct must match same-tier bound-verified counts");
+    if (raw.period === "EARLY TAPE")
+      throw new Error("claim-eligible share card requires an allowlisted reporting period");
+  } else {
+    if (raw.decision_efficiency_pct !== undefined)
+      throw new Error("percentage is allowed only for claim-eligible bound-verified tape");
+    if (raw.period !== "EARLY TAPE")
+      throw new Error("non-claim-bearing share card must remain EARLY TAPE");
+  }
+  if (raw.statement !== shareStatement(raw))
+    throw new Error("statement must be derived from aggregate fields");
+  return raw;
+}
+function buildShareCardPayload(summary, options) {
+  if (summary.verifiedDecisions > 0) {
+    const live = summarizePossessionLedger();
+    if (summary.ledgerSha256 !== live.ledgerSha256 || summary.verifiedDecisions !== live.verifiedDecisions || summary.verifiedGoodDecisions !== live.verifiedGoodDecisions || summary.scoredDecisions !== live.scoredDecisions) {
+      throw new Error("claim-bearing share payload must match the current bound ledger summary");
+    }
+  }
+  const percentageAllowed = summary.scoreStatus === "claim_eligible" && summary.verifiedDecisions >= EFFICIENCY_CONTRACT.percentageDisplayThreshold;
+  const period = percentageAllowed ? safePeriod(options.period) : "EARLY TAPE";
+  const base = {
+    schema: "mm.share-card.v1",
+    metric_contract: EFFICIENCY_CONTRACT.id,
+    score_status: summary.scoreStatus,
+    percentage_display_threshold: EFFICIENCY_CONTRACT.percentageDisplayThreshold,
+    period,
+    statement: "",
+    opened_decisions: summary.openedDecisions,
+    closed_decisions: summary.closedDecisions,
+    pending_decisions: summary.pendingDecisions,
+    excluded_decisions: summary.excludedDecisions,
+    closure_rate_pct: summary.closureRatePct,
+    eligible_exposures: summary.eligibleExposures,
+    scored_exposures: summary.scoredDecisions,
+    repeat_capped_exposures: summary.repeatCappedDecisions,
+    unique_task_classes: summary.uniqueTaskClasses,
+    difficulty_strata: { ...summary.difficultyStrata },
+    verified_good_decisions: summary.verifiedGoodDecisions,
+    verified_neutral_decisions: summary.verifiedNeutralDecisions,
+    verified_evaluated_decisions: summary.verifiedDecisions,
+    judged_good_decisions: summary.judgedGoodDecisions,
+    judged_evaluated_decisions: summary.judgedDecisions,
+    verified_successful_abstentions: summary.verifiedSuccessfulAbstentions,
+    verified_evaluated_abstentions: summary.verifiedEvaluatedAbstentions,
+    judged_successful_abstentions: summary.judgedSuccessfulAbstentions,
+    judged_failed_abstentions: summary.judgedFailedAbstentions,
+    judged_only_abstentions: summary.judgedOnlyAbstentions,
+    helpful_interventions: summary.helpfulInterventions,
+    harmful_interventions: summary.harmfulInterventions,
+    neutral_interventions: summary.neutralInterventions,
+    ledger_integrity: summary.ledgerIntegrity,
+    exclusions: { ...summary.exclusionReasons },
+    ...percentageAllowed && summary.verifiedEfficiencyPct !== null ? { decision_efficiency_pct: summary.verifiedEfficiencyPct } : {}
+  };
+  base.statement = shareStatement(base);
+  if (base.verified_evaluated_decisions > 0 || base.decision_efficiency_pct !== undefined)
+    claimBearingShareCustody.add(base);
+  return validateShareCardPayload(base);
+}
+
+// mods/lifecycle.ts
+var HARM_RETIRE_MIN = 3;
+function skillHarmRecord(name) {
+  const want = slug(name);
+  try {
+    const events = loadPossessionEvents();
+    const owner = new Map;
+    for (const e of events) {
+      if (e && e.type === "decision" && e.action === "prescribe" && e.skill)
+        owner.set(e.possession_id, slug(e.skill));
+    }
+    let helped = 0, harmed = 0;
+    for (const e of events) {
+      if (!e || e.type !== "outcome")
+        continue;
+      if (owner.get(e.possession_id) !== want)
+        continue;
+      if (e.result === "helped")
+        helped++;
+      else if (e.result === "harmed")
+        harmed++;
+    }
+    return { helped, harmed, net: helped - harmed };
+  } catch {
+    return { helped: 0, harmed: 0, net: 0 };
+  }
+}
 function managedSkillUsage(name, rows = loadRows()) {
   const n = slug(name);
   return rows.filter((r) => (r.tmpl || r.fp || "").toLowerCase().includes(`skill ${n}`)).length;
 }
-function curateManagedSkills(ctx, dirsOverride) {
+function curateManagedSkills(ctx2, dirsOverride) {
   const rows = loadRows();
-  const dirs = dirsOverride ?? scanDirs(ctx);
+  const dirs = dirsOverride ?? scanDirs(ctx2);
   const out = [];
   const seen = new Set;
   for (const d of dirs) {
@@ -1862,14 +3234,22 @@ function curateManagedSkills(ctx, dirsOverride) {
         verdict = "review";
         reason = "no observed Skill-tool usage yet; keep if newly created, retire if stale";
       }
-      out.push({ name: n, dir: d, uses, verdict, reason });
+      const h = skillHarmRecord(n);
+      if (h.harmed >= HARM_RETIRE_MIN && h.net < 0) {
+        verdict = "retire_candidate";
+        reason = `${h.harmed} harmed vs ${h.helped} helped close${h.helped === 1 ? "" : "s"} (net ${h.net}) — the tape says it is costing more than it earns`;
+      } else if (h.harmed > 0 && verdict === "keep") {
+        verdict = "review";
+        reason = `${h.harmed} harmed close${h.harmed === 1 ? "" : "s"} on record (net ${h.net}) — inspect before it keeps playing`;
+      }
+      out.push({ name: n, dir: d, uses, verdict, reason, harmed: h.harmed, helped: h.helped });
     }
   }
   return out.sort((a, b) => a.uses - b.uses || a.name.localeCompare(b.name));
 }
-function retireManagedSkill(name, reason, ctx, absorbedInto, restrictDirs) {
-  const dirs = restrictDirs ?? scanDirs(ctx);
-  const d = dirs.find((x) => existsSync3(join4(x, name, "SKILL.md")));
+function retireManagedSkill(name, reason, ctx2, absorbedInto, restrictDirs) {
+  const dirs = restrictDirs ?? scanDirs(ctx2);
+  const d = dirs.find((x) => existsSync7(join7(x, name, "SKILL.md")));
   if (!d)
     throw new Error(`no skill '${name}'`);
   if (!isManaged(d, name))
@@ -1877,29 +3257,29 @@ function retireManagedSkill(name, reason, ctx, absorbedInto, restrictDirs) {
   if (isPinned(name))
     throw new Error(`'${name}' is pinned — unpin first (pin protects from retire, not from patch)`);
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const retiredRoot = join4(d, "_retired");
+  const retiredRoot = join7(d, "_retired");
   try {
-    if (lstatSync2(retiredRoot).isSymbolicLink()) {
+    if (lstatSync3(retiredRoot).isSymbolicLink()) {
       throw new Error(`containment: '_retired' is a symlink — refusing to move '${name}' outside the shelf`);
     }
   } catch (e) {
     if (String(e).includes("containment:"))
       throw e;
   }
-  mkdirSync3(retiredRoot, { recursive: true });
-  const target = join4(retiredRoot, `${name}-${stamp}`);
+  mkdirSync7(retiredRoot, { recursive: true });
+  const target = join7(retiredRoot, `${name}-${stamp}`);
   const forward = absorbedInto ? `absorbed_into: ${absorbedInto}
 ` : "";
-  writeFileSync3(join4(d, name, "RETIRE-REASON.txt"), `${new Date().toISOString()}
+  writeFileSync5(join7(d, name, "RETIRE-REASON.txt"), `${new Date().toISOString()}
 ${reason || "retired by muscle-memory curate"}
 ${forward}`);
-  renameSync2(join4(d, name), target);
+  renameSync2(join7(d, name), target);
   const u = loadUsage();
   u[name] = { ...u[name] || {}, state: "archived", absorbedInto: absorbedInto || undefined };
   saveUsage(u);
   return target;
 }
-function retiredSkillBlocker(name, ctx) {
+function retiredSkillBlocker(name, ctx2) {
   const nm = slug(String(name || ""));
   if (!nm)
     return null;
@@ -1907,10 +3287,10 @@ function retiredSkillBlocker(name, ctx) {
   if (usage?.[nm]?.state === "archived") {
     return `skill '${nm}' is archived/retired; restore it before recreating or patch an existing replacement`;
   }
-  for (const d of scanDirs(ctx)) {
-    const retiredRoot = join4(d, "_retired");
+  for (const d of scanDirs(ctx2)) {
+    const retiredRoot = join7(d, "_retired");
     try {
-      if (!existsSync3(retiredRoot))
+      if (!existsSync7(retiredRoot))
         continue;
       const match = readdirSync2(retiredRoot).find((n) => n === nm || n.startsWith(`${nm}-`));
       if (match)
@@ -1919,7 +3299,7 @@ function retiredSkillBlocker(name, ctx) {
   }
   return null;
 }
-function runAutonomousPrune(ctx, opts = {}) {
+function runAutonomousPrune(ctx2, opts = {}) {
   const maxRetire = Math.max(0, opts.maxRetire ?? 1);
   const usage = loadUsage();
   const now = Date.now();
@@ -1927,7 +3307,7 @@ function runAutonomousPrune(ctx, opts = {}) {
   const retiredPaths = [];
   const flagged = [];
   const kept = [];
-  for (const d of autonomousShelves(ctx)) {
+  for (const d of autonomousShelves(ctx2)) {
     for (const n of listSkillNames(d)) {
       if (!isManaged(d, n)) {
         kept.push(n);
@@ -1947,7 +3327,7 @@ function runAutonomousPrune(ctx, opts = {}) {
       const ageDays = Math.floor((now - created) / 86400000);
       if (ageDays > 30 && retired.length < maxRetire) {
         const reason = `auto-prune: 0 uses in ${ageDays}d — not earning context (reversible quarantine)`;
-        const target = retireManagedSkill(n, reason, ctx, undefined, [d]);
+        const target = retireManagedSkill(n, reason, ctx2, undefined, [d]);
         retired.push(n);
         retiredPaths.push(target);
         appendUiEvent({ phase: "skill_retired", summary: `retired '${n}' (0 uses, ${ageDays}d) — reversible`, skill: n, action: "retire", route: "auto-prune" });
@@ -2028,7 +3408,7 @@ function lifecycleTransition(input) {
 }
 function loadUsage() {
   try {
-    return existsSync3(USAGE_PATH) ? JSON.parse(readFileSync3(USAGE_PATH, "utf8")) : {};
+    return existsSync7(USAGE_PATH) ? JSON.parse(readFileSync7(USAGE_PATH, "utf8")) : {};
   } catch {
     return {};
   }
@@ -2036,7 +3416,7 @@ function loadUsage() {
 function saveUsage(u) {
   try {
     ensureDir();
-    writeFileSync3(USAGE_PATH, JSON.stringify(u, null, 2));
+    writeFileSync5(USAGE_PATH, JSON.stringify(u, null, 2));
   } catch {}
 }
 function bumpUsage(name) {
@@ -2057,21 +3437,21 @@ function setPinned(name, pinned) {
 function isPinned(name) {
   return !!loadUsage()[name]?.pinned;
 }
-function restoreManagedSkill(name, ctx) {
-  const dirs = scanDirs(ctx);
+function restoreManagedSkill(name, ctx2) {
+  const dirs = scanDirs(ctx2);
   for (const d of dirs) {
-    const retiredRoot = join4(d, "_retired");
-    if (!existsSync3(retiredRoot))
+    const retiredRoot = join7(d, "_retired");
+    if (!existsSync7(retiredRoot))
       continue;
     const matches = readdirSync2(retiredRoot).filter((n) => n === name || n.startsWith(`${name}-`)).sort().reverse();
     if (matches.length) {
-      if (existsSync3(join4(d, name, "SKILL.md")))
+      if (existsSync7(join7(d, name, "SKILL.md")))
         throw new Error(`'${name}' already active`);
-      renameSync2(join4(retiredRoot, matches[0]), join4(d, name));
+      renameSync2(join7(retiredRoot, matches[0]), join7(d, name));
       const u = loadUsage();
       u[name] = { ...u[name] || {}, state: "active", lastActivity: Date.now() };
       saveUsage(u);
-      return join4(d, name);
+      return join7(d, name);
     }
   }
   throw new Error(`no retired skill '${name}' to restore`);
@@ -2328,6 +3708,39 @@ function guardDecision(toolName, args, defenses, mode) {
     return null;
   return { decision: mode, reason: `muscle-memory: "${hit.trigger}" → ${hit.errClass} recurred ${hit.count}× with no recovery. ${hit.defense}` };
 }
+function syncNeocortexMemfs(agentId, body, opts = {}) {
+  const id = String(agentId || "").trim();
+  if (!id)
+    return false;
+  try {
+    const localRoot = join8(process.env.LETTA_LOCAL_BACKEND_DIR || join8(homedir3(), ".letta", "lc-local-backend"), "memfs", id, "memory");
+    const cloudRoot = join8(homedir3(), ".letta", "agents", id, "memory");
+    const root = opts.memfsRoot || (existsSync8(localRoot) ? localRoot : existsSync8(cloudRoot) ? cloudRoot : localRoot);
+    const dir = join8(root, "system");
+    mkdirSync8(dir, { recursive: true });
+    const file = join8(dir, "muscle-memory.md");
+    const withFm = body.startsWith("---") ? body : `---
+description: Skills muscle-memory has indexed for this agent; invoke by name with the Skill tool.
+---
+
+${body}`;
+    const prev = existsSync8(file) ? readFileSync8(file, "utf8") : "";
+    if (prev === withFm)
+      return true;
+    writeFileSync6(file, withFm);
+    if (opts.commit === false)
+      return true;
+    const { spawnSync } = __require("node:child_process");
+    const run = (args) => spawnSync("git", args, { cwd: root, encoding: "utf8", timeout: 1e4 });
+    if (!existsSync8(join8(root, ".git")))
+      run(["init", "-q"]);
+    run(["add", "system/muscle-memory.md"]);
+    run(["-c", "user.email=mm@local", "-c", "user.name=muscle-memory", "commit", "-q", "-m", "mm: sync skill index"]);
+    return true;
+  } catch {
+    return false;
+  }
+}
 function buildNeocortexBlock(managed, opts = {}) {
   const limit = opts.limit ?? 4000;
   const head = `# muscle-memory · consolidated skills (neocortex)
@@ -2358,7 +3771,9 @@ function reachFn(root, path) {
   let cur = root;
   let receiver = null;
   for (const key of path) {
-    if (!cur || typeof cur !== "object")
+    if (cur === null || cur === undefined)
+      return null;
+    if (typeof cur !== "object" && typeof cur !== "function")
       return null;
     receiver = cur;
     cur = Reflect.get(cur, key);
@@ -2579,7 +3994,7 @@ function provenanceBlock(c) {
 `;
 }
 function appendRecurrenceNote(dir, name, note) {
-  if (!existsSync4(join5(dir, name, "SKILL.md")))
+  if (!existsSync9(join9(dir, name, "SKILL.md")))
     return false;
   let t = readSkill(dir, name);
   const stamp = new Date().toISOString().slice(0, 10);
@@ -2648,7 +4063,7 @@ ${draft.body}${provenanceBlock(d.candidate)}
 }
 function loadAutopilotState() {
   try {
-    const s = JSON.parse(readFileSync4(AUTOPILOT_STATE, "utf8"));
+    const s = JSON.parse(readFileSync9(AUTOPILOT_STATE, "utf8"));
     const today = new Date().toISOString().slice(0, 10);
     return s.date === today ? s : { date: today, used: 0 };
   } catch {
@@ -2658,7 +4073,7 @@ function loadAutopilotState() {
 function saveAutopilotState(s) {
   try {
     ensureDir();
-    writeFileSync4(AUTOPILOT_STATE, JSON.stringify(s));
+    writeFileSync7(AUTOPILOT_STATE, JSON.stringify(s));
   } catch {}
 }
 function managedView(dirs) {
@@ -2711,14 +4126,14 @@ async function consumeStreamBounded(stream) {
     } catch {}
     return out;
   })();
-  const timer = new Promise((resolve2) => setTimeout(() => resolve2(out), ms));
+  const timer = new Promise((resolve4) => setTimeout(() => resolve4(out), ms));
   return Promise.race([reader, timer]);
 }
 var HIDDEN_FORKS = new WeakMap;
-async function hiddenForkFor(ctx, purpose) {
-  if (typeof ctx?.conversation?.fork !== "function")
+async function hiddenForkFor(ctx2, purpose) {
+  if (typeof ctx2?.conversation?.fork !== "function")
     return null;
-  const key = typeof ctx === "object" && ctx ? ctx : ctx.conversation;
+  const key = typeof ctx2 === "object" && ctx2 ? ctx2 : ctx2.conversation;
   let byPurpose = HIDDEN_FORKS.get(key);
   if (!byPurpose) {
     byPurpose = new Map;
@@ -2726,7 +4141,7 @@ async function hiddenForkFor(ctx, purpose) {
   }
   let forked = byPurpose.get(purpose);
   if (!forked) {
-    forked = Promise.resolve(ctx.conversation.fork({ hidden: true }));
+    forked = Promise.resolve(ctx2.conversation.fork({ hidden: true }));
     byPurpose.set(purpose, forked);
   }
   try {
@@ -2736,13 +4151,13 @@ async function hiddenForkFor(ctx, purpose) {
     throw e;
   }
 }
-async function forkAuthor(ctx, c, repair) {
+async function forkAuthor(ctx2, c, repair) {
   try {
-    if (typeof ctx?.conversation?.fork !== "function")
+    if (typeof ctx2?.conversation?.fork !== "function")
       return null;
     const det = draftWithRepair(c, repair);
     const prompt = `You are muscle-memory's skill author. Write ONLY the markdown BODY (no YAML frontmatter) of a SKILL.md capturing this recurring real workflow. Keep it under 120 lines. Required sections in order: "## Trigger", "## Observed pattern" (include the exact pattern in a code block), "## Procedure" (numbered, concrete, adaptable), ${repair ? `"## Pitfalls" (the observed error "${repair.errClass}" and its fix "${repair.fixStep}"), ` : ""}"## Verification". Pattern: ${c.key}. Reps: ${c.count} across ${c.convs} conversation(s). Output ONLY the markdown body, nothing else.`;
-    const forked = await hiddenForkFor(ctx, "fork-author");
+    const forked = await hiddenForkFor(ctx2, "fork-author");
     if (!forked)
       return null;
     const stream = await forked.sendMessageStream([{ role: "user", content: prompt }]);
@@ -2761,18 +4176,18 @@ async function forkAuthor(ctx, c, repair) {
     return null;
   }
 }
-async function runAutopilot(ctx, config) {
+async function runAutopilot(ctx2, config) {
   const cfg = config || AUTOPILOT_DEFAULT;
-  const dirs = scanDirs(ctx);
+  const dirs = scanDirs(ctx2);
   const rows = loadExperience();
   const st = loadAutopilotState();
   const plan = autopilotPlan({ rows, managed: managedView(dirs), dirsForDedup: dirs, config: cfg, budgetUsedToday: st.used });
   if (cfg.mode === "off" || !plan.decisions.length)
     return plan;
-  const result = executeAutopilotPlan(plan, { skillsDir: agentSkillsDir(ctx), rows, ctx });
+  const result = executeAutopilotPlan(plan, { skillsDir: agentSkillsDir(ctx2), rows, ctx: ctx2 });
   saveAutopilotState({ date: st.date, used: st.used + result.graduated.length + result.staged.length });
   if (result.graduated.length || result.staged.length) {
-    const activeDir = agentSkillsDir(ctx);
+    const activeDir = agentSkillsDir(ctx2);
     const verifiedGraduated = result.graduated.filter((n) => {
       const proof = graduationProof(activeDir, n);
       if (!proof.ok)
@@ -2789,7 +4204,7 @@ async function runAutopilot(ctx, config) {
       appendMeshFeed({ type: "skill_graduated", skill: n, route: "AUTOPILOT", signals: 0 });
     for (const n of verifiedGraduated) {
       try {
-        const _d = agentSkillsDir(ctx);
+        const _d = agentSkillsDir(ctx2);
         const _b = readSkill(_d, n);
         if (_b) {
           const _p = publishPlan({ name: n, description: skillDesc(_d, n), body: _b, shelf: "agent" });
@@ -2802,7 +4217,7 @@ async function runAutopilot(ctx, config) {
   if (process.env.MM_PUBLISH === "auto" && result.graduated.length) {
     for (const n of result.graduated) {
       try {
-        publishSkillToCatalog(n, ctx);
+        publishSkillToCatalog(n, ctx2);
         published.push(n);
       } catch {}
     }
@@ -2815,8 +4230,8 @@ async function runAutopilot(ctx, config) {
   }
   try {
     ensureDir();
-    mkdirSync4(RECEIPTS_DIR, { recursive: true });
-    writeFileSync4(join5(RECEIPTS_DIR, `autopilot-${Date.now()}.json`), JSON.stringify({ mode: cfg.mode, ...result, published, ts: Date.now() }, null, 2));
+    mkdirSync9(RECEIPTS_DIR, { recursive: true });
+    writeFileSync7(join9(RECEIPTS_DIR, `autopilot-${Date.now()}.json`), JSON.stringify({ mode: cfg.mode, ...result, published, ts: Date.now() }, null, 2));
   } catch {}
   return { ...plan, result };
 }
@@ -2843,10 +4258,108 @@ var IDENTITY_STOP = new Set(["recovering", "repairing", "recovery", "repair", "r
 function canonicalSkillIdentity(name) {
   return [...new Set(slug(name).split("-").filter((token) => token && !IDENTITY_STOP.has(token)))].join("-");
 }
+function contextWeightAlpha() {
+  const raw = Number(process.env.MM_CTX_ALPHA);
+  return Number.isFinite(raw) && raw >= 0 && raw <= 1 ? raw : 0.25;
+}
+function contextCharCap() {
+  const raw = Number(process.env.MM_CTX_CAP);
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 2000;
+}
+function contextMatchedCap() {
+  const raw = Number(process.env.MM_CTX_MATCHED_CAP);
+  return Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : 2;
+}
+function flattenContextText(input, cap = 8000) {
+  const parts = [];
+  const push = (s) => {
+    if (typeof s === "string" && s.trim())
+      parts.push(s.trim());
+  };
+  const walkBlock = (b) => {
+    if (typeof b === "string")
+      return push(b);
+    if (!b || typeof b !== "object")
+      return;
+    if (typeof b.text === "string")
+      return push(b.text);
+    if (typeof b.thinking === "string")
+      return push(b.thinking);
+  };
+  const walkMessage = (m) => {
+    if (typeof m === "string")
+      return push(m);
+    if (!m || typeof m !== "object")
+      return;
+    if (m.message && typeof m.message === "object")
+      return walkMessage(m.message);
+    if (typeof m.content === "string")
+      return push(m.content);
+    if (Array.isArray(m.content))
+      return m.content.forEach(walkBlock);
+    walkBlock(m);
+  };
+  (Array.isArray(input) ? input : [input]).forEach(walkMessage);
+  const joined = parts.join(`
+`).replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, " ");
+  return joined.length > cap ? joined.slice(joined.length - cap) : joined;
+}
+function distinctiveTerms(text) {
+  return [...new Set(String(text).toLowerCase().split(/[^a-z0-9.]+/).filter((t) => t.length > 2 && !SEARCH_STOP.has(t)))];
+}
+function stripModEcho(context) {
+  const lines = String(context || "").split(/\r?\n/);
+  const out = [];
+  let inClosest = false;
+  for (const line of lines) {
+    const t = line.trim();
+    if (/^Closest:/i.test(t)) {
+      inClosest = true;
+      continue;
+    }
+    if (inClosest) {
+      if (!t || /^\d+\.\s/.test(t) || /^[·•-]\s/.test(t)) {
+        if (!t)
+          inClosest = false;
+        continue;
+      }
+      inClosest = false;
+    }
+    if (/^(ABSTAIN|PRESCRIBE)\b/.test(t))
+      continue;
+    if (/^possession:\s*p-/.test(t))
+      continue;
+    if (/^NEXT · invoke/.test(t) || /^control: do not inject/.test(t))
+      continue;
+    if (/^(gap diagnosis|runtime model|Next:)\b/.test(t))
+      continue;
+    if (/skill="/.test(t))
+      continue;
+    out.push(line);
+  }
+  return out.join(`
+`);
+}
 function searchSkills(dirs, query, k = 5) {
-  const terms = [...new Set(String(query).toLowerCase().split(/[^a-z0-9.]+/).filter((t) => t.length > 2 && !SEARCH_STOP.has(t)))];
+  return searchSkillsWithContext(dirs, query, "", k);
+}
+function searchSkillsWithContext(dirs, query, context, k = 5, opts) {
+  const terms = distinctiveTerms(query);
+  const alpha = opts?.alpha ?? contextWeightAlpha();
+  const cap = opts?.cap ?? contextCharCap();
+  const matchedCap = opts?.matchedCap ?? contextMatchedCap();
+  const queryTerms = new Set(terms);
+  const rawCtx = String(context || "");
+  const cleanCtx = opts?.stripEcho ?? true ? stripModEcho(rawCtx) : rawCtx;
+  const ctxTerms = alpha > 0 && matchedCap >= 0 ? distinctiveTerms(cleanCtx.length > cap ? cleanCtx.slice(cleanCtx.length - cap) : cleanCtx).filter((t) => !queryTerms.has(t)) : [];
   const out = [];
   const seen = new Set;
+  const hit = (nl, dl, body, t) => {
+    const esc = t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const inName = nl.includes(t), inDesc = dl.includes(t);
+    const bc = Math.min((body.match(new RegExp("\\b" + esc, "g")) || []).length, 3);
+    return { named: inName || inDesc, score: (inName ? 8 : 0) + (inDesc ? 4 : 0) + bc };
+  };
   for (const d of dirs)
     for (const n of listSkillNames(d)) {
       if (seen.has(n))
@@ -2857,15 +4370,21 @@ function searchSkills(dirs, query, k = 5) {
       const nl = n.toLowerCase(), dl = desc.toLowerCase();
       let score = 0, matched = 0;
       for (const t of terms) {
-        const esc = t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        const inName = nl.includes(t), inDesc = dl.includes(t);
-        if (inName || inDesc)
+        const h = hit(nl, dl, body, t);
+        if (h.named)
           matched++;
-        const bc = Math.min((body.match(new RegExp("\\b" + esc, "g")) || []).length, 3);
-        score += (inName ? 8 : 0) + (inDesc ? 4 : 0) + bc;
+        score += h.score;
       }
-      if (matched > 0)
-        out.push({ name: n, description: desc, dir: d, score, matched });
+      if (matched === 0 && !(ctxTerms.length > 0 && score > 0))
+        continue;
+      let ctxMatched = 0, ctxScore = 0;
+      for (const t of ctxTerms) {
+        const h = hit(nl, dl, body, t);
+        if (h.named && ctxMatched < matchedCap)
+          ctxMatched++;
+        ctxScore += h.score;
+      }
+      out.push({ name: n, description: desc, dir: d, score: score + alpha * ctxScore, matched: matched + ctxMatched });
     }
   return out.sort((a, b) => b.score - a.score || b.matched - a.matched).slice(0, k);
 }
@@ -2877,7 +4396,8 @@ function pickUpdateTarget(matches, threshold = 18) {
   const clearlyLeads = !second || top.score >= 1.5 * second.score;
   const topDir = String(top.dir || "");
   const topIsStaged = topDir === STAGED_DIR || /[\\/]staged$/.test(topDir);
-  if (top.score >= threshold && top.matched >= SEARCH_DISTINCT_MIN && (clearlyLeads || topIsStaged))
+  const distinctiveEnough = top.matched >= SEARCH_DISTINCT_MIN || top.matched >= 2 && top.score >= 2.5 * threshold;
+  if (top.score >= threshold && distinctiveEnough && (clearlyLeads || topIsStaged))
     return { ...top, confidence: "high" };
   return null;
 }
@@ -2903,6 +4423,108 @@ function applySemanticEvidence(matches, hits, onShelf, threshold = 18) {
   const lex = top ? boosted.find((m) => m.name === top.name) : undefined;
   const suspect = top && onShelf(top.name) && (!lex || lex.matched < SEARCH_DISTINCT_MIN || lex.score < threshold) ? top.name : null;
   return { matches: boosted, suspect };
+}
+var RERANK_CONF_FLOOR = 0.6;
+var PRESCRIBE_SYSTEM_PROMPT = `You are a prescription gate for a skill library. An agent is about to attempt a task. Decide whether following THIS skill's documented procedure would materially help the agent complete THAT task correctly — especially if the skill encodes a convention, rule, or step the agent would otherwise get wrong. Answer same_job=true if a competent engineer would hand the agent this skill for this task. Answer false if the skill is about a different kind of work, or if the task is described too vaguely to tell. Reply STRICT JSON only: {"same_job": true|false, "confidence": 0.0-1.0}.`;
+function prescribeUserPrompt(task, name, description) {
+  return `Task the agent is about to attempt: ${task}
+Candidate skill — name: ${name}; description: ${description}
+Would this skill help?`;
+}
+function parseJudgement(raw) {
+  const text = String(raw || "").replace(/<\/?think>/gi, "");
+  const m = text.match(/\{[^{}]*"same_job"[^{}]*\}/);
+  if (!m)
+    return null;
+  try {
+    const o = JSON.parse(m[0]);
+    if (typeof o.same_job !== "boolean")
+      return null;
+    const conf = typeof o.confidence === "number" && Number.isFinite(o.confidence) ? Math.min(1, Math.max(0, o.confidence)) : 0;
+    return { same_job: o.same_job, confidence: conf };
+  } catch {
+    return null;
+  }
+}
+function wideCandidates(dirs, query, listNames, k = 3) {
+  const scored = searchSkills(dirs, query, 50);
+  const out = scored.map((s) => ({ name: s.name, dir: s.dir }));
+  const seen = new Set(out.map((o) => o.name));
+  for (const d of dirs)
+    for (const n of listNames(d)) {
+      if (!seen.has(n)) {
+        seen.add(n);
+        out.push({ name: n, dir: d });
+      }
+    }
+  return out.slice(0, k);
+}
+function composeEnabled() {
+  return String(process.env.MM_COMPOSE || "").toLowerCase() === "on";
+}
+function composeMaxSkills() {
+  const raw = Number(process.env.MM_COMPOSE_MAX);
+  return Number.isFinite(raw) && raw >= 1 ? Math.min(3, Math.floor(raw)) : 3;
+}
+function composeMinNewTerms() {
+  const raw = Number(process.env.MM_COMPOSE_MIN_NEW);
+  return Number.isFinite(raw) && raw >= 1 ? Math.floor(raw) : 2;
+}
+function selectCompanions(query, primary, pool, opts) {
+  const threshold = opts?.threshold ?? 18;
+  const maxTotal = opts?.maxTotal ?? composeMaxSkills();
+  const minNew = opts?.minNew ?? composeMinNewTerms();
+  const terms = distinctiveTerms(query);
+  if (!terms.length || maxTotal <= 1)
+    return [];
+  const coveredBy = (nl, dl) => terms.filter((t) => nl.includes(t) || dl.includes(t));
+  const covered = new Set(coveredBy(primary.name.toLowerCase(), String(primary.description || "").toLowerCase()));
+  const out = [];
+  for (const cand of pool) {
+    if (out.length >= maxTotal - 1)
+      break;
+    if (cand.name === primary.name || out.some((c) => c.name === cand.name))
+      continue;
+    if (!pickUpdateTarget([cand], threshold))
+      continue;
+    const newTerms = coveredBy(cand.name.toLowerCase(), String(cand.description || "").toLowerCase()).filter((t) => !covered.has(t));
+    if (newTerms.length < minNew)
+      continue;
+    out.push({ name: cand.name, newTerms });
+    for (const t of newTerms)
+      covered.add(t);
+  }
+  return out;
+}
+function composeAroundPrimary(dirs, query, primaryName) {
+  if (String(process.env.MM_COMPOSE || "").toLowerCase() !== "on")
+    return [primaryName];
+  try {
+    const pool = searchSkills(dirs, query, 8);
+    const primary = pool.find((p) => p.name === primaryName);
+    if (!primary)
+      return [primaryName];
+    const companions = selectCompanions(query, { name: primary.name, description: primary.description || "" }, pool, {});
+    return [primaryName, ...companions.map((c) => c.name)];
+  } catch {
+    return [primaryName];
+  }
+}
+function composePrescription(query, pool, threshold = 18) {
+  const routed = pickUpdateTarget(pool, threshold);
+  if (routed) {
+    const companions2 = selectCompanions(query, { name: routed.name, description: routed.description || "" }, pool, { threshold });
+    return companions2.length ? { primary: routed, companions: companions2, rescuedTie: false } : null;
+  }
+  const top = pool[0];
+  if (!top)
+    return null;
+  if (!pickUpdateTarget([top], threshold))
+    return null;
+  const companions = selectCompanions(query, { name: top.name, description: String(top.description || "") }, pool, { threshold });
+  if (!companions.length)
+    return null;
+  return { primary: top, companions, rescuedTie: true };
 }
 function routeSkill(lexical, hits, onShelf, threshold = 18) {
   const { matches, suspect } = applySemanticEvidence(lexical, hits, onShelf, threshold);
@@ -2968,7 +4590,7 @@ function compareSkillSections(oldContent, newContent) {
 async function reviewAndAuthor(evidence, dirs, authorFn, opts = {}) {
   const threshold = opts.updateThreshold ?? 18;
   const hits = opts.semanticFn ? await opts.semanticFn(evidence, 3).catch(() => []) : [];
-  const d = routeSkill(searchSkills(dirs, evidence, 3), hits, (n) => dirs.some((x) => existsSync4(join5(x, n, "SKILL.md"))), threshold);
+  const d = routeSkill(searchSkills(dirs, evidence, 3), hits, (n) => dirs.some((x) => existsSync9(join9(x, n, "SKILL.md"))), threshold);
   const { matches } = d;
   const updTarget = d.target;
   const slimEarly = matches.map((m) => ({ name: m.name, score: m.score, matched: m.matched }));
@@ -2980,7 +4602,7 @@ async function reviewAndAuthor(evidence, dirs, authorFn, opts = {}) {
   }
   const existingForUpdate = updTarget ? (() => {
     try {
-      const d2 = dirs.find((x) => existsSync4(join5(x, updTarget.name, "SKILL.md")));
+      const d2 = dirs.find((x) => existsSync9(join9(x, updTarget.name, "SKILL.md")));
       return d2 ? readSkill(d2, updTarget.name) : "";
     } catch {
       return "";
@@ -3079,7 +4701,7 @@ The ~70-line cap is LIFTED (target a rich ~120-180 lines); be EXHAUSTIVE on the 
   }
   try {
     ensureDir();
-    writeFileSync4(join5(STATE_DIR, "reflect-last-raw.txt"), `=== ${new Date().toISOString()}${degraded ? " [" + degraded + "]" : ""} ===
+    writeFileSync7(join9(STATE_DIR, "reflect-last-raw.txt"), `=== ${new Date().toISOString()}${degraded ? " [" + degraded + "]" : ""} ===
 ${raw}
 `);
   } catch {}
@@ -3110,7 +4732,7 @@ YOUR PREVIOUS DRAFT IS NOT YET SOTA (${why.join("; ")}). A top-tier skill ALWAYS
     try {
       const raw2 = await authorFn(REVIEW_PROMPT, evidence + hint + depthDirective + corrective) || "";
       try {
-        writeFileSync4(join5(STATE_DIR, "reflect-last-raw.txt"), `=== ${new Date().toISOString()} (retry) ===
+        writeFileSync7(join9(STATE_DIR, "reflect-last-raw.txt"), `=== ${new Date().toISOString()} (retry) ===
 ${raw2}
 `);
       } catch {}
@@ -3197,11 +4819,11 @@ function retrievePreferences(evidence, memDir) {
     return [];
   const prefs = [];
   for (const s of ["persona.md", "system/persona.md", "system/human.md", "human.md", "system/human/preferences.md"]) {
-    const p = join5(dir, s);
-    if (!existsSync4(p))
+    const p = join9(dir, s);
+    if (!existsSync9(p))
       continue;
     try {
-      for (const line of readFileSync4(p, "utf8").split(`
+      for (const line of readFileSync9(p, "utf8").split(`
 `)) {
         const l = line.trim().replace(/^[-*#>\s]+/, "");
         if (/\b(prefer|preference|always|never|wants?|likes?|hates?|style|format|verbos|concise|terse|tone|don'?t)\b/i.test(l) && l.length > 20 && l.length < 220)
@@ -3218,7 +4840,7 @@ ${ev.digest}`);
 }
 function loadHandledReflects() {
   try {
-    return existsSync4(REFLECT_HANDLED) ? JSON.parse(readFileSync4(REFLECT_HANDLED, "utf8")) : {};
+    return existsSync9(REFLECT_HANDLED) ? JSON.parse(readFileSync9(REFLECT_HANDLED, "utf8")) : {};
   } catch {
     return {};
   }
@@ -3228,7 +4850,7 @@ function markHandledReflect(sig, route) {
     ensureDir();
     const h = loadHandledReflects();
     h[sig] = { ts: Date.now(), route };
-    writeFileSync4(REFLECT_HANDLED, JSON.stringify(h, null, 2));
+    writeFileSync7(REFLECT_HANDLED, JSON.stringify(h, null, 2));
   } catch {}
 }
 function isHighConfidenceCreate(res, ev) {
@@ -3241,13 +4863,13 @@ function isHighConfidenceCreate(res, ev) {
 }
 function graduationProof(skillsDir, name) {
   const nm = slug(name);
-  const path = join5(skillsDir, nm, "SKILL.md");
+  const path = join9(skillsDir, nm, "SKILL.md");
   if (!nm)
     return { ok: false, path, reason: "name required" };
-  if (!existsSync4(path))
+  if (!existsSync9(path))
     return { ok: false, path, reason: "SKILL.md missing after write" };
   try {
-    const content = readFileSync4(path, "utf8");
+    const content = readFileSync9(path, "utf8");
     const fmName = slug((content.match(/^name:\s*(.+)$/im)?.[1] || "").trim());
     if (fmName !== nm)
       return { ok: false, path, reason: `frontmatter name mismatch: expected ${nm}, got ${fmName || "(none)"}` };
@@ -3256,18 +4878,18 @@ function graduationProof(skillsDir, name) {
     return { ok: false, path, reason: String(e?.message ?? e) };
   }
 }
-function graduateStagedSkill(name, ctx) {
+function graduateStagedSkill(name, ctx2) {
   const nm = slug(name);
   if (!nm)
     throw new Error("name required");
-  const srcDir = join5(STAGED_DIR, nm);
-  const src = join5(srcDir, "SKILL.md");
-  if (!existsSync4(src))
+  const srcDir = join9(STAGED_DIR, nm);
+  const src = join9(srcDir, "SKILL.md");
+  if (!existsSync9(src))
     throw new Error(`no staged skill '${nm}'`);
-  const retiredBlock = retiredSkillBlocker(nm, ctx);
+  const retiredBlock = retiredSkillBlocker(nm, ctx2);
   if (retiredBlock)
     throw new Error(`retire-sticky blocked graduate: ${retiredBlock}`);
-  const content = readFileSync4(src, "utf8");
+  const content = readFileSync9(src, "utf8");
   const desc = (content.match(/^description:\s*(.+)$/im)?.[1] || "").trim();
   const body = content.replace(/^---[\s\S]*?\n---\s*\n?/, "");
   const lint = lintSkillDraft({ name: nm, description: desc, body });
@@ -3279,17 +4901,17 @@ function graduateStagedSkill(name, ctx) {
   const sec = scanSkillContent(body);
   if (!sec.ok)
     throw new Error(`security blocked: ${sec.issues.join("; ")}`);
-  const dstRoot = agentSkillsDir(ctx);
+  const dstRoot = agentSkillsDir(ctx2);
   const dst = writeSkill(dstRoot, nm, content.includes(MM_TAG) ? content : content + `
 <!-- ${MM_TAG}: graduated ${new Date().toISOString().slice(0, 10)} -->
 `);
   const proof = graduationProof(dstRoot, nm);
   if (!proof.ok)
     throw new Error(`graduation proof failed: ${proof.reason}`);
-  syncSkillToDesktopCatalog(nm, ctx);
-  mkdirSync4(STAGED_RETIRED_DIR, { recursive: true });
+  syncSkillToDesktopCatalog(nm, ctx2);
+  mkdirSync9(STAGED_RETIRED_DIR, { recursive: true });
   try {
-    renameSync3(srcDir, join5(STAGED_RETIRED_DIR, `${nm}-graduated-${Date.now()}`));
+    renameSync3(srcDir, join9(STAGED_RETIRED_DIR, `${nm}-graduated-${Date.now()}`));
   } catch {}
   appendUiEvent({ phase: "skill_graduated", summary: `graduated '${nm}'`, skill: nm, action: "graduate", route: "manual" });
   appendMeshFeed({ type: "skill_graduated", skill: nm, route: "GRADUATE", signals: 0 });
@@ -3303,12 +4925,12 @@ function graduateStagedSkill(name, ctx) {
   } catch {}
   return dst;
 }
-function reviewForkAuthor(ctx) {
+function reviewForkAuthor(ctx2) {
   return async (sys, user) => {
     try {
-      if (typeof ctx?.conversation?.fork !== "function")
+      if (typeof ctx2?.conversation?.fork !== "function")
         return "";
-      const forked = await hiddenForkFor(ctx, "review-author");
+      const forked = await hiddenForkFor(ctx2, "review-author");
       if (!forked)
         return "";
       const stream = await forked.sendMessageStream([{ role: "user", content: `${sys}
@@ -3323,8 +4945,8 @@ ${user}` }]);
     }
   };
 }
-async function runReflectiveReview(ctx, config = {}) {
-  const dirs = config.dirs ?? scanDirs(ctx);
+async function runReflectiveReview(ctx2, config = {}) {
+  const dirs = config.dirs ?? scanDirs(ctx2);
   const stagedShelf = config.stagedDir ?? STAGED_DIR;
   const reviewDirs = config.mode === "auto" ? dirs : [...dirs, stagedShelf];
   const exp = config.experience ?? loadExperience();
@@ -3357,7 +4979,7 @@ ${prefs.map((p) => `- ${p}`).join(`
   writeUiState({ phase: "checking", subject: preTgt?.name || "", route: preTgt ? `UPDATE → ${preTgt.name}` : "CREATE (new skill)" });
   appendUiEvent({ phase: "review_planned", summary: preTgt ? `route UPDATE → ${preTgt.name}` : "route CREATE — no existing skill safely covers this" });
   writeUiState({ phase: "shaping", skill: preTgt?.name || "", route: preTgt ? `UPDATE → ${preTgt.name}` : "CREATE" });
-  const author = config.authorFn || reviewForkAuthor(ctx);
+  const author = config.authorFn || reviewForkAuthor(ctx2);
   let res;
   try {
     res = await reviewAndAuthor(digest, reviewDirs, author, { semanticFn: config.semanticFn });
@@ -3369,13 +4991,13 @@ ${prefs.map((p) => `- ${p}`).join(`
   if ((res.action === "create" || res.action === "update") && res.name && res.content) {
     const live = config.mode === "auto";
     const graduate = live;
-    const dir = graduate ? agentSkillsDir(ctx) : stagedShelf;
+    const dir = graduate ? agentSkillsDir(ctx2) : stagedShelf;
     const tagged = res.content.includes(MM_TAG) ? res.content : res.content + `
 <!-- ${MM_TAG}: reflective ${new Date().toISOString().slice(0, 10)}; action=${res.action}; convs=${ev.convs}; ${graduate ? "graduated=true" : "staged=true"} -->
 `;
     try {
       if (res.action === "create" && !res.updateTarget) {
-        const retiredBlock = retiredSkillBlocker(res.name, ctx);
+        const retiredBlock = retiredSkillBlocker(res.name, ctx2);
         if (retiredBlock) {
           markHandledReflect(sig, `RETIRED:${res.name}`);
           appendUiEvent({ phase: "reflect_none", summary: `retire-sticky blocked '${res.name}'` });
@@ -3391,27 +5013,27 @@ ${prefs.map((p) => `- ${p}`).join(`
         }
       }
       const oldContent = res.action === "update" && res.updateTarget ? (() => {
-        const d = reviewDirs.find((x) => existsSync4(join5(x, res.updateTarget, "SKILL.md")));
+        const d = reviewDirs.find((x) => existsSync9(join9(x, res.updateTarget, "SKILL.md")));
         return d ? readSkill(d, res.updateTarget) : undefined;
       })() : undefined;
       writeUiState({ phase: "saving", skill: res.name, route: res.action.toUpperCase() });
       writeSkill(dir, res.name, tagged);
       writeUiState({ phase: "testing", skill: res.name, route: res.action.toUpperCase() });
-      const proof = graduate ? graduationProof(dir, res.name) : { ok: true, path: join5(dir, res.name, "SKILL.md"), reason: "staged write" };
+      const proof = graduate ? graduationProof(dir, res.name) : { ok: true, path: join9(dir, res.name, "SKILL.md"), reason: "staged write" };
       if (!proof.ok) {
         appendUiEvent({ phase: "graduation_unverified", summary: `not claiming graduation for '${res.name}': ${proof.reason.slice(0, 100)}`, skill: res.name, action: res.action, route: "truth-guard" });
         writeUiState({ phase: "idle", last: `graduation unverified for '${res.name}'`, route: "SKIP · truth-guard" });
-        return { ...res, wrote: join5(dir, res.name), reason: `graduation proof failed: ${proof.reason}` };
+        return { ...res, wrote: join9(dir, res.name), reason: `graduation proof failed: ${proof.reason}` };
       }
       if (graduate)
-        syncSkillToDesktopCatalog(res.name, ctx);
+        syncSkillToDesktopCatalog(res.name, ctx2);
       const manifest = buildEvidenceManifest({ action: res.action, skill: res.name, updateTarget: res.updateTarget, convs: ev.convs, signals: ev.items, memfsHits: res.matches || [], preferences: prefs, rejected: ev.rejected, newContent: tagged, oldContent });
-      const evDir = join5(dir, res.name, "references", "evidence");
-      mkdirSync4(evDir, { recursive: true });
-      writeFileSync4(join5(evDir, `${Date.now()}.json`), JSON.stringify(manifest, null, 2));
+      const evDir = join9(dir, res.name, "references", "evidence");
+      mkdirSync9(evDir, { recursive: true });
+      writeFileSync7(join9(evDir, `${Date.now()}.json`), JSON.stringify(manifest, null, 2));
       ensureDir();
-      mkdirSync4(RECEIPTS_DIR, { recursive: true });
-      writeFileSync4(join5(RECEIPTS_DIR, `reflect-${Date.now()}.json`), JSON.stringify({ action: res.action, name: res.name, updateTarget: res.updateTarget, convs: ev.convs, items: ev.items, prefsInjected: prefs.length, rejected: ev.rejected.length, degraded: res.degraded || null, dir, ts: Date.now() }, null, 2));
+      mkdirSync9(RECEIPTS_DIR, { recursive: true });
+      writeFileSync7(join9(RECEIPTS_DIR, `reflect-${Date.now()}.json`), JSON.stringify({ action: res.action, name: res.name, updateTarget: res.updateTarget, convs: ev.convs, items: ev.items, prefsInjected: prefs.length, rejected: ev.rejected.length, degraded: res.degraded || null, dir, ts: Date.now() }, null, 2));
       if (res.degraded)
         appendUiEvent({ phase: "author_degraded", summary: `authored via graceful degradation: ${res.degraded}`, skill: res.name });
       const phase = graduate ? "skill_graduated" : "skill_staged";
@@ -3426,7 +5048,7 @@ ${prefs.map((p) => `- ${p}`).join(`
       if (prefs.length)
         appendUiEvent({ phase: "memory_pref_injected", summary: `injected ${prefs.length} user preferences` });
       writeUiState(graduate ? { phase: res.action === "update" ? "updated" : "learned", skill: res.name, last: summary, route: `${graduate ? "GRADUATE" : res.action.toUpperCase()}${res.updateTarget ? " " + res.updateTarget : ""} · live` } : { phase: "idle", last: "", route: `${res.action.toUpperCase()} · staged` });
-      return { ...res, wrote: join5(dir, res.name) };
+      return { ...res, wrote: join9(dir, res.name) };
     } catch (e) {
       appendUiEvent({ phase: "reflect_error", summary: `write failed: ${String(e?.message ?? e).slice(0, 80)}` });
       return { ...res, reason: String(e?.message ?? e) };
@@ -3437,8 +5059,8 @@ ${prefs.map((p) => `- ${p}`).join(`
     markHandledReflect(sig, routeKey);
     try {
       ensureDir();
-      mkdirSync4(RECEIPTS_DIR, { recursive: true });
-      writeFileSync4(join5(RECEIPTS_DIR, `reflect-rejected-${Date.now()}.json`), JSON.stringify({ action: "reject", safe, reason: res.reason || "(none)", degraded: res.degraded || null, convs: ev.convs, items: ev.items, ts: Date.now() }, null, 2));
+      mkdirSync9(RECEIPTS_DIR, { recursive: true });
+      writeFileSync7(join9(RECEIPTS_DIR, `reflect-rejected-${Date.now()}.json`), JSON.stringify({ action: "reject", safe, reason: res.reason || "(none)", degraded: res.degraded || null, convs: ev.convs, items: ev.items, ts: Date.now() }, null, 2));
     } catch {}
     appendUiEvent({ phase: safe ? "blocked_unsafe" : "reflect_none", summary: safe ? `\uD83D\uDEE1️ blocked unsafe content (safe): ${res.reason}` : `draft rejected; nothing saved (${res.reason})${res.degraded ? " [degraded: " + res.degraded + "]" : ""}` });
     writeUiState({ phase: safe ? "protected" : "idle", last: safe ? "blocked unsafe content (safe)" : `draft rejected; nothing saved`, route: safe ? "BLOCKED · protected" : "SKIP · rejected-draft" });
@@ -3448,6 +5070,331 @@ ${prefs.map((p) => `- ${p}`).join(`
     writeUiState({ phase: "idle", last: "nothing to save" });
   }
   return res;
+}
+
+// mods/gate.ts
+function dedupCheck(name, description, dirs = [globalSkillsDir()]) {
+  const words = new Set(description.toLowerCase().split(/\W+/).filter((w) => w.length > 3));
+  const overlapWith = (desc) => {
+    const dw = new Set(desc.toLowerCase().split(/\W+/).filter((w) => w.length > 3));
+    let inter = 0;
+    for (const w of words)
+      if (dw.has(w))
+        inter++;
+    return words.size ? inter / words.size : 0;
+  };
+  let worst = { name: "", overlap: 0 };
+  for (const dir of dirs) {
+    for (const n of listSkillNames(dir)) {
+      if (n === name)
+        return { dup: true, reason: `skill '${n}' already exists — patch it, don't duplicate`, name: n, overlap: 1 };
+      const overlap = overlapWith(skillDesc(dir, n));
+      if (overlap > worst.overlap)
+        worst = { name: n, overlap };
+    }
+    const retiredRoot = join10(dir, "_retired");
+    for (const rn of listSkillNames(retiredRoot)) {
+      const base = rn.replace(/-\d{4}-\d{2}-\d{2}T[\dZ.-]+$/, "");
+      if (base === name)
+        return { dup: true, reason: `retired skill '${base}' exists in quarantine (${retiredRoot}/${rn}) — restore it or absorb instead of recreating`, name: base, overlap: 1 };
+      const overlap = overlapWith(skillDesc(retiredRoot, rn));
+      if (overlap > 0.6)
+        return { dup: true, reason: `>60% description overlap with RETIRED skill '${base}' (${retiredRoot}/${rn}) — quarantined: restore/absorb instead of recreating a sibling`, name: base, overlap };
+    }
+  }
+  return { dup: worst.overlap > 0.6, reason: worst.overlap > 0.6 ? `>60% description overlap with '${worst.name}' — patch/absorb instead` : "", name: worst.name, overlap: worst.overlap };
+}
+function candidateName(c) {
+  const key = c.key.replace(/<[^>]+>/g, "").replace(/[(){}]/g, "").replace(/→/g, " to ");
+  const STOP = new Set(["str", "path", "url", "read", "write", "edit", "bash", "sh", "cd", "ls", "cat", "echo", "pwd", "true", "sleep", "mkdir", "amp"]);
+  const seen = new Set;
+  const words = key.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 1 && !STOP.has(w) && !seen.has(w) && seen.add(w));
+  const base = words.slice(0, 5).join("-") || (c.kind === "sequence" ? "recurring-workflow" : "recurring-command");
+  const name = words.length >= 2 || /ing$/.test(base) ? base : `${base}-workflow`;
+  return slug(name);
+}
+function candidateDescription(c) {
+  return `Use when repeating the observed ${c.kind} workflow '${c.key}' (${c.count} reps across ${c.convs} conversation${c.convs === 1 ? "" : "s"}${c.fixes ? `, ${c.fixes} error-recovery reps` : ""}); trigger on similar repeated tool-use, validation, or repair loops.`;
+}
+function draftSkillFromCandidate(c) {
+  const name = candidateName(c);
+  const description = candidateDescription(c);
+  const parts = c.key.split(/\s*→\s*/).filter(Boolean);
+  const steps = parts.length > 1 ? parts.map((s, i) => `${i + 1}. **${s}** — perform this step intentionally; adapt paths/args to the current repo/session.`).join(`
+`) : `1. **${c.key}** — run the recurring command/template only after confirming the current repo/session context.
+2. Inspect the output and capture the success/failure receipt.
+3. If it fails, patch the root cause and rerun the same validation once.`;
+  const recovery = c.fixes ? `
+## Failure recovery
+This pattern includes ${c.fixes} observed error-recovery rep${c.fixes === 1 ? "" : "s"}. Preserve the recovery loop:
+
+1. Treat the first failure as diagnostic signal, not random noise.
+2. Inspect the concrete error output.
+3. Patch the smallest root cause.
+4. Rerun the same validation command/tool before claiming fixed.
+` : "";
+  const body = `# ${name}
+
+This skill was drafted from repeated real tool-use captured by muscle-memory. Treat it as a starting playbook: refine after the next successful/failed use.
+
+## Trigger
+${description}
+
+## Observed pattern
+\`\`\`text
+${c.key}
+\`\`\`
+
+- Kind: ${c.kind}
+- Repetitions: ${c.count}
+- Conversation spread: ${c.convs}
+- Error-recovery reps: ${c.fixes}
+- Maturity score: ${c.maturity}
+
+## Procedure
+${steps}${recovery}
+## Verification
+- Capture the concrete command/tool output that proves the workflow succeeded.
+- If this touches files, inspect diff/status before claiming done.
+- If this changes a package/mod, bundle/import or run its package-local test.
+- If this is visual/frontend work, require visual receipts plus computed boxes, not presence-only proof.
+
+## Anti-bloat / refinement rule
+- Patch this skill in place when a step is too vague, stale, or misses a failure mode.
+- Do not create a duplicate skill for the same workflow; merge or absorb instead.
+- Retire/quarantine it if future usage shows it does not earn its context.
+`;
+  return { name, description, body };
+}
+function findCandidate(candidateKey) {
+  const { candidates } = detect(loadExperience());
+  if (!candidateKey)
+    return candidates[0];
+  return candidates.find((c) => c.key === candidateKey || c.key.includes(candidateKey));
+}
+function repairForCandidate(c) {
+  if (!c.fixes)
+    return;
+  const first = c.key.split(/\s*→\s*/)[0];
+  return detectRepairChains(loadExperience()).find((r) => r.trigger === first || r.verifyStep === first || c.key.includes(r.trigger) || c.key.includes(r.verifyStep));
+}
+function lintSkillDraft(d, opts = {}) {
+  const issues = [];
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(d.name))
+    issues.push("name must be lowercase-hyphen slug");
+  if (d.name.length > 64)
+    issues.push("name > 64 chars");
+  if (!d.description || d.description.length < 20)
+    issues.push("description too short");
+  if (!/\b(use when|trigger|when )/i.test(d.description))
+    issues.push("description must state WHEN to use (trigger phrase)");
+  if (d.description.length > 700)
+    issues.push("description > 700 chars (keep routing lean)");
+  const approxTokens = Math.ceil(d.body.length / 4);
+  if (approxTokens > 5000)
+    issues.push(`body ~${approxTokens} tokens > 5000 (decompose into references/)`);
+  if (!/##\s+procedure/i.test(d.body))
+    issues.push("body missing ## Procedure");
+  if (!/##\s+verification/i.test(d.body))
+    issues.push("body missing ## Verification");
+  if (opts.needsPitfalls && !/##\s+(pitfalls|failure recovery)/i.test(d.body))
+    issues.push("fix-pattern skill must include ## Pitfalls / Failure recovery");
+  if (opts.needsWorkedExample && !/##\s+(worked example|worked examples|example)/i.test(d.body)) {
+    issues.push("body missing ## Worked example — the same procedure scored 0.6 as prose vs 5.4 with one worked example; a skill without one is shipped in the form measured not to convert");
+  }
+  if (opts.needsRetrievableDescription) {
+    const descWords = String(d.description).toLowerCase().match(/[a-z][a-z0-9-]{2,}/g) || [];
+    const bodyWords = new Set(String(d.body).toLowerCase().match(/[a-z][a-z0-9-]{2,}/g) || []);
+    const plain = descWords.filter((w) => !SEARCH_STOP.has(w));
+    if (plain.length < 6)
+      issues.push("description carries too few distinctive terms to be retrievable — say what artifact and what outcome, in the words a caller would use");
+    const jargonOnly = plain.length > 0 && plain.every((w) => bodyWords.has(w) && w.length > 7);
+    if (jargonOnly)
+      issues.push("description reads as internal jargon only — add the ordinary words someone would use to describe this task");
+  }
+  return { ok: issues.length === 0, issues };
+}
+function sotaQualityGaps(d) {
+  const gaps = [];
+  const b = d.body;
+  const lc = b.toLowerCase();
+  const procedural = /##\s+(procedure|steps|workflow|method|pitfalls|failure recovery|recipe|how to)/i.test(b);
+  const fencedBodies = [...b.matchAll(/```[^\n]*\n([\s\S]*?)```/g)].map((m) => m[1]);
+  const concreteFence = fencedBodies.some((sample) => /(?:^|\s)(?:npm|npx|pnpm|yarn|bun|node|deno|python3?|pytest|jest|vitest|cargo|go|make|git|curl|letta|shopify|docker|kubectl)\b|(?:^|[\s"'`])[\w./-]+\.(?:ts|tsx|js|jsx|py|sh|rb|go|json|ya?ml|toml|liquid|md)\b|(?:^|\n)[+-]\s|[A-Za-z_$][\w$]*\s*(?:\(|=)|\b(?:return|if|for|while|class|function|const|let|def|import)\b/m.test(sample));
+  if (procedural && !concreteFence)
+    gaps.push("CONCRETENESS: add a fenced example with a real command, file, code fragment, or diff (show the exact correct fix, never hand-wave)");
+  if (/##\s+pitfalls/i.test(b)) {
+    const section = (b.split(/##\s+pitfalls[^\n]*\n/i)[1] || "").split(/\n##\s+/)[0] || "";
+    const sectionLc = section.toLowerCase();
+    const tells = (sectionLc.match(/\btell\b|\bsymptom\b|at-a-glance|the signal|you'll see|gives it away/g) || []).length;
+    const pitfalls = section.match(/^\s*(?:[-*]|\d+\.|###)\s/gm)?.length || 0;
+    if (pitfalls >= 2 && tells < Math.min(2, pitfalls))
+      gaps.push("DIAGNOSTIC TELLS: give each Pitfall a one-line TELL — the at-a-glance symptom/error-string that identifies that failure class");
+  }
+  const destructive = /\b(rm\s+-rf?|reset\s+--hard|force[- ]?push|git\s+push\s+--force|--force\b|drop\s+(table|database)|db[: ]?migrate|delete\s+from|truncate\b|mv\s+[^\n]*\/)/i.test(b);
+  const safeFirst = /\b(back\s?up|snapshot|stash|dry[- ]?run|--dry-run|--check|copy first|inspect|diff before|reversible|safety net|to a branch|tag first)\b/i.test(lc);
+  if (destructive && !safeFirst)
+    gaps.push("SAFE-FIRST: add an explicit non-destructive safety net (backup/snapshot/dry-run/inspect) as the first step before any destructive command");
+  const idMatches = b.match(/\b(agent-[a-f0-9-]{8,}|[A-Za-z0-9_]+\.com\/[A-Za-z0-9_./-]+|sk-[A-Za-z0-9]{6,})\b/g) || [];
+  if (idMatches.length >= 3)
+    gaps.push("GENERALITY: this reads as a one-off (hardcoded ids/paths) — generalize to a class-level rule and demote the specifics to a worked example");
+  return gaps;
+}
+function auditSkills(skills) {
+  const flagged = [];
+  const gapCounts = {};
+  for (const s of skills) {
+    const gaps = sotaQualityGaps({ name: s.name, description: s.description ?? "Use when relevant", body: s.body });
+    if (gaps.length) {
+      flagged.push({ name: s.name, gaps });
+      for (const g of gaps) {
+        const k = g.split(":")[0];
+        gapCounts[k] = (gapCounts[k] || 0) + 1;
+      }
+    }
+  }
+  return { total: skills.length, clean: skills.length - flagged.length, flagged, gapCounts };
+}
+function crossShelfDuplicates(entries) {
+  const byName = new Map;
+  for (const e of entries) {
+    const a = byName.get(e.name) || [];
+    a.push({ shelf: e.shelf, body: e.body });
+    byName.set(e.name, a);
+  }
+  const out = [];
+  const norm = (b) => hash(b.replace(/<!--[\s\S]*?-->/g, "").replace(/\s+/g, " ").trim());
+  for (const [name, copies] of byName) {
+    if (copies.length < 2)
+      continue;
+    const divergent = new Set(copies.map((c) => norm(c.body))).size > 1;
+    out.push({ name, shelves: [...new Set(copies.map((c) => c.shelf))], divergent });
+  }
+  return out;
+}
+function effectivenessVerdict(input) {
+  if (input.staleAntiPattern)
+    return { verdict: "retire_candidate", reason: "the failure it targeted keeps recurring — skill isn't working" };
+  if (input.uses === 0 && input.ageDays > 14)
+    return { verdict: "retire_candidate", reason: `0 uses in ${input.ageDays}d — not earning its context` };
+  if (input.uses === 0)
+    return { verdict: "review", reason: "no observed use yet — keep if newly created" };
+  return { verdict: "keep", reason: `used ${input.uses}×` };
+}
+function renderWorkedExamples(worked) {
+  if (!worked || !worked.length)
+    return "";
+  const items = worked.map((w) => {
+    const sym = w.errMsg ? `**symptom:** \`${w.errMsg.replace(/\s+/g, " ").slice(0, 180)}\`` : "**symptom:** (captured)";
+    const fix = w.fix ? `
+  \`\`\`diff
+${w.fix.split(`
+`).slice(0, 10).map((l) => "  " + l).join(`
+`)}
+  \`\`\`` : "";
+    return `- ${sym}${fix}`;
+  }).join(`
+`);
+  return `
+
+## Worked examples (real, redacted)
+Real symptom→fix pairs captured across sessions (credentials/paths scrubbed):
+${items}
+`;
+}
+function buildDiffFragment(args) {
+  const oldS = typeof args?.old_string === "string" ? args.old_string : "";
+  const newS = typeof args?.new_string === "string" ? args.new_string : typeof args?.content === "string" ? args.content : "";
+  if (!oldS && !newS)
+    return;
+  const o = redactFragment(oldS, 6, 200);
+  const n = redactFragment(newS, 6, 200);
+  const lines = [];
+  for (const l of o ? o.split(`
+`) : [])
+    lines.push(`- ${l}`);
+  for (const l of n ? n.split(`
+`) : [])
+    lines.push(`+ ${l}`);
+  const out = lines.join(`
+`).slice(0, 400);
+  return out || undefined;
+}
+function draftWithRepair(c, repair) {
+  if (!repair)
+    return draftSkillFromCandidate(c);
+  const workedMd = renderWorkedExamples(repair.worked);
+  const errTag = repair.errClass && repair.errClass !== "inferred-failure" ? repair.errClass : "";
+  const s = repair.convs === 1 ? "" : "s";
+  if (repair.generalized) {
+    const name2 = slug(`recovering-from-${repair.trigger}`).slice(0, 64);
+    const exs = ((repair.examples?.length) ? repair.examples : [repair.verifyStep]).slice(0, 4);
+    const exList = exs.map((e) => `\`${e}\``).join(", ");
+    const worked = exs.map((e) => `- \`${e}\` failed${errTag ? ` (\`${errTag}\`)` : ""} → edit the **source** to fix the cause → re-ran \`${e}\` → PASS`).join(`
+`);
+    const description2 = `Use when a test or script run fails (seen with ${exList}) — recover by editing the source and re-running the same command, never blind-retrying. Triggers on any fix-then-recheck loop, in any language.`;
+    const body2 = `# ${name2}
+
+A recovery discipline distilled from ${repair.count} real fix-then-recheck loops across ${repair.convs} session${s} (${exList}). The command differs by language; the discipline does not.
+
+## When to use
+- A test/script run fails (assertion, traceback, or wrong output) and you need to recover.
+- You're about to re-run a failed command unchanged, hoping it passes.
+- Any edit→re-run loop, regardless of language.
+
+## Procedure (decision guide)
+1. Re-run the exact failing command and READ the concrete error — assertion, traceback, or a wrong printed value.
+2. Do NOT blind-retry. Edit the **source** (not the test) for that specific error — smallest change first.
+3. Re-run the SAME command; confirm it passes (exit 0).
+4. Run it once more to rule out a flaky / state-dependent pass.
+
+## Worked examples (observed)
+\`\`\`text
+${worked}
+\`\`\`
+
+## Pitfalls (symptom → fix)
+- TELL: re-running a failed command unchanged → it stays red; nothing passes until the source changes.
+- TELL: exit code 0 but wrong output (e.g. \`go run\` prints the wrong value) → the failure is in stdout, not the exit code; assert on the value, not just the exit.
+- TELL: editing the test to force a green → fix the code the test exercises, not the assertion.
+
+## Verification
+- [ ] The failure reproduced before the fix (you saw the real error).
+- [ ] The same command passes after the fix (exit 0).
+- [ ] A second independent run also passes.`;
+    return { name: name2, description: description2, body: body2 + workedMd };
+  }
+  const verb = slug(repair.verifyStep) || slug(c.key) || "a-recurring-check";
+  const name = slug(`recovering-from-${verb}-failures`).slice(0, 64);
+  const description = `Use when \`${repair.verifyStep}\` fails${errTag ? ` (\`${errTag}\`)` : ""} — recover by applying \`${repair.fixStep}\` then re-running \`${repair.verifyStep}\`, never blind-retrying. Observed ${repair.count}× across ${repair.convs} session${s}.`;
+  const body = `# ${name}
+
+A recovery discipline distilled from ${repair.count} real \`${repair.verifyStep}\` fix-then-recheck loop${repair.count === 1 ? "" : "s"} across ${repair.convs} session${s}. The fix is known — apply it instead of re-deriving.
+
+## When to use
+- \`${repair.verifyStep}\` fails${errTag ? ` with \`${errTag}\`` : ""}, or any check→fix→recheck loop on it.
+- You're about to re-run \`${repair.verifyStep}\` unchanged after it failed.
+
+## Procedure (decision guide)
+1. Run \`${repair.verifyStep}\` and read the concrete error${errTag ? ` (expect \`${errTag}\`)` : ""}.
+2. Do NOT blind-retry. Apply the known fix: \`${repair.fixStep}\` — addressing that specific error.
+3. Re-run \`${repair.verifyStep}\` to confirm it passes (exit 0).
+4. Run once more to rule out a flaky pass.
+
+## Worked example (observed)
+\`\`\`text
+${repair.verifyStep} failed${errTag ? ` (${errTag})` : ""} → ${repair.fixStep} → re-ran ${repair.verifyStep} → PASS  (${repair.count}× / ${repair.convs} session${s})
+\`\`\`
+
+## Pitfalls (symptom → fix)
+- TELL: re-running \`${repair.verifyStep}\` unchanged → stays red; it won't pass until \`${repair.fixStep}\` is applied.
+- TELL: treating the first failure as noise → it's signal; the fix is known from ${repair.count} prior recoveries.
+
+## Verification
+- [ ] \`${repair.verifyStep}\` failed before the fix (real error seen).
+- [ ] \`${repair.verifyStep}\` passes after \`${repair.fixStep}\` (exit 0).
+- [ ] A second run also passes.`;
+  return { name, description, body: body + workedMd };
 }
 // mods/ui.ts
 function summarizeReflectActions(events, mode = "compact") {
@@ -3479,6 +5426,7 @@ function renderAgentBoxScore(summary, options) {
   const lines = [
     `MUSCLE MEMORY · DECISION REPORT · ${stage}`,
     `INTERVENTIONS · ${summary.observedInterventions} served · ${summary.observedHelpfulInterventions} helped · ${summary.observedHarmfulInterventions} harmed${neutral}`,
+    ...summary.prescriptionsIssued > 0 ? [`ADHERENCE · ${summary.prescriptionsIssued} prescribed · ${summary.prescriptionsAdheredTo} invoked · ` + `${summary.prescriptionsNeverInvoked} never invoked · ${summary.prescriptionsUnclosed} unclosed` + (summary.prescriptionsNeverInvoked > 0 ? ` · the gap is handoff, not skill quality` : ``)] : [],
     `ABSTENTIONS · ${summary.observedAbstentions} · ${summary.observedSuccessfulAbstentions} succeeded unaided · ${summary.observedFailedAbstentions} failed`,
     `SKILLS · ${activeSkills} active · ${provenSkills} proven`
   ];
@@ -3488,8 +5436,8 @@ function renderAgentBoxScore(summary, options) {
     const result = play.result ? play.result.replace(/_/g, " ") : "outcome pending";
     lines.push(`LAST · ${decision} · ${friendlyRouteLabel(play.route)} · ${result}`);
   }
-  const pending = summary.latestPendingPossession;
-  const pendingDetail = pending ? ` · ${pending.taskClass}${pending.skill ? ` → ${pending.skill}` : ""}` : "";
+  const pending2 = summary.latestPendingPossession;
+  const pendingDetail = pending2 ? ` · ${pending2.taskClass}${pending2.skill ? ` → ${pending2.skill}` : ""}` : "";
   lines.push(`PENDING · ${summary.pendingDecisions}${pendingDetail}`);
   if (summary.openedDecisions === 0 && summary.scoreStatus !== "blocked")
     lines.push("START · declare a real procedural gap before a meaningful task");
@@ -3585,1545 +5533,54 @@ function renderMuscleMemoryPanel(state) {
   return resting();
 }
 
-// mods/invocation.ts
-import { appendFileSync as appendFileSync2, existsSync as existsSync6, mkdirSync as mkdirSync6, readFileSync as readFileSync6 } from "node:fs";
-import { randomUUID } from "node:crypto";
-import { dirname as dirname3, join as join7 } from "node:path";
+// mods/nudge.ts
+function closeNudgeEnabled(env = process.env) {
+  return String(env.MM_CLOSE_NUDGE || "").toLowerCase() !== "off";
+}
+function closeoutNudge(opts) {
+  return [
+    `
 
-// mods/instrument.ts
-import { createHash as createHash2, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { chmodSync, existsSync as existsSync5, mkdirSync as mkdirSync5, readFileSync as readFileSync5, realpathSync as realpathSync2, statSync, writeFileSync as writeFileSync5 } from "node:fs";
-import { homedir as homedir2 } from "node:os";
-import { dirname as dirname2, join as join6, resolve as resolve2, sep as sep2 } from "node:path";
-function defaultInstrumentKeyPath(home = homedir2()) {
-  return join6(home, ".letta", "instrument", "muscle-memory.key");
+<system-reminder>`,
+    `muscle-memory OPEN POSSESSION · the prescribed skill "${opts.skill}" just ran under possession ${opts.possessionId}.`,
+    "CLOSE THE LOOP NOW · call muscle_memory_close with:",
+    `  possession_id="${opts.possessionId}"`,
+    "  result = exactly ONE of: helped | harmed | neutral",
+    "  reason = one concrete sentence about the observed task outcome",
+    "The ledger reads ONLY the machine-readable result field — narrating the outcome in prose does not record it.",
+    "If the outcome is not observable yet, finish the task first, then close before this turn ends.",
+    "</system-reminder>"
+  ].join(`
+`);
 }
-function resolveInstrumentKeyPath(opts = {}) {
-  const env = opts.env ?? process.env;
-  const override = String(env.MM_INSTRUMENT_KEY_FILE || "").trim();
-  return override ? resolve2(override) : defaultInstrumentKeyPath(opts.home ?? homedir2());
+function prescribeNudgeEnabled(env = process.env) {
+  return String(env.MM_PRESCRIBE_NUDGE || "").toLowerCase() === "on";
 }
-function isInsideStateDir(candidate, stateDir) {
-  const real = (p) => {
-    try {
-      return realpathSync2(p);
-    } catch {
-      return resolve2(p);
-    }
-  };
-  const key = real(candidate);
-  const keyDir = real(dirname2(candidate));
-  const state = real(stateDir);
-  const under = (p) => p === state || p.startsWith(state + sep2);
-  return under(key) || under(keyDir);
-}
-function loadInstrumentKey(opts) {
-  const keyPath = opts.keyPath ?? resolveInstrumentKeyPath({ env: opts.env });
-  if (isInsideStateDir(keyPath, opts.stateDir))
-    return { available: false, reason: "key_inside_state_dir", keyPath };
-  if (!existsSync5(keyPath))
-    return { available: false, reason: "key_absent", keyPath };
-  const mode = statSync(keyPath).mode & 511;
-  if (mode !== 384)
-    return { available: false, reason: "key_permissions", keyPath, detail: mode.toString(8) };
-  const dirMode = statSync(dirname2(keyPath)).mode & 511;
-  if (dirMode & 63)
-    return { available: false, reason: "key_dir_permissions", keyPath, detail: dirMode.toString(8) };
-  const raw = readFileSync5(keyPath, "utf8").trim();
-  const [keyId, material] = raw.split(".");
-  if (!keyId || !material || !/^[a-z0-9]{8}$/.test(keyId))
-    return { available: false, reason: "key_malformed", keyPath };
-  return { available: true, keyId, secret: Buffer.from(material, "base64url"), keyPath };
-}
-function initInstrumentKey(opts) {
-  onKeyChanged();
-  const keyPath = opts.keyPath ?? resolveInstrumentKeyPath({ env: opts.env });
-  if (isInsideStateDir(keyPath, opts.stateDir)) {
-    throw new Error("refusing to create the instrument key inside the state directory; it must live outside the directory whose contents it authenticates");
-  }
-  const existing = loadInstrumentKey({ keyPath, stateDir: opts.stateDir });
-  if (existing.available)
-    return { created: false, keyId: existing.keyId, keyPath };
-  mkdirSync5(dirname2(keyPath), { recursive: true, mode: 448 });
-  chmodSync(dirname2(keyPath), 448);
-  const material = randomBytes(32);
-  const keyId = createHash2("sha256").update(material).digest("hex").slice(0, 8);
-  writeFileSync5(keyPath, `${keyId}.${material.toString("base64url")}
-`, { mode: 384 });
-  chmodSync(keyPath, 384);
-  return { created: true, keyId, keyPath };
-}
-function instrumentStatusLine(loaded) {
-  if (loaded.available)
-    return null;
-  if (loaded.reason === "key_inside_state_dir")
-    return "INSTRUMENT KEY REFUSED · key must not live inside the state directory · verified disabled (judged still works)";
-  if (loaded.reason === "key_absent")
-    return "INSTRUMENT UNAVAILABLE · run /muscle-memory instrument init · verified disabled (judged still works)";
-  return `INSTRUMENT KEY REFUSED · ${loaded.reason.replace(/_/g, " ")} · verified disabled (judged still works)`;
-}
-var noticeShown = false;
-var keyChangeListeners = [];
-function onInstrumentKeyChange(fn) {
-  keyChangeListeners.push(fn);
-}
-function onKeyChanged() {
-  noticeShown = false;
-  for (const fn of keyChangeListeners) {
-    try {
-      fn();
-    } catch {}
-  }
-}
-function instrumentSessionNotice(stateDir) {
-  if (noticeShown)
-    return null;
-  const line = instrumentStatusLine(loadInstrumentKey({ stateDir }));
-  if (!line)
-    return null;
-  noticeShown = true;
-  return line;
-}
-var EVIDENCE_FIELDS = [
-  "schema_version",
-  "key_id",
-  "nonce",
-  "timestamp",
-  "possession_id",
-  "decision_event_id",
-  "skill",
-  "task_id",
-  "task_class",
-  "manifest_sha256",
-  "baseline_sha256",
-  "baseline_captured_at",
-  "expected_sha256",
-  "final_sha256",
-  "invocation_receipt_id",
-  "verifier_id",
-  "verifier_version",
-  "target_rel",
-  "result_class"
-];
-function signInstrumentTuple(tuple, key) {
-  const bytes = Buffer.from(JSON.stringify(tuple, Object.keys(tuple).sort()), "utf8");
-  return `${key.keyId}:${createHmac("sha256", key.secret).update(bytes).digest("hex")}`;
-}
-function verifyInstrumentTuple(tuple, mac, key) {
-  if (typeof mac !== "string")
-    return false;
-  const expected = Buffer.from(signInstrumentTuple(tuple, key), "utf8");
-  const actual = Buffer.from(mac, "utf8");
-  return expected.length === actual.length && timingSafeEqual(actual, expected);
-}
-function canonicalEvidenceBytes(payload) {
-  if (!payload || typeof payload !== "object")
-    throw new Error("evidence payload must be an object");
-  const raw = payload;
-  if (Object.keys(raw).length !== EVIDENCE_FIELDS.length)
-    throw new Error("evidence payload field count mismatch");
-  const canonical = {};
-  for (const field of [...EVIDENCE_FIELDS].sort()) {
-    if (!(field in raw))
-      throw new Error(`evidence payload missing '${field}'`);
-    canonical[field] = raw[field];
-  }
-  return Buffer.from(JSON.stringify(canonical), "utf8");
-}
-function signEvidencePayload(payload, key) {
-  return createHmac("sha256", key.secret).update(canonicalEvidenceBytes(payload)).digest("hex");
-}
-function verifyEvidenceSignature(payload, signature, key) {
-  let expected;
-  try {
-    expected = Buffer.from(signEvidencePayload(payload, key), "hex");
-  } catch (error) {
-    return { ok: false, reason: error instanceof Error ? error.message : "malformed payload" };
-  }
-  if (typeof signature !== "string" || !/^[a-f0-9]{64}$/i.test(signature))
-    return { ok: false, reason: "malformed signature" };
-  const actual = Buffer.from(signature, "hex");
-  if (actual.length !== expected.length)
-    return { ok: false, reason: "length mismatch" };
-  return timingSafeEqual(actual, expected) ? { ok: true } : { ok: false, reason: "signature mismatch" };
-}
+function prescribeNudge(skillCount) {
+  return [
+    `
 
-// mods/invocation.ts
-var INVOCATION_LOG_PATH = join7(STATE_DIR, "invocations.jsonl");
-var SCHEMA = "mm.invocation.v1";
-var SAFE = /^[a-z0-9][a-z0-9._:-]{0,127}$/i;
-function invocationTuple(e) {
-  return {
-    schema: e.schema,
-    invocation_id: e.invocation_id,
-    possession_id: e.possession_id,
-    decision_event_id: e.decision_event_id,
-    skill: e.skill,
-    call_id: e.call_id,
-    started_at: e.started_at,
-    ended_at: e.ended_at,
-    nonce: e.nonce
-  };
-}
-function instrumentKey() {
-  const loaded = loadInstrumentKey({ stateDir: STATE_DIR });
-  return loaded.available ? { keyId: loaded.keyId, secret: loaded.secret } : null;
-}
-var unauthenticatedInvocationsSeen = 0;
-var pending = new Map;
-function appendInvocation(event) {
-  const key = instrumentKey();
-  const signed = key ? { ...event, mac: signInstrumentTuple(invocationTuple(event), key) } : event;
-  mkdirSync6(dirname3(INVOCATION_LOG_PATH), { recursive: true });
-  appendFileSync2(INVOCATION_LOG_PATH, `${JSON.stringify(signed)}
-`, "utf8");
-}
-function loadInvocations() {
-  if (!existsSync6(INVOCATION_LOG_PATH))
-    return [];
-  const rows = [];
-  for (const line of readFileSync6(INVOCATION_LOG_PATH, "utf8").split(`
-`)) {
-    const text = line.trim();
-    if (!text)
-      continue;
-    try {
-      const raw = JSON.parse(text);
-      if (raw?.schema !== SCHEMA)
-        continue;
-      if (!SAFE.test(String(raw.possession_id ?? "")) || !SAFE.test(String(raw.invocation_id ?? "")))
-        continue;
-      const key = instrumentKey();
-      if (!key || !raw.mac || !verifyInstrumentTuple(invocationTuple(raw), raw.mac, key)) {
-        unauthenticatedInvocationsSeen++;
-        continue;
-      }
-      rows.push(raw);
-    } catch {}
-  }
-  return rows;
-}
-function qualifyingInvocation(opts) {
-  const rows = (opts.invocations ?? loadInvocations()).filter((row) => row.possession_id === opts.possessionId && row.decision_event_id === opts.decisionEventId && row.skill === opts.skill && row.started_at >= opts.decisionAt && row.started_at >= opts.baselineAt && row.ended_at >= row.started_at && row.ended_at <= opts.verifiedAt);
-  return rows.length === 1 ? rows[0] : null;
-}
-function observeToolStart(event, now = Date.now()) {
-  if (String(event?.toolName ?? "") !== "Skill")
-    return;
-  const skill = String(event?.args?.skill ?? "");
-  const callId = String(event?.toolCallId ?? "");
-  if (!skill || !callId || !SAFE.test(callId))
-    return;
-  pending.set(callId, { skill, startedAt: now });
-  if (pending.size > 256) {
-    const first = pending.keys().next().value;
-    if (first !== undefined)
-      pending.delete(first);
-  }
-}
-function observeToolEnd(event, openPossessions, now = Date.now()) {
-  const callId = String(event?.toolCallId ?? "");
-  const started = callId ? pending.get(callId) : undefined;
-  if (!started)
-    return null;
-  pending.delete(callId);
-  const status = String(event?.status ?? "");
-  const ok = status ? status === "success" : event?.ok ?? !(event?.isError || event?.error);
-  if (!ok)
-    return null;
-  const matches = openPossessions.filter((row) => row.skill === started.skill);
-  if (matches.length !== 1)
-    return null;
-  const invocation = {
-    schema: SCHEMA,
-    invocation_id: `inv-${randomUUID()}`,
-    possession_id: matches[0].possession_id,
-    decision_event_id: matches[0].event_id,
-    skill: started.skill,
-    call_id: callId,
-    started_at: started.startedAt,
-    ended_at: now,
-    nonce: randomUUID()
-  };
-  appendInvocation(invocation);
-  return invocation;
-}
-
-// mods/possessions.ts
-import { createHash as createHash4 } from "node:crypto";
-import { appendFileSync as appendFileSync3, existsSync as existsSync8, mkdirSync as mkdirSync8, readFileSync as readFileSync8 } from "node:fs";
-import { dirname as dirname4, join as join9 } from "node:path";
-
-// mods/verification.ts
-import {
-  chmodSync as chmodSync2,
-  closeSync,
-  constants,
-  existsSync as existsSync7,
-  fstatSync,
-  lstatSync as lstatSync3,
-  mkdirSync as mkdirSync7,
-  openSync,
-  readFileSync as readFileSync7,
-  realpathSync as realpathSync3,
-  statSync as statSync2,
-  writeFileSync as writeFileSync6
-} from "node:fs";
-import { createHash as createHash3, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
-import { isAbsolute as isAbsolute2, join as join8, relative as relative2, resolve as resolve3, sep as sep3 } from "node:path";
-var EXACT_FILE_ADAPTER_ID = "mm.exact-file-sha256.v1";
-var VERIFICATION_TASK_SCHEMA = "mm.verification-task.exact-file.v1";
-var VERIFICATION_BINDING_SCHEMA = "mm.verification-binding.v1";
-var VERIFICATION_RECEIPT_SCHEMA = "mm.verification-receipt.v1";
-var VERIFICATION_TASK_DIR = join8(STATE_DIR, "verification-tasks");
-var ADAPTER_VERSION = "1";
-var ROOT_ID = "configured";
-var SAFE_SLUG = /^[a-z0-9][a-z0-9-]{0,79}$/;
-var SAFE_ID = /^[a-z0-9][a-z0-9._:-]{0,127}$/i;
-var SHA256 = /^[a-f0-9]{64}$/;
-var TASK_KEYS = new Set(["schema", "adapter_id", "adapter_version", "task_id", "task_class", "registered_at", "root_id", "root_identity_sha256", "target_rel", "expected_sha256", "baseline_sha256"]);
-var receiptCustody = new WeakSet;
-var BINDING_KEYS = new Set(["schema", "adapter_id", "adapter_version", "task_id", "task_class", "manifest_sha256"]);
-var RECEIPT_KEYS = new Set(["schema", "adapter_id", "adapter_version", "task_id", "task_class", "possession_id", "decision_event_id", "manifest_sha256", "artifact_sha256", "matched", "procedural_credit", "verified_at"]);
-function exactObject(input, keys, label) {
-  if (!input || typeof input !== "object" || Array.isArray(input))
-    throw new Error(`${label} must be an object`);
-  const raw = input;
-  for (const key of Object.keys(raw))
-    if (!keys.has(key))
-      throw new Error(`${label} has unexpected field '${key}'`);
-  for (const key of keys)
-    if (!(key in raw))
-      throw new Error(`${label} missing field '${key}'`);
-  return raw;
-}
-function normalizeVerificationBinding(input) {
-  const raw = exactObject(input, BINDING_KEYS, "verification binding");
-  if (raw.schema !== VERIFICATION_BINDING_SCHEMA || raw.adapter_id !== EXACT_FILE_ADAPTER_ID || raw.adapter_version !== ADAPTER_VERSION) {
-    throw new Error("verification binding identity mismatch");
-  }
-  assertSlug("verification task_id", raw.task_id);
-  assertSlug("verification task_class", raw.task_class);
-  assertSha("verification manifest_sha256", raw.manifest_sha256);
-  return { ...raw };
-}
-function normalizeInstrumentVerificationReceipt(input) {
-  const raw = exactObject(input, RECEIPT_KEYS, "verification receipt");
-  if (raw.schema !== VERIFICATION_RECEIPT_SCHEMA || raw.adapter_id !== EXACT_FILE_ADAPTER_ID || raw.adapter_version !== ADAPTER_VERSION) {
-    throw new Error("verification receipt identity mismatch");
-  }
-  assertSlug("verification task_id", raw.task_id);
-  assertSlug("verification task_class", raw.task_class);
-  assertId("verification possession_id", raw.possession_id);
-  assertId("verification decision_event_id", raw.decision_event_id);
-  assertSha("verification manifest_sha256", raw.manifest_sha256);
-  assertSha("verification artifact_sha256", raw.artifact_sha256);
-  if (typeof raw.matched !== "boolean")
-    throw new Error("verification matched must be boolean");
-  if (!Number.isSafeInteger(raw.verified_at) || Number(raw.verified_at) < 0)
-    throw new Error("verification verified_at must be a non-negative safe integer");
-  return { ...raw };
-}
-var hashBytes = (bytes) => createHash3("sha256").update(bytes).digest("hex");
-var rootIdentitySha256 = (root) => {
-  const st = statSync2(root);
-  return hashBytes(`${root}\x00${st.dev}\x00${st.ino}`);
-};
-var taskPath = (taskId) => join8(VERIFICATION_TASK_DIR, `${taskId}.json`);
-function assertSlug(label, value) {
-  if (typeof value !== "string" || !SAFE_SLUG.test(value))
-    throw new Error(`${label} must be a lowercase safe slug`);
-}
-function assertId(label, value) {
-  if (typeof value !== "string" || !SAFE_ID.test(value))
-    throw new Error(`${label} must be a bounded safe identifier`);
-}
-function assertSha(label, value) {
-  if (typeof value !== "string" || !SHA256.test(value))
-    throw new Error(`${label} must be a canonical lowercase SHA-256`);
-}
-function assertTargetRel(value) {
-  if (typeof value !== "string" || !value || value.length > 240)
-    throw new Error("target_rel must be a bounded relative path");
-  if (value.includes("\x00") || value.includes("\\") || isAbsolute2(value) || value.startsWith("./") || value.includes("//")) {
-    throw new Error("target_rel must be a canonical POSIX-style relative path");
-  }
-  const parts = value.split("/");
-  if (parts.some((part) => !part || part === "." || part === ".."))
-    throw new Error("target_rel cannot traverse or contain empty/dot segments");
-}
-function configuredRoot() {
-  const raw = String(process.env.MM_EXACT_FILE_ROOT || "").trim();
-  if (!raw || !isAbsolute2(raw))
-    throw new Error("MM_EXACT_FILE_ROOT must be configured as an absolute trusted root");
-  const root = realpathSync3(raw);
-  if (!statSync2(root).isDirectory())
-    throw new Error("MM_EXACT_FILE_ROOT must resolve to a directory");
-  return root;
-}
-function resolveTarget(root, targetRel, requireFile) {
-  assertTargetRel(targetRel);
-  const lexical = resolve3(root, targetRel);
-  const lexicalRel = relative2(root, lexical);
-  if (!lexicalRel || lexicalRel.startsWith("..") || isAbsolute2(lexicalRel))
-    throw new Error("target_rel escapes the trusted root");
-  if (!existsSync7(lexical)) {
-    if (requireFile)
-      throw new Error("verification target does not exist");
-    return lexical;
-  }
-  const lst = lstatSync3(lexical);
-  if (lst.isSymbolicLink())
-    throw new Error("verification target cannot be a symlink");
-  const target = realpathSync3(lexical);
-  if (target !== root && !target.startsWith(`${root}${sep3}`))
-    throw new Error("verification target resolves outside the trusted root");
-  if (!statSync2(target).isFile())
-    throw new Error("verification target must be a regular file");
-  return target;
-}
-function parseTaskBytes(bytes, path) {
-  let raw;
-  try {
-    raw = JSON.parse(bytes);
-  } catch {
-    throw new Error(`verification manifest is malformed: ${path}`);
-  }
-  if (!raw || typeof raw !== "object" || Array.isArray(raw))
-    throw new Error("verification manifest must be an object");
-  for (const key of Object.keys(raw))
-    if (!TASK_KEYS.has(key))
-      throw new Error(`verification manifest has unexpected field '${key}'`);
-  for (const key of TASK_KEYS)
-    if (!(key in raw))
-      throw new Error(`verification manifest missing field '${key}'`);
-  if (raw.schema !== VERIFICATION_TASK_SCHEMA)
-    throw new Error("verification manifest schema mismatch");
-  if (raw.adapter_id !== EXACT_FILE_ADAPTER_ID || raw.adapter_version !== ADAPTER_VERSION)
-    throw new Error("verification adapter identity mismatch");
-  if (raw.root_id !== ROOT_ID)
-    throw new Error("verification root identity mismatch");
-  assertSha("root_identity_sha256", raw.root_identity_sha256);
-  assertSlug("task_id", raw.task_id);
-  assertSlug("task_class", raw.task_class);
-  if (!Number.isSafeInteger(raw.registered_at) || Number(raw.registered_at) < 0)
-    throw new Error("registered_at must be a non-negative safe integer");
-  assertTargetRel(raw.target_rel);
-  assertSha("expected_sha256", raw.expected_sha256);
-  return raw;
-}
-function loadTask(taskId) {
-  assertSlug("task_id", taskId);
-  const path = taskPath(taskId);
-  if (!existsSync7(path))
-    throw new Error(`unknown verification task '${taskId}'`);
-  const mode = statSync2(path).mode & 511;
-  if ((mode & 146) !== 0)
-    throw new Error("verification manifest must remain read-only");
-  const bytes = readFileSync7(path, "utf8");
-  const task = parseTaskBytes(bytes, path);
-  if (task.task_id !== taskId)
-    throw new Error("verification manifest task_id mismatch");
-  return { task, path, bytes, manifestSha256: hashBytes(bytes) };
-}
-function createExactFileVerificationTask(input) {
-  assertSlug("task_id", input.taskId);
-  assertSlug("task_class", input.taskClass);
-  assertTargetRel(input.targetRel);
-  assertSha("expected_sha256", input.expectedSha256);
-  const registeredAt = input.registeredAt ?? Date.now();
-  if (!Number.isSafeInteger(registeredAt) || registeredAt < 0)
-    throw new Error("registeredAt must be a non-negative safe integer");
-  const root = configuredRoot();
-  const targetPath = resolveTarget(root, input.targetRel, true);
-  let baselineSha = null;
-  try {
-    baselineSha = hashBytes(readFileSync7(targetPath));
-  } catch {
-    baselineSha = null;
-  }
-  const task = {
-    schema: VERIFICATION_TASK_SCHEMA,
-    adapter_id: EXACT_FILE_ADAPTER_ID,
-    adapter_version: ADAPTER_VERSION,
-    task_id: input.taskId,
-    task_class: input.taskClass,
-    registered_at: registeredAt,
-    root_id: ROOT_ID,
-    root_identity_sha256: rootIdentitySha256(root),
-    target_rel: input.targetRel,
-    expected_sha256: input.expectedSha256,
-    baseline_sha256: baselineSha
-  };
-  const bytes = `${JSON.stringify(task)}
-`;
-  mkdirSync7(VERIFICATION_TASK_DIR, { recursive: true });
-  const path = taskPath(input.taskId);
-  writeFileSync6(path, bytes, { encoding: "utf8", flag: "wx", mode: 292 });
-  chmodSync2(path, 292);
-  const reread = readFileSync7(path, "utf8");
-  if (reread !== bytes)
-    throw new Error("verification manifest write custody mismatch");
-  return { path, manifestSha256: hashBytes(reread), task };
-}
-function bindExactFileVerificationTask(taskId) {
-  const { task, manifestSha256 } = loadTask(taskId);
-  return {
-    schema: VERIFICATION_BINDING_SCHEMA,
-    adapter_id: EXACT_FILE_ADAPTER_ID,
-    adapter_version: ADAPTER_VERSION,
-    task_id: task.task_id,
-    task_class: task.task_class,
-    manifest_sha256: manifestSha256
-  };
-}
-function isInstrumentVerificationReceipt(value) {
-  return !!value && typeof value === "object" && receiptCustody.has(value);
-}
-function isStoredVerificationReceiptBound(bindingInput, receiptInput, possessionId, decisionEventId) {
-  try {
-    const binding = normalizeVerificationBinding(bindingInput);
-    const receipt = normalizeInstrumentVerificationReceipt(receiptInput);
-    if (receipt.possession_id !== possessionId || receipt.decision_event_id !== decisionEventId)
-      return false;
-    if (binding.adapter_id !== receipt.adapter_id || binding.adapter_version !== receipt.adapter_version)
-      return false;
-    if (binding.task_id !== receipt.task_id || binding.task_class !== receipt.task_class)
-      return false;
-    if (binding.manifest_sha256 !== receipt.manifest_sha256)
-      return false;
-    const loaded = loadTask(binding.task_id);
-    const digestRelation = receipt.artifact_sha256 === loaded.task.expected_sha256;
-    return loaded.manifestSha256 === binding.manifest_sha256 && loaded.task.task_id === binding.task_id && loaded.task.task_class === binding.task_class && receipt.matched === digestRelation;
-  } catch {
-    return false;
-  }
-}
-function verifyExactFilePossession(decision) {
-  if (decision.action !== "prescribe")
-    throw new Error("exact-file verification supports prescribed-skill possessions only");
-  const binding = decision.verification;
-  if (!binding)
-    throw new Error("possession has no pre-work verification binding");
-  if (binding.schema !== VERIFICATION_BINDING_SCHEMA || binding.adapter_id !== EXACT_FILE_ADAPTER_ID || binding.adapter_version !== ADAPTER_VERSION) {
-    throw new Error("possession verification binding is not the exact-file adapter");
-  }
-  const { task, manifestSha256 } = loadTask(binding.task_id);
-  {
-    const bound = loadPossessionEvents().filter((row) => row.type === "decision" && row.verification?.task_id === binding.task_id);
-    if (bound.some((row) => row.possession_id !== decision.possession_id)) {
-      throw new Error("verification task_id is already bound to a different possession");
-    }
-  }
-  if (manifestSha256 !== binding.manifest_sha256)
-    throw new Error("verification manifest hash mismatch after decision binding");
-  if (task.task_class !== binding.task_class || decision.task_class !== task.task_class)
-    throw new Error("verification task_class mismatch");
-  if (task.task_id !== binding.task_id)
-    throw new Error("verification task_id mismatch");
-  if (task.registered_at > decision.ts)
-    throw new Error("verification task must be registered before the decision");
-  const root = configuredRoot();
-  if (rootIdentitySha256(root) !== task.root_identity_sha256)
-    throw new Error("configured verification root changed after task registration");
-  const target = resolveTarget(root, task.target_rel, true);
-  if (typeof constants.O_NOFOLLOW !== "number" || constants.O_NOFOLLOW === 0) {
-    throw new Error("exact-file verification is unsupported on this platform: O_NOFOLLOW unavailable");
-  }
-  const fd = openSync(target, constants.O_RDONLY | constants.O_NOFOLLOW);
-  let bytes;
-  try {
-    const before = fstatSync(fd);
-    if (!before.isFile())
-      throw new Error("verification target must remain a regular file");
-    const openedReal = realpathSync3(target);
-    if (openedReal !== root && !openedReal.startsWith(`${root}${sep3}`))
-      throw new Error("verification target escaped the trusted root while opening");
-    const openedPathStat = statSync2(openedReal);
-    if (openedPathStat.dev !== before.dev || openedPathStat.ino !== before.ino)
-      throw new Error("verification target changed before hashing");
-    bytes = readFileSync7(fd);
-    const after = fstatSync(fd);
-    const afterReal = realpathSync3(target);
-    const afterPathStat = statSync2(afterReal);
-    if (afterReal !== openedReal || afterPathStat.dev !== after.dev || afterPathStat.ino !== after.ino || before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size || before.mtimeMs !== after.mtimeMs) {
-      throw new Error("verification target changed while hashing");
-    }
-  } finally {
-    closeSync(fd);
-  }
-  const artifactSha256 = hashBytes(bytes);
-  const matched = timingSafeEqual2(Buffer.from(artifactSha256, "hex"), Buffer.from(task.expected_sha256, "hex"));
-  const preExisting = task.baseline_sha256 !== null && task.baseline_sha256 === task.expected_sha256;
-  const verifiedAt = Date.now();
-  const invocation = decision.skill ? qualifyingInvocation({
-    possessionId: decision.possession_id,
-    decisionEventId: decision.event_id,
-    skill: decision.skill,
-    baselineAt: task.registered_at,
-    decisionAt: decision.ts,
-    verifiedAt
-  }) : null;
-  const proceduralCredit = matched && !preExisting && invocation !== null;
-  const verification = {
-    schema: VERIFICATION_RECEIPT_SCHEMA,
-    adapter_id: EXACT_FILE_ADAPTER_ID,
-    adapter_version: ADAPTER_VERSION,
-    task_id: task.task_id,
-    task_class: task.task_class,
-    possession_id: decision.possession_id,
-    decision_event_id: decision.event_id,
-    manifest_sha256: manifestSha256,
-    artifact_sha256: artifactSha256,
-    matched,
-    procedural_credit: proceduralCredit,
-    verified_at: verifiedAt
-  };
-  receiptCustody.add(verification);
-  const result = !matched ? "harmed" : proceduralCredit ? "helped" : "neutral";
-  const reason = !matched ? "exact-file SHA-256 did not match the bound manifest" : proceduralCredit ? "exact-file SHA-256 was wrong at registration and matches the bound manifest now" : preExisting ? "exact-file SHA-256 matched the bound manifest, but the target already matched before the prescription — artifact verified, no procedural credit" : "exact-file SHA-256 matches now, but no invocation of the prescribed skill was observed — artifact verified, no procedural credit";
-  return {
-    result,
-    evidence_tier: "verified",
-    reason,
-    evidence_ref: `adapter:${EXACT_FILE_ADAPTER_ID}:${manifestSha256}`,
-    verification,
-    artifact_verified: matched,
-    procedural_credit: proceduralCredit,
-    evidence_context: {
-      baselineSha256: task.baseline_sha256 ?? "",
-      baselineCapturedAt: task.registered_at,
-      invocationReceiptId: invocation?.invocation_id ?? "",
-      skill: decision.skill ?? ""
-    }
-  };
-}
-
-// mods/possessions.ts
-var POSSESSION_LEDGER_PATH = join9(STATE_DIR, "possessions.jsonl");
-var keyCache;
-function currentInstrumentKey() {
-  if (keyCache)
-    return keyCache;
-  const loaded = loadInstrumentKey({ stateDir: STATE_DIR });
-  keyCache = loaded.available ? { keyId: loaded.keyId, secret: loaded.secret } : null;
-  return keyCache;
-}
-onInstrumentKeyChange(() => {
-  keyCache = undefined;
-});
-var POSSESSION_SCHEMA = "mm.possession.v1";
-function authenticateStoredEvidence(input) {
-  const deny = (reason) => ({ authenticated: false, reason, artifactVerified: false, proceduralCredit: false, resultClass: "neutral" });
-  const payload = input.evidence?.payload;
-  if (!input.evidence || !payload)
-    return deny("legacy_unsigned");
-  if (!input.key)
-    return deny("key_unavailable");
-  if (payload.key_id !== input.key.keyId)
-    return deny("unknown_key");
-  if (input.evidence.signature === undefined)
-    return deny("missing_signature");
-  if (!verifyEvidenceSignature(payload, input.evidence.signature, input.key).ok)
-    return deny("bad_signature");
-  const artifactVerified = payload.final_sha256 === payload.expected_sha256;
-  const hadGap = payload.baseline_sha256 !== payload.expected_sha256;
-  const invoked = !!String(payload.invocation_receipt_id || "").trim();
-  const invocationAfterBaseline = input.invocationObservedAt === undefined || input.invocationObservedAt >= Number(payload.baseline_captured_at);
-  let proceduralReason;
-  if (!hadGap)
-    proceduralReason = "no_gap_to_close";
-  else if (!invoked)
-    proceduralReason = "no_observed_invocation";
-  else if (!invocationAfterBaseline)
-    proceduralReason = "invocation_precedes_baseline";
-  else if (!artifactVerified)
-    proceduralReason = "artifact_mismatch";
-  const proceduralCredit = proceduralReason === undefined;
-  const resultClass = artifactVerified ? proceduralCredit ? String(payload.result_class) : "neutral" : invoked ? "harmed" : "neutral";
-  return { authenticated: true, artifactVerified, proceduralCredit, proceduralReason, resultClass };
-}
-var EFFICIENCY_CONTRACT = Object.freeze({
-  id: "mm.efficiency.v2",
-  numerator: "same_tier_helped_prescriptions + same_tier_successful_abstentions",
-  denominator: "same_tier_scored_evaluated_decisions",
-  neutralPolicy: "neutral_prescriptions_remain_in_denominator",
-  harmPolicy: "harmful_prescriptions_remain_in_denominator_and_report_separately",
-  verifiedPolicy: "agent_callers_cannot_self_award_verified; exact-file adapter binds pre-work manifest + instrument receipt",
-  earnedMinute: "same_tier_helped_prescription | same_tier_successful_abstention; useful routing decision, not literal skill invocation",
-  repeatCapPerTaskClass: 3,
-  minimumUniqueTaskClasses: 3,
-  minimumClosureRatePct: 80,
-  percentageDisplayThreshold: 10
-});
-var DECISION_ACTIONS = new Set(["prescribe", "abstain"]);
-var DECISION_ROUTES = new Set(["matched", "no-gap", "weak-match", "ambiguous", "negative-field", "no-safe-match"]);
-var DIFFICULTIES = new Set(["routine", "standard", "hard", "unknown"]);
-var OUTCOMES = new Set(["helped", "harmed", "neutral", "succeeded_unaided", "failed_unaided"]);
-var EVIDENCE_TIERS = new Set(["verified", "human_judged", "agent_judged"]);
-var LIFECYCLE_ACTIONS = new Set(["learn", "update", "graduate", "retire", "restore"]);
-var SAFE_ID2 = /^[a-z0-9][a-z0-9._:-]{0,127}$/i;
-var SAFE_SLUG2 = /^[a-z0-9][a-z0-9-]{0,79}$/;
-var emptyExclusions = () => ({
-  malformed_json: 0,
-  invalid_schema: 0,
-  unknown_enum: 0,
-  duplicate_event_id: 0,
-  duplicate_decision: 0,
-  orphan_outcome: 0,
-  duplicate_outcome: 0,
-  invalid_supersession: 0,
-  incompatible_outcome: 0
-});
-function assertSafeId(label, value) {
-  if (typeof value !== "string" || !SAFE_ID2.test(value))
-    throw new Error(`${label} must be a bounded safe identifier`);
-}
-function assertSafeSlug(label, value) {
-  if (typeof value !== "string" || !SAFE_SLUG2.test(value))
-    throw new Error(`${label} must be a lowercase slug, not raw task text`);
-}
-function compatible(action, result) {
-  return action === "prescribe" ? result === "helped" || result === "harmed" || result === "neutral" : result === "succeeded_unaided" || result === "failed_unaided";
-}
-function normalizeEvent(input, mode) {
-  if (!input || typeof input !== "object")
-    throw new Error("event must be an object");
-  const event = input;
-  if (event.schema !== POSSESSION_SCHEMA)
-    throw new Error(`schema must be ${POSSESSION_SCHEMA}`);
-  assertSafeId("event_id", event.event_id);
-  assertSafeId("possession_id", event.possession_id);
-  if (!Number.isFinite(event.ts) || event.ts < 0)
-    throw new Error("ts must be a non-negative number");
-  if (event.type === "decision") {
-    if (!DECISION_ACTIONS.has(event.action))
-      throw new Error("action must be prescribe|abstain");
-    if (!DECISION_ROUTES.has(event.route))
-      throw new Error("route is not a known decision route");
-    const difficulty = event.difficulty ?? "unknown";
-    if (!DIFFICULTIES.has(difficulty))
-      throw new Error("difficulty must be routine|standard|hard|unknown");
-    assertSafeSlug("task_class", event.task_class);
-    if (event.skill !== undefined)
-      assertSafeSlug("skill", event.skill);
-    if (event.action === "prescribe" && !event.skill)
-      throw new Error("prescribe decisions require a skill");
-    if (event.action === "abstain" && event.skill)
-      throw new Error("abstain decisions cannot inject a skill");
-    const verification = event.verification === undefined ? undefined : normalizeVerificationBinding(event.verification);
-    if (verification && event.action !== "prescribe")
-      throw new Error("verification binding supports prescribed-skill possessions only");
-    if (verification && verification.task_class !== event.task_class)
-      throw new Error("verification binding task_class must match the decision");
-    return {
-      schema: POSSESSION_SCHEMA,
-      event_id: event.event_id,
-      possession_id: event.possession_id,
-      ts: event.ts,
-      type: "decision",
-      agent: redactFragment(String(event.agent || "agent"), 1, 80),
-      model: redactFragment(String(event.model || "unknown"), 1, 120),
-      action: event.action,
-      task_class: event.task_class,
-      difficulty,
-      eligible: true,
-      gap_observed: event.gap_observed === true,
-      route: event.route,
-      ...event.skill ? { skill: event.skill } : {},
-      ...verification ? { verification } : {}
-    };
-  }
-  if (event.type === "outcome") {
-    if (!OUTCOMES.has(event.result))
-      throw new Error("result is not a known outcome");
-    if (!EVIDENCE_TIERS.has(event.evidence_tier))
-      throw new Error("evidence_tier is not known");
-    if (mode === "caller" && event.evidence_tier === "verified") {
-      throw new Error("instrument-derived verification is required; callers must use human_judged or agent_judged");
-    }
-    if (event.evidence_tier !== "verified" && event.verification !== undefined) {
-      throw new Error("judged outcomes cannot carry a verification receipt");
-    }
-    let verification;
-    if (event.evidence_tier === "verified" && event.verification !== undefined) {
-      verification = normalizeInstrumentVerificationReceipt(event.verification);
-    }
-    if (mode === "instrument") {
-      if (event.evidence_tier !== "verified" || !verification || !isInstrumentVerificationReceipt(event.verification)) {
-        throw new Error("instrument-owned receipt is required for verified append");
-      }
-    }
-    if (!String(event.reason || "").trim())
-      throw new Error("outcomes require a reason");
-    if (event.supersedes_event_id)
-      assertSafeId("supersedes_event_id", event.supersedes_event_id);
-    return {
-      schema: POSSESSION_SCHEMA,
-      event_id: event.event_id,
-      possession_id: event.possession_id,
-      ts: event.ts,
-      type: "outcome",
-      result: event.result,
-      evidence_tier: event.evidence_tier,
-      reason: redactFragment(String(event.reason), 4, 320),
-      ...event.evidence_ref ? { evidence_ref: redactFragment(String(event.evidence_ref), 2, 180) } : {},
-      ...event.supersedes_event_id ? { supersedes_event_id: event.supersedes_event_id } : {},
-      ...event.evidence ? { evidence: event.evidence } : {},
-      ...verification ? { verification } : {}
-    };
-  }
-  if (event.type === "lifecycle") {
-    if (!LIFECYCLE_ACTIONS.has(event.action))
-      throw new Error("lifecycle action is not known");
-    assertSafeSlug("skill", event.skill);
-    if (!String(event.reason || "").trim())
-      throw new Error("lifecycle events require a reason");
-    return {
-      schema: POSSESSION_SCHEMA,
-      event_id: event.event_id,
-      possession_id: event.possession_id,
-      ts: event.ts,
-      type: "lifecycle",
-      action: event.action,
-      skill: event.skill,
-      reason: redactFragment(String(event.reason), 4, 320)
-    };
-  }
-  throw new Error("type is not a known possession event");
-}
-function classifyNormalizationError(error, raw) {
-  const message = String(error?.message || error);
-  if (message.includes("schema"))
-    return "invalid_schema";
-  if (message.includes("action") || message.includes("route") || message.includes("difficulty") || message.includes("result") || message.includes("evidence_tier") || message.includes("type"))
-    return "unknown_enum";
-  return raw?.type === "decision" ? "unknown_enum" : "invalid_schema";
-}
-function inspectPossessionLedger() {
-  const rawText = existsSync8(POSSESSION_LEDGER_PATH) ? readFileSync8(POSSESSION_LEDGER_PATH, "utf8") : "";
-  const lines = rawText.split(`
-`).filter((line) => line.trim());
-  const exclusions = emptyExclusions();
-  const excludedPossessions = new Set;
-  const excludedDecisionPossessions = new Set;
-  const seenEventIds = new Set;
-  const events = [];
-  const decisions = new Map;
-  const activeOutcomes = new Map;
-  let malformedRows = 0;
-  let unknownEnumRows = 0;
-  for (const line of lines) {
-    let raw;
-    try {
-      raw = JSON.parse(line);
-    } catch {
-      malformedRows++;
-      exclusions.malformed_json++;
-      continue;
-    }
-    let event;
-    try {
-      event = normalizeEvent(raw, "read");
-    } catch (error) {
-      const reason = classifyNormalizationError(error, raw);
-      exclusions[reason]++;
-      if (reason === "unknown_enum")
-        unknownEnumRows++;
-      if (typeof raw?.possession_id === "string") {
-        excludedPossessions.add(raw.possession_id);
-        if (raw?.type === "decision")
-          excludedDecisionPossessions.add(raw.possession_id);
-      }
-      continue;
-    }
-    if (seenEventIds.has(event.event_id)) {
-      exclusions.duplicate_event_id++;
-      excludedPossessions.add(event.possession_id);
-      if (event.type === "decision" || decisions.has(event.possession_id))
-        excludedDecisionPossessions.add(event.possession_id);
-      continue;
-    }
-    seenEventIds.add(event.event_id);
-    if (event.type === "decision") {
-      if (decisions.has(event.possession_id)) {
-        exclusions.duplicate_decision++;
-        excludedPossessions.add(event.possession_id);
-        excludedDecisionPossessions.add(event.possession_id);
-        continue;
-      }
-      decisions.set(event.possession_id, event);
-      events.push(event);
-      continue;
-    }
-    if (event.type === "outcome") {
-      const decision = decisions.get(event.possession_id);
-      if (!decision) {
-        exclusions.orphan_outcome++;
-        excludedPossessions.add(event.possession_id);
-        continue;
-      }
-      if (!compatible(decision.action, event.result)) {
-        exclusions.incompatible_outcome++;
-        excludedPossessions.add(event.possession_id);
-        excludedDecisionPossessions.add(event.possession_id);
-        continue;
-      }
-      const active = activeOutcomes.get(event.possession_id);
-      if (active) {
-        if (!event.supersedes_event_id) {
-          exclusions.duplicate_outcome++;
-          excludedPossessions.add(event.possession_id);
-          excludedDecisionPossessions.add(event.possession_id);
-          continue;
-        }
-        if (event.supersedes_event_id !== active.event_id) {
-          exclusions.invalid_supersession++;
-          excludedPossessions.add(event.possession_id);
-          excludedDecisionPossessions.add(event.possession_id);
-          continue;
-        }
-      } else if (event.supersedes_event_id) {
-        exclusions.invalid_supersession++;
-        excludedPossessions.add(event.possession_id);
-        excludedDecisionPossessions.add(event.possession_id);
-        continue;
-      }
-      activeOutcomes.set(event.possession_id, event);
-      events.push(event);
-      continue;
-    }
-    events.push(event);
-  }
-  const excludedRows = Object.values(exclusions).reduce((sum, count) => sum + count, 0);
-  const blocked = excludedRows > 0;
-  return {
-    events,
-    integrity: {
-      blocked,
-      ledgerSha256: createHash4("sha256").update(rawText).digest("hex"),
-      rowCount: lines.length,
-      validRows: events.length,
-      malformedRows,
-      unknownEnumRows,
-      excludedRows,
-      excludedPossessionIds: [...excludedPossessions].sort(),
-      excludedDecisionPossessionIds: [...excludedDecisionPossessions].sort(),
-      orphanOutcomes: exclusions.orphan_outcome,
-      exclusionReasons: exclusions
-    }
-  };
-}
-function appendPossessionEvent(input, mode) {
-  const clean = normalizeEvent(input, mode);
-  const inspection = inspectPossessionLedger();
-  if (inspection.integrity.blocked)
-    throw new Error("ledger integrity is BLOCKED; repair custody before appending");
-  if (inspection.events.some((row) => row.event_id === clean.event_id))
-    throw new Error(`duplicate event_id '${clean.event_id}'`);
-  const decisions = inspection.events.filter((row) => row.type === "decision");
-  const outcomes = inspection.events.filter((row) => row.type === "outcome");
-  if (clean.type === "decision" && decisions.some((row) => row.possession_id === clean.possession_id)) {
-    throw new Error(`decision already exists for possession '${clean.possession_id}'`);
-  }
-  if (clean.type === "outcome") {
-    const decision = decisions.find((row) => row.possession_id === clean.possession_id);
-    if (!decision)
-      throw new Error(`cannot record orphan outcome for '${clean.possession_id}'`);
-    if (!compatible(decision.action, clean.result))
-      throw new Error(`result '${clean.result}' is incompatible with decision '${decision.action}'`);
-    if (clean.evidence_tier === "verified") {
-      if (!decision.verification || !clean.verification || !isStoredVerificationReceiptBound(decision.verification, clean.verification, decision.possession_id, decision.event_id)) {
-        throw new Error("verified outcome is not bound to the possession decision and stored manifest");
-      }
-      const expectedResult = !clean.verification.matched ? "harmed" : clean.verification.procedural_credit ? "helped" : "neutral";
-      if (clean.result !== expectedResult) {
-        throw new Error("verified outcome result does not match the instrument receipt");
-      }
-    }
-    const active = outcomes.filter((row) => row.possession_id === clean.possession_id).at(-1);
-    if (active && !clean.supersedes_event_id)
-      throw new Error(`active outcome already exists for '${clean.possession_id}'`);
-    if (active && clean.supersedes_event_id !== active.event_id)
-      throw new Error("supersedes_event_id must bind the active outcome");
-    if (!active && clean.supersedes_event_id)
-      throw new Error("cannot supersede a missing outcome");
-  }
-  mkdirSync8(dirname4(POSSESSION_LEDGER_PATH), { recursive: true });
-  appendFileSync3(POSSESSION_LEDGER_PATH, `${JSON.stringify(clean)}
-`, "utf8");
-  return clean;
-}
-function recordPossessionEvent(input) {
-  return appendPossessionEvent(input, "caller");
-}
-function recordInstrumentVerifiedOutcome(input, context) {
-  const key = currentInstrumentKey();
-  const receipt = input.verification;
-  if (receipt && typeof receipt === "object" && receipt.procedural_credit === true) {
-    const namedId = String(context?.invocationReceiptId ?? "").trim();
-    if (!namedId)
-      throw new Error("procedural credit requires an observed invocation receipt id at the signing boundary");
-    const owned = loadInvocations().some((row) => row.invocation_id === namedId && row.possession_id === input.possession_id);
-    if (!owned)
-      throw new Error("procedural credit names an invocation that is not an authenticated observation of this possession");
-  }
-  if (key && receipt && typeof receipt === "object") {
-    const r = receipt;
-    const payload = {
-      schema_version: "mm.evidence.v1",
-      key_id: key.keyId,
-      nonce: `${input.possession_id}:${input.event_id}`,
-      timestamp: input.ts,
-      possession_id: input.possession_id,
-      decision_event_id: String(r.decision_event_id ?? ""),
-      skill: String(context?.skill ?? ""),
-      task_id: String(r.task_id ?? ""),
-      task_class: String(r.task_class ?? ""),
-      manifest_sha256: String(r.manifest_sha256 ?? ""),
-      baseline_sha256: String(context?.baselineSha256 ?? ""),
-      baseline_captured_at: Number(context?.baselineCapturedAt ?? 0),
-      expected_sha256: String(r.artifact_sha256 ?? ""),
-      final_sha256: r.matched ? String(r.artifact_sha256 ?? "") : "",
-      invocation_receipt_id: String(context?.invocationReceiptId ?? ""),
-      verifier_id: String(r.adapter_id ?? ""),
-      verifier_version: String(r.adapter_version ?? ""),
-      target_rel: String(r.target_rel ?? ""),
-      result_class: input.result
-    };
-    const signed = { ...input, evidence: { payload, signature: signEvidencePayload(payload, key) } };
-    return appendPossessionEvent(signed, "instrument");
-  }
-  return appendPossessionEvent(input, "instrument");
-}
-function loadPossessionEvents() {
-  return inspectPossessionLedger().events;
-}
-var pct = (good, total) => total ? Math.round(100 * good / total) : null;
-var cleanIntegrity = () => ({
-  blocked: false,
-  ledgerSha256: createHash4("sha256").update("").digest("hex"),
-  rowCount: 0,
-  validRows: 0,
-  malformedRows: 0,
-  unknownEnumRows: 0,
-  excludedRows: 0,
-  excludedPossessionIds: [],
-  excludedDecisionPossessionIds: [],
-  orphanOutcomes: 0,
-  exclusionReasons: emptyExclusions()
-});
-var safePossessionView = (decision, outcome) => ({
-  possessionId: decision.possession_id,
-  taskClass: decision.task_class,
-  difficulty: decision.difficulty ?? "unknown",
-  action: decision.action,
-  route: decision.route,
-  ...decision.skill ? { skill: decision.skill } : {},
-  openedAt: decision.ts,
-  ...outcome ? {
-    result: outcome.result,
-    evidence: claimBearingVerdict(decision, outcome).verified ? "bound_verified" : "judged"
-  } : { evidence: "none" }
-});
-function pendingPossessionViews(events) {
-  const outcomes = new Set(events.filter((event) => event.type === "outcome").map((event) => event.possession_id));
-  return events.filter((event) => event.type === "decision" && !outcomes.has(event.possession_id)).sort((a, b) => b.ts - a.ts).map((decision) => safePossessionView(decision));
-}
-function claimBearingVerdict(decision, outcome) {
-  if (outcome.evidence_tier !== "verified")
-    return { verified: false, proceduralCredit: false };
-  const key = currentInstrumentKey();
-  const verdict = authenticateStoredEvidence({ evidence: outcome.evidence, key });
-  if (!verdict.authenticated)
-    return { verified: false, proceduralCredit: false, downgrade: verdict.reason };
-  const structurallyBound = !!decision.verification && !!outcome.verification && isStoredVerificationReceiptBound(decision.verification, outcome.verification, decision.possession_id, decision.event_id);
-  if (!structurallyBound)
-    return { verified: false, proceduralCredit: false, downgrade: "bad_signature" };
-  const payload = outcome.evidence?.payload ?? {};
-  const receipt = outcome.verification;
-  if (receipt.procedural_credit !== undefined && typeof receipt.procedural_credit !== "boolean") {
-    return { verified: false, proceduralCredit: false, downgrade: "evidence_transplanted" };
-  }
-  const sameRow = String(payload.possession_id ?? "") === decision.possession_id && String(payload.decision_event_id ?? "") === decision.event_id;
-  const sameInstrumentEvent = String(payload.task_id ?? "") === String(receipt.task_id ?? "") && String(payload.manifest_sha256 ?? "") === String(receipt.manifest_sha256 ?? "") && String(payload.expected_sha256 ?? "") === String(receipt.artifact_sha256 ?? "");
-  if (!sameRow || !sameInstrumentEvent) {
-    return { verified: false, proceduralCredit: false, downgrade: "evidence_transplanted" };
-  }
-  const attributedSkill = String(payload.skill ?? "");
-  const attributedResult = String(payload.result_class ?? "");
-  const skillDisagrees = !!decision.skill && attributedSkill !== decision.skill;
-  const resultDisagrees = !!outcome.result && !!attributedResult && attributedResult !== outcome.result;
-  if (skillDisagrees || resultDisagrees) {
-    return { verified: false, proceduralCredit: false, downgrade: "attribution_mismatch" };
-  }
-  const namedInvocation = String(payload.invocation_receipt_id ?? "").trim();
-  if (namedInvocation) {
-    const owned = loadInvocations().some((row) => row.invocation_id === namedInvocation && row.possession_id === decision.possession_id);
-    if (!owned)
-      return { verified: false, proceduralCredit: false, downgrade: "evidence_transplanted" };
-  }
-  return { verified: true, proceduralCredit: verdict.proceduralCredit, proceduralReason: verdict.proceduralReason, attributedSkill };
-}
-function summarizePossessions(events, integrity = cleanIntegrity()) {
-  const decisions = events.filter((event) => event.type === "decision");
-  const activeOutcomes = new Map;
-  for (const event of events)
-    if (event.type === "outcome")
-      activeOutcomes.set(event.possession_id, event);
-  const excludedIds = new Set(integrity.excludedDecisionPossessionIds);
-  const repeatCounts = new Map;
-  const difficultyStrata = { routine: 0, standard: 0, hard: 0, unknown: 0 };
-  let evaluatedDecisions = 0;
-  let scoredDecisions = 0;
-  let repeatCappedDecisions = 0;
-  let observedInterventions = 0;
-  let observedHelpfulInterventions = 0;
-  let observedHarmfulInterventions = 0;
-  let observedNeutralInterventions = 0;
-  let observedAbstentions = 0;
-  let observedSuccessfulAbstentions = 0;
-  let observedFailedAbstentions = 0;
-  let helpfulInterventions = 0;
-  let harmfulInterventions = 0;
-  let neutralInterventions = 0;
-  let successfulAbstentions = 0;
-  let failedAbstentions = 0;
-  let verifiedSuccessfulAbstentions = 0;
-  let verifiedEvaluatedAbstentions = 0;
-  let judgedSuccessfulAbstentions = 0;
-  let judgedEvaluatedAbstentions = 0;
-  let judgedOnlyAbstentions = 0;
-  let interferenceAbstentions = 0;
-  let verifiedDecisions = 0;
-  let judgedDecisions = 0;
-  let verifiedGood = 0;
-  let judgedGood = 0;
-  let unboundVerifiedDowngraded = 0;
-  let transplantDemoted = 0;
-  let attributionMismatch = 0;
-  let verifiedNeutralDecisions = 0;
-  let prescribedEvaluated = 0;
-  for (const decision of decisions) {
-    const difficulty = decision.difficulty ?? "unknown";
-    difficultyStrata[difficulty]++;
-    if (excludedIds.has(decision.possession_id))
-      continue;
-    const outcome = activeOutcomes.get(decision.possession_id);
-    if (!outcome || !compatible(decision.action, outcome.result))
-      continue;
-    evaluatedDecisions++;
-    if (decision.action === "prescribe") {
-      observedInterventions++;
-      if (outcome.result === "helped")
-        observedHelpfulInterventions++;
-      if (outcome.result === "harmed")
-        observedHarmfulInterventions++;
-      if (outcome.result === "neutral")
-        observedNeutralInterventions++;
-    } else {
-      observedAbstentions++;
-      if (outcome.result === "succeeded_unaided")
-        observedSuccessfulAbstentions++;
-      if (outcome.result === "failed_unaided")
-        observedFailedAbstentions++;
-    }
-    const seen = repeatCounts.get(decision.task_class) || 0;
-    const scoreEligible = seen < EFFICIENCY_CONTRACT.repeatCapPerTaskClass;
-    repeatCounts.set(decision.task_class, seen + 1);
-    if (!scoreEligible) {
-      repeatCappedDecisions++;
-      continue;
-    }
-    scoredDecisions++;
-    const verdict = claimBearingVerdict(decision, outcome);
-    const boundVerified = verdict.verified;
-    if (outcome.evidence_tier === "verified" && !boundVerified)
-      unboundVerifiedDowngraded++;
-    if (verdict.downgrade === "evidence_transplanted")
-      transplantDemoted++;
-    if (verdict.downgrade === "attribution_mismatch")
-      attributionMismatch++;
-    let good = false;
-    if (decision.action === "prescribe") {
-      prescribedEvaluated++;
-      const creditable = !boundVerified || verdict.proceduralCredit;
-      if (outcome.result === "helped" && creditable) {
-        helpfulInterventions++;
-        good = true;
-      } else if (outcome.result === "helped") {
-        neutralInterventions++;
-        if (boundVerified)
-          verifiedNeutralDecisions++;
-      }
-      if (outcome.result === "harmed")
-        harmfulInterventions++;
-      if (outcome.result === "neutral") {
-        neutralInterventions++;
-        if (boundVerified)
-          verifiedNeutralDecisions++;
-      }
-    } else {
-      if (outcome.result === "succeeded_unaided") {
-        successfulAbstentions++;
-        good = true;
-      } else {
-        failedAbstentions++;
-      }
-      if (boundVerified) {
-        verifiedEvaluatedAbstentions++;
-        if (good)
-          verifiedSuccessfulAbstentions++;
-      } else {
-        judgedEvaluatedAbstentions++;
-        judgedOnlyAbstentions++;
-        if (good)
-          judgedSuccessfulAbstentions++;
-      }
-    }
-    if (boundVerified) {
-      verifiedDecisions++;
-      if (good)
-        verifiedGood++;
-    } else {
-      judgedDecisions++;
-      if (good)
-        judgedGood++;
-    }
-  }
-  const lifecycle = events.filter((event) => event.type === "lifecycle");
-  const excludedDecisions = excludedIds.size;
-  const validDecisionIds = new Set(decisions.map((decision) => decision.possession_id));
-  const excludedDecisionRowsWithoutValidDecision = [...excludedIds].filter((id) => !validDecisionIds.has(id)).length;
-  difficultyStrata.unknown += excludedDecisionRowsWithoutValidDecision;
-  const openedDecisions = decisions.length + excludedDecisionRowsWithoutValidDecision;
-  const closedDecisions = evaluatedDecisions + excludedDecisions;
-  const pendingDecisions = Math.max(0, openedDecisions - closedDecisions);
-  const closureRatePct = pct(closedDecisions, openedDecisions);
-  const uniqueTaskClasses = new Set(decisions.map((decision) => decision.task_class)).size;
-  const pendingRows = decisions.filter((decision) => !excludedIds.has(decision.possession_id) && !activeOutcomes.has(decision.possession_id)).sort((a, b) => b.ts - a.ts);
-  const activityTs = (decision) => Math.max(decision.ts, activeOutcomes.get(decision.possession_id)?.ts ?? decision.ts);
-  const latestActivityDecision = [...decisions].sort((a, b) => activityTs(b) - activityTs(a))[0];
-  const latestPendingPossession = pendingRows[0] ? safePossessionView(pendingRows[0]) : null;
-  const lastPlay = latestActivityDecision ? safePossessionView(latestActivityDecision, activeOutcomes.get(latestActivityDecision.possession_id)) : null;
-  const goodDecisions = verifiedGood + judgedGood;
-  const contextsAvoided = verifiedSuccessfulAbstentions;
-  const blocked = integrity.blocked;
-  const incomplete = openedDecisions >= EFFICIENCY_CONTRACT.percentageDisplayThreshold && (closureRatePct ?? 0) < EFFICIENCY_CONTRACT.minimumClosureRatePct;
-  const exploratory = repeatCappedDecisions > 0 || uniqueTaskClasses < EFFICIENCY_CONTRACT.minimumUniqueTaskClasses || difficultyStrata.unknown > 0;
-  const scoreStatus = blocked ? "blocked" : incomplete ? "incomplete" : verifiedDecisions < EFFICIENCY_CONTRACT.percentageDisplayThreshold ? exploratory ? "exploratory" : "early_tape" : exploratory ? "exploratory" : "claim_eligible";
-  return {
-    metricContract: EFFICIENCY_CONTRACT.id,
-    percentageDisplayThreshold: EFFICIENCY_CONTRACT.percentageDisplayThreshold,
-    scoreStatus,
-    ledgerIntegrity: blocked ? "blocked" : "ok",
-    ledgerSha256: integrity.ledgerSha256,
-    ledgerRows: integrity.rowCount,
-    eligibleExposures: openedDecisions,
-    openedDecisions,
-    closedDecisions,
-    pendingDecisions,
-    excludedDecisions,
-    exclusionReasons: { ...integrity.exclusionReasons },
-    closureRatePct,
-    decisions: openedDecisions,
-    evaluatedDecisions,
-    scoredDecisions,
-    repeatCappedDecisions,
-    uniqueTaskClasses,
-    difficultyStrata,
-    goodDecisions,
-    prescribed: decisions.filter((event) => event.action === "prescribe").length,
-    abstained: decisions.filter((event) => event.action === "abstain").length,
-    observedInterventions,
-    observedHelpfulInterventions,
-    observedHarmfulInterventions,
-    observedNeutralInterventions,
-    observedAbstentions,
-    observedSuccessfulAbstentions,
-    observedFailedAbstentions,
-    helpfulInterventions,
-    harmfulInterventions,
-    neutralInterventions,
-    successfulAbstentions,
-    failedAbstentions,
-    verifiedSuccessfulAbstentions,
-    verifiedEvaluatedAbstentions,
-    judgedSuccessfulAbstentions,
-    judgedEvaluatedAbstentions,
-    judgedOnlyAbstentions,
-    contextsAvoided,
-    interferenceAbstentions,
-    verifiedDecisions,
-    verifiedGoodDecisions: verifiedGood,
-    judgedDecisions,
-    judgedGoodDecisions: judgedGood,
-    unboundVerifiedDowngraded,
-    transplantDemoted,
-    attributionMismatch,
-    verifiedNeutralDecisions,
-    decisionEfficiencyPct: pct(goodDecisions, scoredDecisions),
-    verifiedEfficiencyPct: pct(verifiedGood, verifiedDecisions),
-    judgedEfficiencyPct: pct(judgedGood, judgedDecisions),
-    restraintEfficiencyPct: pct(verifiedSuccessfulAbstentions, verifiedEvaluatedAbstentions),
-    harmRatePct: pct(harmfulInterventions, prescribedEvaluated),
-    skillsLearned: lifecycle.filter((event) => event.action === "learn" || event.action === "graduate").length,
-    skillsUpdated: lifecycle.filter((event) => event.action === "update").length,
-    skillsRetired: lifecycle.filter((event) => event.action === "retire").length,
-    skillsRestored: lifecycle.filter((event) => event.action === "restore").length,
-    latestPendingPossession,
-    lastPlay
-  };
-}
-function summarizePossessionLedger() {
-  const inspection = inspectPossessionLedger();
-  return summarizePossessions(inspection.events, inspection.integrity);
-}
-var claimBearingShareCustody = new WeakSet;
-var SHARE_KEYS = new Set([
-  "schema",
-  "metric_contract",
-  "score_status",
-  "percentage_display_threshold",
-  "period",
-  "statement",
-  "opened_decisions",
-  "closed_decisions",
-  "pending_decisions",
-  "excluded_decisions",
-  "closure_rate_pct",
-  "eligible_exposures",
-  "scored_exposures",
-  "repeat_capped_exposures",
-  "unique_task_classes",
-  "difficulty_strata",
-  "verified_good_decisions",
-  "verified_neutral_decisions",
-  "verified_evaluated_decisions",
-  "judged_good_decisions",
-  "judged_evaluated_decisions",
-  "verified_successful_abstentions",
-  "verified_evaluated_abstentions",
-  "judged_successful_abstentions",
-  "judged_failed_abstentions",
-  "judged_only_abstentions",
-  "helpful_interventions",
-  "harmful_interventions",
-  "neutral_interventions",
-  "ledger_integrity",
-  "exclusions",
-  "decision_efficiency_pct"
-]);
-var PERIODS = new Set(["EARLY TAPE", "LAST 7 DAYS", "LAST 30 DAYS", "SEASON", "ALL TIME"]);
-var SCORE_STATUSES = new Set(["blocked", "incomplete", "early_tape", "exploratory", "claim_eligible"]);
-var safePeriod = (value) => {
-  const normalized = String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
-  if (normalized === "last_7_days" || normalized === "this_week")
-    return "LAST 7 DAYS";
-  if (normalized === "last_30_days" || normalized === "this_month")
-    return "LAST 30 DAYS";
-  if (normalized === "season")
-    return "SEASON";
-  return "ALL TIME";
-};
-function shareStatement(card) {
-  if (card.score_status === "blocked")
-    return "ledger blocked · inspect integrity";
-  if (card.score_status === "incomplete")
-    return `${card.closed_decisions} of ${card.opened_decisions} possessions closed · incomplete tape`;
-  if (card.score_status === "claim_eligible" && card.decision_efficiency_pct !== undefined) {
-    return `${card.verified_good_decisions} of ${card.verified_evaluated_decisions} bound-verified good decisions · ${card.decision_efficiency_pct}%`;
-  }
-  if (card.verified_evaluated_decisions > 0)
-    return `${card.verified_good_decisions} of ${card.verified_evaluated_decisions} bound-verified good decisions · early tape`;
-  return `no bound-verified score · judged tape ${card.judged_good_decisions} of ${card.judged_evaluated_decisions}`;
-}
-var nonNegativeInt = (label, value) => {
-  if (!Number.isInteger(value) || Number(value) < 0)
-    throw new Error(`${label} must be a non-negative integer`);
-};
-function validateShareCardPayload(input) {
-  if (!input || typeof input !== "object" || Array.isArray(input))
-    throw new Error("share payload must be an object");
-  const raw = input;
-  for (const key of Object.keys(raw))
-    if (!SHARE_KEYS.has(key))
-      throw new Error(`unexpected field '${key}'`);
-  for (const key of SHARE_KEYS)
-    if (key !== "decision_efficiency_pct" && !(key in raw))
-      throw new Error(`missing field '${key}'`);
-  if (raw.schema !== "mm.share-card.v1")
-    throw new Error("schema mismatch");
-  if (raw.metric_contract !== EFFICIENCY_CONTRACT.id)
-    throw new Error("metric_contract mismatch");
-  if (!SCORE_STATUSES.has(raw.score_status))
-    throw new Error("score_status mismatch");
-  if (!PERIODS.has(raw.period))
-    throw new Error("period is not allowlisted");
-  if (raw.percentage_display_threshold !== EFFICIENCY_CONTRACT.percentageDisplayThreshold)
-    throw new Error("percentage_display_threshold must match the metric contract");
-  if (raw.ledger_integrity !== "ok" && raw.ledger_integrity !== "blocked")
-    throw new Error("ledger_integrity mismatch");
-  const numeric = [
-    "percentage_display_threshold",
-    "opened_decisions",
-    "closed_decisions",
-    "pending_decisions",
-    "excluded_decisions",
-    "eligible_exposures",
-    "scored_exposures",
-    "repeat_capped_exposures",
-    "unique_task_classes",
-    "verified_good_decisions",
-    "verified_evaluated_decisions",
-    "judged_good_decisions",
-    "judged_evaluated_decisions",
-    "verified_successful_abstentions",
-    "verified_evaluated_abstentions",
-    "judged_successful_abstentions",
-    "judged_failed_abstentions",
-    "judged_only_abstentions",
-    "helpful_interventions",
-    "harmful_interventions",
-    "neutral_interventions"
-  ];
-  for (const key of numeric)
-    nonNegativeInt(key, raw[key]);
-  if (raw.closure_rate_pct !== null && (!Number.isInteger(raw.closure_rate_pct) || raw.closure_rate_pct < 0 || raw.closure_rate_pct > 100))
-    throw new Error("closure_rate_pct invalid");
-  if (raw.decision_efficiency_pct !== undefined && (!Number.isInteger(raw.decision_efficiency_pct) || raw.decision_efficiency_pct < 0 || raw.decision_efficiency_pct > 100))
-    throw new Error("decision_efficiency_pct invalid");
-  for (const key of DIFFICULTIES)
-    nonNegativeInt(`difficulty_strata.${key}`, raw.difficulty_strata?.[key]);
-  if (Object.keys(raw.difficulty_strata || {}).some((key) => !DIFFICULTIES.has(key)))
-    throw new Error("difficulty_strata unexpected field");
-  for (const key of Object.keys(emptyExclusions()))
-    nonNegativeInt(`exclusions.${key}`, raw.exclusions?.[key]);
-  if (Object.keys(raw.exclusions || {}).some((key) => !(key in emptyExclusions())))
-    throw new Error("exclusions unexpected field");
-  const claimBearing = raw.verified_evaluated_decisions > 0 || raw.verified_good_decisions > 0 || raw.decision_efficiency_pct !== undefined;
-  if (claimBearing && !claimBearingShareCustody.has(raw))
-    throw new Error("claim-bearing verified share payload must be constructed from the bound ledger summary");
-  const statusSaysBlocked = raw.score_status === "blocked";
-  const integritySaysBlocked = raw.ledger_integrity === "blocked";
-  if (statusSaysBlocked !== integritySaysBlocked)
-    throw new Error("score_status=blocked must exactly match ledger_integrity=blocked");
-  if (raw.opened_decisions !== raw.closed_decisions + raw.pending_decisions)
-    throw new Error("custody arithmetic mismatch: opened must equal closed + pending");
-  if (raw.eligible_exposures !== raw.opened_decisions)
-    throw new Error("custody arithmetic mismatch: eligible exposures must equal opened decisions");
-  if (raw.closed_decisions < raw.excluded_decisions)
-    throw new Error("custody arithmetic mismatch: excluded exceeds closed");
-  if (raw.scored_exposures + raw.repeat_capped_exposures !== raw.closed_decisions - raw.excluded_decisions)
-    throw new Error("custody arithmetic mismatch: scored + repeat-capped must equal evaluated closures");
-  if (raw.verified_evaluated_decisions + raw.judged_evaluated_decisions !== raw.scored_exposures)
-    throw new Error("custody arithmetic mismatch: evidence tiers must equal scored exposures");
-  if (raw.verified_good_decisions > raw.verified_evaluated_decisions || raw.judged_good_decisions > raw.judged_evaluated_decisions)
-    throw new Error("custody arithmetic mismatch: good decisions exceed same-tier evaluated decisions");
-  if (raw.verified_successful_abstentions > raw.verified_evaluated_abstentions)
-    throw new Error("custody arithmetic mismatch: verified abstention successes exceed evaluated abstentions");
-  if (raw.judged_successful_abstentions + raw.judged_failed_abstentions !== raw.judged_only_abstentions)
-    throw new Error("custody arithmetic mismatch: judged abstention outcomes must equal judged-only abstentions");
-  if (raw.verified_evaluated_abstentions !== 0 || raw.verified_successful_abstentions !== 0)
-    throw new Error("exact-file verification cannot claim verified abstentions");
-  const verifiedHelpful = raw.verified_good_decisions;
-  const verifiedHarmful = Math.max(0, raw.verified_evaluated_decisions - raw.verified_good_decisions - (raw.verified_neutral_decisions ?? 0));
-  const judgedHelpful = raw.helpful_interventions - verifiedHelpful;
-  const judgedHarmful = raw.harmful_interventions - verifiedHarmful;
-  if (judgedHelpful < 0 || judgedHarmful < 0)
-    throw new Error("custody arithmetic mismatch: verified intervention counts exceed totals");
-  const judgedNeutral = raw.neutral_interventions - (raw.verified_neutral_decisions ?? 0);
-  if (judgedNeutral < 0)
-    throw new Error("custody arithmetic mismatch: verified neutral exceeds neutral total");
-  if (judgedHelpful + judgedHarmful + judgedNeutral + raw.judged_only_abstentions !== raw.judged_evaluated_decisions)
-    throw new Error("custody arithmetic mismatch: judged intervention and abstention outcomes must equal judged evaluated decisions");
-  if (raw.judged_good_decisions !== judgedHelpful + raw.judged_successful_abstentions)
-    throw new Error("custody arithmetic mismatch: judged good decisions must equal judged helped prescriptions + successful abstentions");
-  const difficultyTotal = Object.values(raw.difficulty_strata).reduce((sum, count) => sum + Number(count), 0);
-  if (difficultyTotal !== raw.opened_decisions)
-    throw new Error("custody arithmetic mismatch: difficulty strata must equal opened decisions");
-  const expectedClosure = raw.opened_decisions ? Math.round(100 * raw.closed_decisions / raw.opened_decisions) : null;
-  if (raw.closure_rate_pct !== expectedClosure)
-    throw new Error("custody arithmetic mismatch: closure rate does not match counts");
-  const exploratory = raw.repeat_capped_exposures > 0 || raw.unique_task_classes < EFFICIENCY_CONTRACT.minimumUniqueTaskClasses || raw.difficulty_strata.unknown > 0;
-  const incomplete = raw.opened_decisions >= EFFICIENCY_CONTRACT.percentageDisplayThreshold && (raw.closure_rate_pct ?? 0) < EFFICIENCY_CONTRACT.minimumClosureRatePct;
-  const claimEligible = raw.verified_evaluated_decisions >= EFFICIENCY_CONTRACT.percentageDisplayThreshold && !exploratory && !incomplete && !integritySaysBlocked;
-  const expectedStatus = integritySaysBlocked ? "blocked" : incomplete ? "incomplete" : claimEligible ? "claim_eligible" : exploratory ? "exploratory" : "early_tape";
-  if (raw.score_status !== expectedStatus)
-    throw new Error(`score_status mismatch: expected ${expectedStatus}`);
-  if (claimEligible) {
-    const expectedPct = pct(raw.verified_good_decisions, raw.verified_evaluated_decisions);
-    if (raw.decision_efficiency_pct !== expectedPct)
-      throw new Error("decision_efficiency_pct must match same-tier bound-verified counts");
-    if (raw.period === "EARLY TAPE")
-      throw new Error("claim-eligible share card requires an allowlisted reporting period");
-  } else {
-    if (raw.decision_efficiency_pct !== undefined)
-      throw new Error("percentage is allowed only for claim-eligible bound-verified tape");
-    if (raw.period !== "EARLY TAPE")
-      throw new Error("non-claim-bearing share card must remain EARLY TAPE");
-  }
-  if (raw.statement !== shareStatement(raw))
-    throw new Error("statement must be derived from aggregate fields");
-  return raw;
-}
-function buildShareCardPayload(summary, options) {
-  if (summary.verifiedDecisions > 0) {
-    const live = summarizePossessionLedger();
-    if (summary.ledgerSha256 !== live.ledgerSha256 || summary.verifiedDecisions !== live.verifiedDecisions || summary.verifiedGoodDecisions !== live.verifiedGoodDecisions || summary.scoredDecisions !== live.scoredDecisions) {
-      throw new Error("claim-bearing share payload must match the current bound ledger summary");
-    }
-  }
-  const percentageAllowed = summary.scoreStatus === "claim_eligible" && summary.verifiedDecisions >= EFFICIENCY_CONTRACT.percentageDisplayThreshold;
-  const period = percentageAllowed ? safePeriod(options.period) : "EARLY TAPE";
-  const base = {
-    schema: "mm.share-card.v1",
-    metric_contract: EFFICIENCY_CONTRACT.id,
-    score_status: summary.scoreStatus,
-    percentage_display_threshold: EFFICIENCY_CONTRACT.percentageDisplayThreshold,
-    period,
-    statement: "",
-    opened_decisions: summary.openedDecisions,
-    closed_decisions: summary.closedDecisions,
-    pending_decisions: summary.pendingDecisions,
-    excluded_decisions: summary.excludedDecisions,
-    closure_rate_pct: summary.closureRatePct,
-    eligible_exposures: summary.eligibleExposures,
-    scored_exposures: summary.scoredDecisions,
-    repeat_capped_exposures: summary.repeatCappedDecisions,
-    unique_task_classes: summary.uniqueTaskClasses,
-    difficulty_strata: { ...summary.difficultyStrata },
-    verified_good_decisions: summary.verifiedGoodDecisions,
-    verified_neutral_decisions: summary.verifiedNeutralDecisions,
-    verified_evaluated_decisions: summary.verifiedDecisions,
-    judged_good_decisions: summary.judgedGoodDecisions,
-    judged_evaluated_decisions: summary.judgedDecisions,
-    verified_successful_abstentions: summary.verifiedSuccessfulAbstentions,
-    verified_evaluated_abstentions: summary.verifiedEvaluatedAbstentions,
-    judged_successful_abstentions: summary.judgedSuccessfulAbstentions,
-    judged_failed_abstentions: summary.failedAbstentions,
-    judged_only_abstentions: summary.judgedOnlyAbstentions,
-    helpful_interventions: summary.helpfulInterventions,
-    harmful_interventions: summary.harmfulInterventions,
-    neutral_interventions: summary.neutralInterventions,
-    ledger_integrity: summary.ledgerIntegrity,
-    exclusions: { ...summary.exclusionReasons },
-    ...percentageAllowed && summary.verifiedEfficiencyPct !== null ? { decision_efficiency_pct: summary.verifiedEfficiencyPct } : {}
-  };
-  base.statement = shareStatement(base);
-  if (base.verified_evaluated_decisions > 0 || base.decision_efficiency_pct !== undefined)
-    claimBearingShareCustody.add(base);
-  return validateShareCardPayload(base);
+<system-reminder>`,
+    `muscle-memory · ${skillCount} installed skill${skillCount === 1 ? "" : "s"} on this agent's shelf (shown once).`,
+    "If any part of the current task hits a procedure you do not already know:",
+    '  call muscle_memory_skill_read with action="prescribe", task=<one sentence describing the gap>, gap_observed=true',
+    "It returns exactly ONE of:",
+    "  PRESCRIBE <skill> — invoke that skill with the Skill tool, then apply its procedure",
+    "  ABSTAIN — no installed skill fits; continue unaided, which is a correct outcome",
+    "If you already know the procedure, continue unaided and ignore this note.",
+    "</system-reminder>"
+  ].join(`
+`);
 }
 
 // mods/wins.ts
-import { existsSync as existsSync9, readFileSync as readFileSync9, readdirSync as readdirSync3 } from "node:fs";
-import { join as join10 } from "node:path";
+import { existsSync as existsSync10, readFileSync as readFileSync10, readdirSync as readdirSync3 } from "node:fs";
+import { join as join11 } from "node:path";
 function readJsonl(path) {
-  if (!existsSync9(path))
+  if (!existsSync10(path))
     return [];
   const out = [];
-  for (const line of readFileSync9(path, "utf8").split(`
+  for (const line of readFileSync10(path, "utf8").split(`
 `)) {
     if (!line.trim())
       continue;
@@ -5150,7 +5607,7 @@ function str(o, k) {
   return "";
 }
 function collectWins(stateDir = STATE_DIR) {
-  const exp = readJsonl(join10(stateDir, "experience.jsonl"));
+  const exp = readJsonl(join11(stateDir, "experience.jsonl"));
   const convs = new Set;
   let firstRepTs = null;
   for (const r of exp) {
@@ -5161,18 +5618,18 @@ function collectWins(stateDir = STATE_DIR) {
     if (ts !== null && (firstRepTs === null || ts < firstRepTs))
       firstRepTs = ts;
   }
-  const sessions = new Set(readJsonl(join10(stateDir, "sessions.jsonl")).map((s) => str(s, "conv")).filter(Boolean));
+  const sessions = new Set(readJsonl(join11(stateDir, "sessions.jsonl")).map((s) => str(s, "conv")).filter(Boolean));
   for (const c of convs)
     sessions.add(c);
   const skillsEarned = [];
   const updatesFolded = [];
-  const receiptsDir = join10(stateDir, "receipts");
-  if (existsSync9(receiptsDir)) {
+  const receiptsDir = join11(stateDir, "receipts");
+  if (existsSync10(receiptsDir)) {
     for (const f of readdirSync3(receiptsDir)) {
       if (!/^reflect-\d+\.json$/.test(f))
         continue;
       try {
-        const r = JSON.parse(readFileSync9(join10(receiptsDir, f), "utf8"));
+        const r = JSON.parse(readFileSync10(join11(receiptsDir, f), "utf8"));
         const action = str(r, "action");
         const name = str(r, "name");
         const ts = num(r, "ts") ?? 0;
@@ -5188,7 +5645,7 @@ function collectWins(stateDir = STATE_DIR) {
   }
   skillsEarned.sort((a, b) => b.ts - a.ts);
   updatesFolded.sort((a, b) => b.ts - a.ts);
-  const hits = readJsonl(join10(stateDir, "defense-hits.jsonl"));
+  const hits = readJsonl(join11(stateDir, "defense-hits.jsonl"));
   let knownFixSurfaced = 0;
   let lastFlag = null;
   for (const h of hits) {
@@ -5199,17 +5656,17 @@ function collectWins(stateDir = STATE_DIR) {
       lastFlag = { step: str(h, "step"), errClass: str(h, "errClass"), defense: str(h, "defense"), ts };
   }
   let noiseRejected = 0;
-  for (const e of readJsonl(join10(stateDir, "ui-events.jsonl"))) {
+  for (const e of readJsonl(join11(stateDir, "ui-events.jsonl"))) {
     if (str(e, "phase") !== "noise_rejected")
       continue;
     const m = str(e, "summary").match(/rejected (\d+)/);
     noiseRejected += m ? Number(m[1]) : 1;
   }
   const skillUses = [];
-  const usagePath = join10(stateDir, "skill-usage.json");
-  if (existsSync9(usagePath)) {
+  const usagePath = join11(stateDir, "skill-usage.json");
+  if (existsSync10(usagePath)) {
     try {
-      const u = JSON.parse(readFileSync9(usagePath, "utf8"));
+      const u = JSON.parse(readFileSync10(usagePath, "utf8"));
       if (u && typeof u === "object")
         for (const [name, rec] of Object.entries(u)) {
           const uses = num(rec, "uses") ?? (typeof rec === "number" ? rec : 0);
@@ -5286,14 +5743,14 @@ function renderWins(w, now = Date.now()) {
 }
 
 // mods/history.ts
-import { existsSync as existsSync10, readFileSync as readFileSync10, writeFileSync as writeFileSync7 } from "node:fs";
-import { join as join11 } from "node:path";
-var MINE_WATERMARK_PATH = join11(STATE_DIR, "mined-watermark.json");
+import { existsSync as existsSync11, readFileSync as readFileSync11, writeFileSync as writeFileSync8 } from "node:fs";
+import { join as join12 } from "node:path";
+var MINE_WATERMARK_PATH = join12(STATE_DIR, "mined-watermark.json");
 function loadWatermarks() {
   try {
-    if (!existsSync10(MINE_WATERMARK_PATH))
+    if (!existsSync11(MINE_WATERMARK_PATH))
       return {};
-    const parsed = JSON.parse(readFileSync10(MINE_WATERMARK_PATH, "utf8"));
+    const parsed = JSON.parse(readFileSync11(MINE_WATERMARK_PATH, "utf8"));
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch {
     return {};
@@ -5304,7 +5761,7 @@ function saveWatermark(agentId, id, ts) {
     ensureDir();
     const all = loadWatermarks();
     all[agentId] = { id, ts };
-    writeFileSync7(MINE_WATERMARK_PATH, JSON.stringify(all, null, 2));
+    writeFileSync8(MINE_WATERMARK_PATH, JSON.stringify(all, null, 2));
   } catch {}
 }
 function parseHistoryMessage(m) {
@@ -5417,10 +5874,35 @@ async function mineAgentHistory(client, agentId, opts) {
 }
 
 // mods/referee.ts
-import { existsSync as existsSync11, readFileSync as readFileSync11, writeFileSync as writeFileSync8, appendFileSync as appendFileSync4 } from "node:fs";
-import { join as join12 } from "node:path";
-var PLUSMINUS_PATH = join12(STATE_DIR, "skill-plusminus.json");
-var RATING_REASONS_PATH = join12(STATE_DIR, "rating-reasons.jsonl");
+import { existsSync as existsSync12, readFileSync as readFileSync12, writeFileSync as writeFileSync9, appendFileSync as appendFileSync4 } from "node:fs";
+import { join as join13 } from "node:path";
+var PLUSMINUS_PATH = join13(STATE_DIR, "skill-plusminus.json");
+var RATING_REASONS_PATH = join13(STATE_DIR, "rating-reasons.jsonl");
+function recordObservedSkillFailure(input) {
+  const skill = String(input.skill || "").trim();
+  const model = String(input.model || "").trim();
+  if (!skill || !model || model === "unknown")
+    return false;
+  const ref = `tool_end:${String(input.toolCallId || "").trim() || "unknown"}`;
+  try {
+    if (loadRatingEvents().some((ev) => ev.skill === skill && ev.evidence_ref === ref))
+      return false;
+  } catch {}
+  return appendRatingReason({
+    ts: Date.now(),
+    agent: String(input.agent || "unknown"),
+    rater: "instrument",
+    skill,
+    rating: "down",
+    reason: `instrument-observed: the Skill tool call for "${skill}" failed on runtime model ${model}` + (input.detail ? ` — ${input.detail}` : ""),
+    evidence_ref: ref,
+    task: String(input.task || ""),
+    step_id: null,
+    source: "tool_end",
+    model,
+    provider: String(input.provider || "unknown")
+  });
+}
 function appendRatingReason(ev) {
   try {
     ensureDir();
@@ -5433,9 +5915,9 @@ function appendRatingReason(ev) {
 }
 function loadPlusMinus() {
   try {
-    if (!existsSync11(PLUSMINUS_PATH))
+    if (!existsSync12(PLUSMINUS_PATH))
       return {};
-    const parsed = JSON.parse(readFileSync11(PLUSMINUS_PATH, "utf8"));
+    const parsed = JSON.parse(readFileSync12(PLUSMINUS_PATH, "utf8"));
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch {
     return {};
@@ -5443,10 +5925,10 @@ function loadPlusMinus() {
 }
 function loadRatingEvents() {
   try {
-    if (!existsSync11(RATING_REASONS_PATH))
+    if (!existsSync12(RATING_REASONS_PATH))
       return [];
     const out = [];
-    for (const line of readFileSync11(RATING_REASONS_PATH, "utf8").split(`
+    for (const line of readFileSync12(RATING_REASONS_PATH, "utf8").split(`
 `)) {
       if (!line.trim())
         continue;
@@ -5468,7 +5950,7 @@ function recordPlusMinus(skillName, up, stepId) {
   ledger[skillName] = next;
   try {
     ensureDir();
-    writeFileSync8(PLUSMINUS_PATH, JSON.stringify(ledger, null, 2));
+    writeFileSync9(PLUSMINUS_PATH, JSON.stringify(ledger, null, 2));
     return { line: next, persisted: true };
   } catch {
     return { line: next, persisted: false };
@@ -5516,7 +5998,7 @@ async function rateSkill(client, skillName, rating, stepId, opts = {}) {
     aggregatePersisted: null,
     partial: false
   });
-  if (!isValidSkillName(skillName))
+  if (!isSafeExistingSkillName(skillName))
     return refuse(`invalid skill name '${skillName}'`, true);
   if (kind !== "up" && kind !== "down" && kind !== "no_rate")
     return refuse(`invalid rating '${String(rating)}' (want up|down|no_rate)`, true);
@@ -5573,8 +6055,8 @@ function renderPlusMinus(ledger) {
 }
 
 // mods/shelf.ts
-import { mkdirSync as mkdirSync9, writeFileSync as writeFileSync9 } from "node:fs";
-import { join as join13 } from "node:path";
+import { mkdirSync as mkdirSync10, writeFileSync as writeFileSync10 } from "node:fs";
+import { join as join14 } from "node:path";
 var SQUAD_ARCHIVE_NAME = process.env.MM_SQUAD_ARCHIVE || "mm-squad-shelf";
 var SHELF_DOC_TAG = "mm:shelf-doc";
 async function ensureSquadArchive(client, opts) {
@@ -5660,12 +6142,12 @@ async function pullShelfSkill(client, agentId, skillName) {
       return { ok: false, stagedPath: null, publisher: null, reason: `no shelf doc found for '${skillName}' (is the shelf attached to this agent?)` };
     if (SECRET_TOKEN_RE.test(best.content))
       return { ok: false, stagedPath: null, publisher: best.publisher, reason: "shelf content failed the secret gate — refused" };
-    const dir = join13(PUBLISH_STAGED_DIR, skillName);
-    mkdirSync9(dir, { recursive: true });
-    const staged = join13(dir, "SKILL.md");
+    const dir = join14(PUBLISH_STAGED_DIR, skillName);
+    mkdirSync10(dir, { recursive: true });
+    const staged = join14(dir, "SKILL.md");
     const header = `<!-- muscle-memory shelf pull · publisher: ${best.publisher} · published: ${best.publishedAt} · pulled: ${new Date().toISOString()} · REVIEW BEFORE PROMOTION -->
 `;
-    writeFileSync9(staged, header + best.content);
+    writeFileSync10(staged, header + best.content);
     return { ok: true, stagedPath: staged, publisher: best.publisher, reason: "staged for review" };
   } catch (e) {
     return { ok: false, stagedPath: null, publisher: null, reason: `pull failed: ${e instanceof Error ? e.message : "unknown"}` };
@@ -5799,15 +6281,41 @@ var __mm = {
   collectWins,
   renderWins
 };
-function autoPruneIfEnabled(ctx) {
+function autoPruneIfEnabled(ctx2) {
   if (process.env.MM_PRUNE !== "enabled")
     return;
   try {
-    runAutonomousPrune(ctx, { maxRetire: 1 });
+    runAutonomousPrune(ctx2, { maxRetire: 1 });
   } catch {}
 }
 function activate(letta) {
   const disposers = [];
+  const pushSkillIndex = (agentId, ctx2) => {
+    try {
+      if (!nativeEnabled("blocks"))
+        return;
+      const dirs2 = scanDirs(ctx2 ?? {});
+      const shelf = [...new Set(dirs2.flatMap((d) => {
+        try {
+          return listSkillNames(d);
+        } catch {
+          return [];
+        }
+      }))].sort().map((n) => {
+        const d = dirs2.find((dir) => existsSync13(join15(dir, n, "SKILL.md")));
+        return { name: n, description: d ? skillDesc(d, n) : "" };
+      });
+      if (shelf.length)
+        syncNeocortexMemfs(String(agentId || "") || null, buildNeocortexBlock(shelf));
+    } catch {}
+  };
+  try {
+    if (letta?.events?.on) {
+      disposers.push(letta.events.on("conversation_open", (event, ctx2) => {
+        pushSkillIndex(event?.agentId ?? ctx2?.agent?.id ?? ctx2?.agentId, ctx2);
+      }) || (() => {}));
+    }
+  } catch {}
   let panel = null;
   let panelBeatTimer = null;
   const flashEarnedMinute = (label, skill = "") => {
@@ -5826,7 +6334,7 @@ function activate(letta) {
       clearTimeout(panelBeatTimer);
     panelBeatTimer = null;
   });
-  const DEFENSE_HITS = join14(STATE_DIR, "defense-hits.jsonl");
+  const DEFENSE_HITS = join15(STATE_DIR, "defense-hits.jsonl");
   let defensesCache = [];
   const refreshDefenses = () => {
     try {
@@ -5835,7 +6343,7 @@ function activate(letta) {
       defensesCache = [];
     }
   };
-  const isInstalledSkill = (name, ctx) => scanDirs(ctx).some((dir) => existsSync12(join14(dir, name, "SKILL.md")));
+  const isInstalledSkill = (name, ctx2) => scanDirs(ctx2).some((dir) => existsSync13(join15(dir, name, "SKILL.md")));
   const recordLifecycle = (action, skill, reason) => {
     const stamp = Date.now();
     try {
@@ -5855,11 +6363,11 @@ function activate(letta) {
 ⚠ lifecycle event not recorded — ${String(error?.message || error)}`;
     }
   };
-  const renderRosterSnapshot = (ctx) => {
+  const renderRosterSnapshot = (ctx2) => {
     const events = loadPossessionEvents();
-    const active = new Set(curateManagedSkills(ctx).map((row) => row.name));
+    const active = new Set(curateManagedSkills(ctx2).map((row) => row.name));
     for (const event of events) {
-      if (event.type === "decision" && event.action === "prescribe" && event.skill && isInstalledSkill(event.skill, ctx))
+      if (event.type === "decision" && event.action === "prescribe" && event.skill && isInstalledSkill(event.skill, ctx2))
         active.add(event.skill);
     }
     const decisions = new Map(events.filter((event) => event.type === "decision").map((event) => [event.possession_id, event]));
@@ -5884,16 +6392,82 @@ function activate(letta) {
     }
     return { total: active.size, proven: provenNames.size, provenNames: [...provenNames].sort(), helped };
   };
-  const renderDecisionReport = (summary, ctx) => {
-    const roster = renderRosterSnapshot(ctx);
+  const renderDecisionReport = (summary, ctx2) => {
+    const roster = renderRosterSnapshot(ctx2);
     return renderAgentBoxScore(summary, {
-      agent: String(process.env.MM_AGENT || ctx?.agent?.name || "Agent"),
+      agent: String(process.env.MM_AGENT || ctx2?.agent?.name || "Agent"),
       period: "All time",
       skills: { active: roster.total, proven: roster.proven }
     });
   };
   let possessionCounter = 0;
-  const prescribeForTask = (task, gapDeclared, ctx, taskClassInput, difficultyInput, verificationTaskId) => {
+  function rerankEnabled() {
+    return String(process.env.MM_RERANK || "").toLowerCase() === "on" && !!process.env.MM_RERANK_CMD;
+  }
+  let TURN_CONTEXT = null;
+  function contextAsQueryEnabled() {
+    return String(process.env.MM_CTX_QUERY || "").toLowerCase() === "on";
+  }
+  function contextTtlMs() {
+    const raw = Number(process.env.MM_CTX_TTL_MS);
+    return Number.isFinite(raw) && raw > 0 ? raw : 300000;
+  }
+  function setTurnContext(conv, text) {
+    TURN_CONTEXT = text ? { conv, ts: Date.now(), text } : null;
+  }
+  function clearTurnContext() {
+    TURN_CONTEXT = null;
+  }
+  function currentTurnContext(ctx2) {
+    if (!contextAsQueryEnabled() || !TURN_CONTEXT)
+      return "";
+    if (Date.now() - TURN_CONTEXT.ts > contextTtlMs()) {
+      TURN_CONTEXT = null;
+      return "";
+    }
+    const conv = String(ctx2?.sessionId ?? ctx2?.conversationId ?? "");
+    if (conv && TURN_CONTEXT.conv && conv !== TURN_CONTEXT.conv)
+      return "";
+    return TURN_CONTEXT.text;
+  }
+  async function runJudge(evidence, name, description) {
+    const cmd = String(process.env.MM_RERANK_CMD || "");
+    if (!cmd)
+      return null;
+    try {
+      const { spawnSync } = await import("node:child_process");
+      const res = spawnSync("/bin/sh", ["-lc", cmd], {
+        input: PRESCRIBE_SYSTEM_PROMPT + `
+
+` + prescribeUserPrompt(evidence, name, description),
+        encoding: "utf8",
+        timeout: Number(process.env.MM_RERANK_TIMEOUT_MS || 120000),
+        maxBuffer: 8388608
+      });
+      if (res.error || typeof res.stdout !== "string")
+        return null;
+      return parseJudgement(res.stdout);
+    } catch {
+      return null;
+    }
+  }
+  async function judgePrescription(dirs, query, ctx2) {
+    const budget = Math.max(1, Number(process.env.MM_RERANK_MAX_JUDGE || 3));
+    const cands = wideCandidates(dirs, query, (dir) => listSkillNames(dir), budget);
+    let best = null;
+    for (const c of cands) {
+      const desc = skillDesc(c.dir, c.name);
+      const j = await runJudge(query, c.name, desc);
+      if (!j)
+        continue;
+      if (j.same_job === true && j.confidence >= RERANK_CONF_FLOOR) {
+        if (!best || j.confidence > best.confidence)
+          best = { name: c.name, confidence: j.confidence };
+      }
+    }
+    return best;
+  }
+  const prescribeForTask = async (task, gapDeclared, ctx2, taskClassInput, difficultyInput, verificationTaskId) => {
     const query = String(task || "").trim();
     if (!query)
       return "ABSTAIN — describe the observed task/procedure gap before requesting a prescription.";
@@ -5902,15 +6476,15 @@ function activate(letta) {
       const stamp = Date.now();
       const possessionId = `p-${stamp.toString(36)}-${++possessionCounter}-${hash(`${taskClass}:${route2}:${stamp}`)}`;
       try {
-        const verification = action === "prescribe" && verificationTaskId ? bindExactFileVerificationTask(String(verificationTaskId)) : undefined;
+        const verification = verificationTaskId ? bindExactFileVerificationTask(String(verificationTaskId)) : undefined;
         recordPossessionEvent({
           schema: "mm.possession.v1",
           event_id: `d-${possessionId}`,
           possession_id: possessionId,
           ts: stamp,
           type: "decision",
-          agent: String(process.env.MM_AGENT || ctx?.agent?.name || "agent"),
-          model: modelIdentity(ctx?.model),
+          agent: String(process.env.MM_AGENT || ctx2?.agent?.name || "agent"),
+          model: modelIdentity(ctx2?.model),
           action,
           task_class: taskClass,
           difficulty: difficultyInput || "unknown",
@@ -5929,35 +6503,98 @@ tracking: decision not recorded — ${String(error?.message || error)}`;
     };
     if (!gapDeclared)
       return track("ABSTAIN — no observed/known procedure gap was declared. Relevance alone is not an indication; let the model work unaided.", "abstain", "no-gap");
-    const dirs = scanDirs(ctx);
-    const top = searchSkills(dirs, normalizePrescriptionQuery(query), 3);
-    const decision = routeSkill(top, [], (name) => dirs.some((dir) => existsSync12(join14(dir, name, "SKILL.md"))), 18);
+    const dirs = scanDirs(ctx2);
+    const normalizedQuery = normalizePrescriptionQuery(query);
+    const turnCtx = currentTurnContext(ctx2);
+    const top = searchSkillsWithContext(dirs, normalizedQuery, turnCtx, 3);
+    const decision = routeSkill(top, [], (name) => dirs.some((dir) => existsSync13(join15(dir, name, "SKILL.md"))), 18);
+    if (decision.route !== "update" && rerankEnabled()) {
+      const judged = await judgePrescription(dirs, normalizedQuery, ctx2);
+      if (judged) {
+        const jc = composeAroundPrimary(dirs, normalizedQuery, judged.name);
+        const jcLines = jc.length > 1 ? `
+COMPOSE · apply in order: ${jc.map((n) => `"${n}"`).join(" → ")}; each companion earned its slot with task vocabulary the earlier picks do not cover` : "";
+        return track(`PRESCRIBE "${judged.name}" — semantic precision gate (judge same_job, confidence ${judged.confidence.toFixed(2)}); lexical overlap alone did not route${jcLines}
+NEXT · invoke the normal Skill tool with skill="${judged.name}", perform the task, then call muscle_memory_close with the observed result
+gap diagnosis: caller-attested observed/known procedure gap
+control: do not inject sibling skills or the full shelf`, "prescribe", "matched-semantic", judged.name);
+      }
+    }
     if (decision.route === "update" && decision.target) {
+      if (String(process.env.MM_SHAM || "").toLowerCase() === "on") {
+        const shelf = [...new Set(dirs.flatMap((d) => {
+          try {
+            return listSkillNames(d);
+          } catch {
+            return [];
+          }
+        }))].sort();
+        if (shelf.length > 0) {
+          const seed = Number(process.env.MM_SHAM_SEED || 0) || 1;
+          let h = seed >>> 0;
+          for (const s of shelf)
+            for (let k = 0;k < s.length; k++)
+              h = Math.imul(h, 31) + s.charCodeAt(k) >>> 0;
+          const shamName = shelf[h % shelf.length];
+          return track(`PRESCRIBE "${shamName}" — one smallest matching installed skill (sham control)
+NEXT · invoke the normal Skill tool with skill="${shamName}", perform the task, then call muscle_memory_close with the observed result
+control: do not inject sibling skills or the full shelf`, "prescribe", "matched", shamName);
+        }
+      }
       const t = decision.target;
-      const model = modelIdentity(ctx?.model);
+      const model = modelIdentity(ctx2?.model);
       const modelEvents = loadRatingEvents().filter((ev) => ev.skill === t.name && ev.rating !== "no_rate" && model !== "unknown" && ev.model === model);
       const modelNet = modelEvents.reduce((sum, ev) => sum + (ev.rating === "up" ? 1 : -1), 0);
       if (modelEvents.length && modelNet < 0) {
         return track(`ABSTAIN — "${t.name}" matches the task but has negative field evidence for runtime model ${model} (${modelNet}, n=${modelEvents.length}). Review/reformulate instead of repeating observed harm.`, "abstain", "negative-field");
       }
       const modelLine = model === "unknown" ? "runtime model: unknown (selection is task-conditioned only; capability is not inferred)" : modelEvents.length ? `runtime model ${model}: field ${modelNet >= 0 ? "+" : ""}${modelNet} across ${modelEvents.length} rated possession${modelEvents.length === 1 ? "" : "s"}` : `runtime model ${model}: unproven for this skill; caller owns the gap diagnosis`;
+      let composeLines = "";
+      if (composeEnabled()) {
+        const pool = searchSkillsWithContext(dirs, normalizedQuery, turnCtx, 10);
+        const companions = selectCompanions(normalizedQuery, { name: t.name, description: t.description || "" }, pool, { threshold: 18 });
+        if (companions.length) {
+          composeLines = `
+COMPOSE · this task spans ${companions.length + 1} skills; after "${t.name}", also apply in order: ` + companions.map((c) => `"${c.name}" (covers task terms this set otherwise misses: ${c.newTerms.slice(0, 4).join(", ")})`).join("; ") + `
+compose control: at most 3 skills total, each cleared the same match gate as the primary and earned its slot with uncovered task vocabulary — this is a reasoned set, never the shelf`;
+        }
+      }
       return track(`PRESCRIBE "${t.name}" — one smallest matching installed skill (score ${t.score}, ${t.matched} distinctive terms)
 NEXT · invoke the normal Skill tool with skill="${t.name}", perform the task, then call muscle_memory_close with the observed result
 ${modelLine}
 gap diagnosis: caller-attested observed/known procedure gap; the router does not infer hidden model capability
-control: do not inject sibling skills or the full shelf`, "prescribe", "matched", t.name);
+control: do not inject sibling skills or the full shelf${composeLines}`, "prescribe", "matched", t.name);
+    }
+    if (composeEnabled()) {
+      const pool = searchSkillsWithContext(dirs, normalizedQuery, turnCtx, 10);
+      const composed = composePrescription(normalizedQuery, pool, 18);
+      if (composed && composed.rescuedTie) {
+        const order = [composed.primary.name, ...composed.companions.map((c) => c.name)];
+        const reasons = composed.companions.map((c) => `"${c.name}" (covers task terms the set otherwise misses: ${c.newTerms.slice(0, 4).join(", ")})`).join("; ");
+        return track(`PRESCRIBE "${composed.primary.name}" — first of a ${order.length}-skill composition; this task spans complementary skills that tied because no single one covers it
+COMPOSE · apply in order: ${order.map((n) => `"${n}"`).join(" → ")}; ${reasons}
+NEXT · invoke the normal Skill tool with skill="${composed.primary.name}", continue through the composition, then call muscle_memory_close with the observed result
+gap diagnosis: caller-attested observed/known procedure gap
+compose control: at most 3 skills total, each cleared the same match gate, each earned its slot with uncovered task vocabulary — this is a reasoned set, never the shelf
+control: do not inject sibling skills or the full shelf`, "prescribe", "matched", composed.primary.name);
+      }
     }
     const strongTie = top.length > 1 && top[0].score >= 18 && top[1].score >= 18 && Math.abs(top[0].score - top[1].score) <= 3;
     const route = decision.route === "park-ambiguous" || strongTie ? "ambiguous" : decision.route === "park-semantic" ? "weak-match" : "no-safe-match";
     const why = route === "ambiguous" ? "two candidates tied for the strongest match, so no single skill had enough dominance to inject safely" : decision.route === "park-semantic" ? `possible duplicate/neighbor "${decision.suspect}" without enough lexical proof` : "no installed skill cleared the safe-match gate";
+    const shelfNames = dirs.flatMap((d) => listSkillNames(d));
     const closest = top.length ? top.map((m, index) => `${index + 1}. ${m.name} — ${index === 0 ? "strongest" : m.score === top[0].score ? "tied strongest" : "close neighbor"}; ${m.matched} distinctive term${m.matched === 1 ? "" : "s"}`).join(`
-`) : "none";
+`) : shelfNames.length ? `none scored — ${shelfNames.length} skill${shelfNames.length === 1 ? "" : "s"} installed but 0 shared a distinctive term with this wording:
+` + shelfNames.slice(0, 5).map((n) => `  · ${n}`).join(`
+`) + (shelfNames.length > 5 ? `
+  · …${shelfNames.length - 5} more` : "") : `none installed — shelves scanned: ${dirs.join(", ") || "(none)"}`;
+    const hint = top.length ? "Next: continue unaided, or inspect one candidate without loading the full shelf." : shelfNames.length ? "Next: continue unaided. If one of these should have matched, its description does not share vocabulary with how this task was described — rephrase the task or widen the skill description." : "Next: continue unaided. No SKILL.md was found on any scanned shelf — check the skill is installed in one of the directories listed above.";
     return track(`ABSTAIN — ${why}.
 
 Closest:
 ${closest}
 
-Next: continue unaided, or inspect one candidate without loading the full shelf.`, "abstain", route);
+${hint}`, "abstain", route);
   };
   const renderPendingPossessions = () => {
     const rows = pendingPossessionViews(loadPossessionEvents());
@@ -5975,8 +6612,8 @@ CLOSE · muscle_memory_close possession_id="${row.possessionId}"`;
 
 `);
   };
-  const renderRosterReport = (ctx, compact = false) => {
-    const managedRows = curateManagedSkills(ctx);
+  const renderRosterReport = (ctx2, compact = false) => {
+    const managedRows = curateManagedSkills(ctx2);
     const managed = new Map(managedRows.map((row) => [row.name, row]));
     const events = loadPossessionEvents();
     const outcomes = new Map;
@@ -5985,7 +6622,7 @@ CLOSE · muscle_memory_close possession_id="${row.possessionId}"`;
         outcomes.set(event.possession_id, event);
     const stats = new Map;
     for (const event of events) {
-      if (event.type !== "decision" || event.action !== "prescribe" || !event.skill || !isInstalledSkill(event.skill, ctx))
+      if (event.type !== "decision" || event.action !== "prescribe" || !event.skill || !isInstalledSkill(event.skill, ctx2))
         continue;
       const row = stats.get(event.skill) || { helped: 0, harmed: 0, neutral: 0, judged: 0, verified: 0 };
       const outcome = outcomes.get(event.possession_id);
@@ -6070,11 +6707,16 @@ STATUS · ${res.reason}`;
   if (letta.capabilities?.events?.tools) {
     const stepByCallId = new Map;
     const coachedOnce = new Set;
+    const consultNudged = new Set;
+    const shelfConsulted = new Set;
     disposers.push(letta.events.on("tool_start", (event) => {
       try {
         const tool = String(event?.toolName ?? "");
         if (!tool)
           return;
+        if (tool === "Skill" || tool.startsWith("muscle_memory") || tool === "rate_skill" || tool.startsWith("record_agent") || tool.startsWith("verify_agent") || tool.startsWith("register_exact_file")) {
+          shelfConsulted.add(String(event?.conversationId ?? "?"));
+        }
         const { fp, tmpl } = fingerprint2(tool, event?.args ?? {});
         const callId = String(event?.toolCallId ?? "");
         if (callId) {
@@ -6102,6 +6744,7 @@ STATUS · ${res.reason}`;
     try {
       disposers.push(letta.events.on("tool_end", (event) => {
         let coached = null;
+        let closePrompt = null;
         try {
           const status = String(event?.status ?? "");
           const ok = status ? status === "success" : event?.ok ?? !(event?.isError || event?.error);
@@ -6112,7 +6755,30 @@ STATUS · ${res.reason}`;
           try {
             const open = loadPossessionEvents();
             const closed = new Set(open.filter((row) => row.type === "outcome").map((row) => row.possession_id));
-            observeToolEnd(event, open.filter((row) => row.type === "decision" && row.action === "prescribe" && !closed.has(row.possession_id)).map((row) => ({ possession_id: row.possession_id, event_id: row.event_id, skill: row.skill })));
+            const invocation = observeToolEnd(event, open.filter((row) => row.type === "decision" && row.action === "prescribe" && !closed.has(row.possession_id)).map((row) => ({ possession_id: row.possession_id, event_id: row.event_id, skill: row.skill })));
+            if (invocation && closeNudgeEnabled()) {
+              closePrompt = { status: status || "success", output: outText + closeoutNudge({ skill: invocation.skill, possessionId: invocation.possession_id }) };
+            }
+          } catch {}
+          try {
+            if (!ok && String(event?.toolName ?? "") === "Skill") {
+              const invoked = String(event?.args?.skill ?? event?.args?.name ?? "").trim();
+              if (invoked) {
+                const rows = loadPossessionEvents();
+                const settled = new Set(rows.filter((row) => row.type === "outcome").map((row) => row.possession_id));
+                const openForSkill = rows.some((row) => row.type === "decision" && row.action === "prescribe" && row.skill === invoked && !settled.has(row.possession_id));
+                if (openForSkill) {
+                  recordObservedSkillFailure({
+                    skill: invoked,
+                    model: modelIdentity(ctx?.model),
+                    provider: String(ctx?.provider ?? "unknown"),
+                    agent: String(ctx?.agent?.id ?? ctx?.agentId ?? "unknown"),
+                    toolCallId: event?.toolCallId ?? null,
+                    detail: classifyError(outText, false)?.kind ?? undefined
+                  });
+                }
+              }
+            }
           } catch {}
           appendJsonl(OUTCOME_PATH, { ts: Date.now(), id: event?.toolCallId ?? null, tool: event?.toolName ?? null, conv: event?.conversationId ?? null, ok, err, ...errMsg ? { errMsg } : {} });
           if (process.env.MM_REFLEX === "on" && !ok && defensesCache.length) {
@@ -6127,7 +6793,33 @@ STATUS · ${res.reason}`;
             }
           }
         } catch {}
-        return coached ? { result: coached } : undefined;
+        let shelfNudge = null;
+        try {
+          if (prescribeNudgeEnabled()) {
+            const conv = String(event?.conversationId ?? "?");
+            const tool = String(event?.toolName ?? "");
+            const status = String(event?.status ?? "");
+            const ok = status ? status === "success" : event?.ok ?? !(event?.isError || event?.error);
+            const ordinary = tool && tool !== "Skill" && !tool.startsWith("muscle_memory") && tool !== "rate_skill" && !tool.startsWith("record_agent") && !tool.startsWith("verify_agent") && !tool.startsWith("register_exact_file");
+            if (ok && ordinary && !consultNudged.has(conv) && !shelfConsulted.has(conv)) {
+              const shelfNames = new Set;
+              for (const d of scanDirs())
+                for (const n of listSkillNames(d))
+                  shelfNames.add(n);
+              if (shelfNames.size > 0) {
+                consultNudged.add(conv);
+                if (consultNudged.size > 256) {
+                  const first = consultNudged.keys().next().value;
+                  if (first !== undefined)
+                    consultNudged.delete(first);
+                }
+                const outText = String(event?.output ?? event?.resultText ?? "");
+                shelfNudge = { status: status || "success", output: outText + prescribeNudge(shelfNames.size) };
+              }
+            }
+          }
+        } catch {}
+        return coached ? { result: coached } : closePrompt ? { result: closePrompt } : shelfNudge ? { result: shelfNudge } : undefined;
       }));
     } catch {}
   }
@@ -6144,8 +6836,8 @@ STATUS · ${res.reason}`;
         const span2 = { tokensIn: event?.usage?.promptTokens ?? event?.tokensIn, tokensOut: event?.usage?.completionTokens ?? event?.tokensOut, ms: Date.now() - started, stop: event?.stopReason };
         let t = {};
         try {
-          if (existsSync12(TELEMETRY_PATH))
-            t = JSON.parse(readFileSync12(TELEMETRY_PATH, "utf8"));
+          if (existsSync13(TELEMETRY_PATH))
+            t = JSON.parse(readFileSync13(TELEMETRY_PATH, "utf8"));
         } catch {}
         const agg = aggregateTelemetry([span2]);
         t.calls = (t.calls || 0) + agg.calls;
@@ -6154,26 +6846,26 @@ STATUS · ${res.reason}`;
         t.ms = (t.ms || 0) + agg.ms;
         try {
           ensureDir();
-          writeFileSync10(TELEMETRY_PATH, JSON.stringify(t));
+          writeFileSync11(TELEMETRY_PATH, JSON.stringify(t));
         } catch {}
       } catch {}
     }));
   }
   if (letta.capabilities?.events?.compact) {
     let compactReflectInFlight = false;
-    disposers.push(letta.events.on("compact_start", (event, ctx) => {
+    disposers.push(letta.events.on("compact_start", (event, ctx2) => {
       try {
         ensureDir();
-        mkdirSync10(RECEIPTS_DIR, { recursive: true });
+        mkdirSync11(RECEIPTS_DIR, { recursive: true });
         const { candidates } = detect(loadExperience());
-        writeFileSync10(join14(RECEIPTS_DIR, `compact-${Date.now()}.json`), JSON.stringify({ phase: "start", conv: event?.conversationId ?? null, trigger: event?.trigger ?? null, candidatesPreserved: candidates.length, ts: Date.now() }));
+        writeFileSync11(join15(RECEIPTS_DIR, `compact-${Date.now()}.json`), JSON.stringify({ phase: "start", conv: event?.conversationId ?? null, trigger: event?.trigger ?? null, candidatesPreserved: candidates.length, ts: Date.now() }));
       } catch {}
       const rfMode = process.env.MM_REFLECT;
       if (rfMode !== "staged" && rfMode !== "auto" || compactReflectInFlight)
         return;
       compactReflectInFlight = true;
       appendUiEvent({ phase: "compact_reflect_started", summary: "compaction boundary → reflective review started before context eviction" });
-      runReflectiveReview(ctx ?? { agentId: event?.agentId }, { mode: rfMode, semanticFn: semanticFnFor(event?.agentId ?? ctx?.agent?.id) }).then(() => {
+      runReflectiveReview(ctx2 ?? { agentId: event?.agentId }, { mode: rfMode, semanticFn: semanticFnFor(event?.agentId ?? ctx2?.agent?.id) }).then(() => {
         try {
           panel?.update();
         } catch {}
@@ -6184,18 +6876,18 @@ STATUS · ${res.reason}`;
     disposers.push(letta.events.on("compact_end", (event) => {
       try {
         ensureDir();
-        mkdirSync10(RECEIPTS_DIR, { recursive: true });
-        writeFileSync10(join14(RECEIPTS_DIR, `compact-end-${Date.now()}.json`), JSON.stringify({ phase: "end", conv: event?.conversationId ?? null, trigger: event?.trigger ?? null, messagesBefore: event?.messagesBefore ?? null, messagesAfter: event?.messagesAfter ?? null, contextTokensBefore: event?.contextTokensBefore ?? null, contextTokensAfter: event?.contextTokensAfter ?? null, ts: Date.now() }));
+        mkdirSync11(RECEIPTS_DIR, { recursive: true });
+        writeFileSync11(join15(RECEIPTS_DIR, `compact-end-${Date.now()}.json`), JSON.stringify({ phase: "end", conv: event?.conversationId ?? null, trigger: event?.trigger ?? null, messagesBefore: event?.messagesBefore ?? null, messagesAfter: event?.messagesAfter ?? null, contextTokensBefore: event?.contextTokensBefore ?? null, contextTokensAfter: event?.contextTokensAfter ?? null, ts: Date.now() }));
       } catch {}
     }));
   }
   if (letta.capabilities?.events?.lifecycle) {
-    disposers.push(letta.events.on("conversation_close", (event, ctx) => {
+    disposers.push(letta.events.on("conversation_close", (event, ctx2) => {
       appendJsonl(SESSIONS_PATH, { ts: Date.now(), conv: event?.conversationId ?? null, agent: event?.agentId ?? null, reason: event?.reason ?? null, toolCalls: event?.toolCallCount ?? null, messages: event?.messageCount ?? null, durationMs: event?.durationMs ?? null });
       refreshDefenses();
       if (nativeEnabled("blocks") || nativeEnabled("passages")) {
         try {
-          const managed = managedView(scanDirs(ctx ?? {})).map((m) => ({ name: m.name, description: m.description }));
+          const managed = managedView(scanDirs(ctx2 ?? {})).map((m) => ({ name: m.name, description: m.description }));
           if (nativeEnabled("blocks"))
             syncNeocortexBlock(letta.client, event?.agentId ?? null, buildNeocortexBlock(managed));
           if (nativeEnabled("passages"))
@@ -6204,12 +6896,12 @@ STATUS · ${res.reason}`;
       }
       const apMode = process.env.MM_AUTOPILOT;
       if (apMode === "staged" || apMode === "auto") {
-        runAutopilot(ctx ?? { agentId: event?.agentId }, { ...AUTOPILOT_DEFAULT, mode: apMode }).catch(() => {});
+        runAutopilot(ctx2 ?? { agentId: event?.agentId }, { ...AUTOPILOT_DEFAULT, mode: apMode }).catch(() => {});
       }
       const rfMode = process.env.MM_REFLECT;
       if (rfMode === "staged" || rfMode === "auto") {
-        runReflectiveReview(ctx ?? { agentId: event?.agentId }, { mode: rfMode, semanticFn: semanticFnFor(event?.agentId ?? ctx?.agent?.id) }).then(() => {
-          autoPruneIfEnabled(ctx ?? { agentId: event?.agentId });
+        runReflectiveReview(ctx2 ?? { agentId: event?.agentId }, { mode: rfMode, semanticFn: semanticFnFor(event?.agentId ?? ctx2?.agent?.id) }).then(() => {
+          autoPruneIfEnabled(ctx2 ?? { agentId: event?.agentId });
           try {
             panel?.update();
           } catch {}
@@ -6218,8 +6910,50 @@ STATUS · ${res.reason}`;
     }));
   }
   if (letta.capabilities?.events?.turns) {
+    disposers.push(letta.events.on("turn_start", async (event, ctx2) => {
+      try {
+        if (nativeEnabled("blocks")) {
+          const dirs2 = scanDirs(ctx2 ?? {});
+          const shelf = [...new Set(dirs2.flatMap((d) => {
+            try {
+              return listSkillNames(d);
+            } catch {
+              return [];
+            }
+          }))].sort().map((n) => {
+            const d = dirs2.find((dir) => existsSync13(join15(dir, n, "SKILL.md")));
+            return { name: n, description: d ? skillDesc(d, n) : "" };
+          });
+          if (shelf.length)
+            syncNeocortexMemfs(event?.agentId ?? ctx2?.agent?.id ?? ctx2?.agentId ?? null, buildNeocortexBlock(shelf));
+        }
+      } catch {}
+      if (!contextAsQueryEnabled())
+        return;
+      try {
+        const conv = String(event?.conversationId ?? ctx2?.sessionId ?? "");
+        let text = flattenContextText(event?.input ?? [], contextCharCap() * 4);
+        if (String(process.env.MM_CTX_FORK || "").toLowerCase() === "on" && ctx2?.conversation?.fork) {
+          if (ctx2?.signal?.aborted)
+            return;
+          const forked = await ctx2.conversation.fork({ hidden: true });
+          if (ctx2?.signal?.aborted)
+            return;
+          const history = await forked.getHistory?.();
+          const prior = flattenContextText(history ?? [], contextCharCap() * 4);
+          if (prior)
+            text = `${prior}
+${text}`;
+        }
+        setTurnContext(conv, text);
+      } catch {
+        try {
+          clearTurnContext();
+        } catch {}
+      }
+    }));
     let autoReflectInFlight = false;
-    disposers.push(letta.events.on("turn_end", (event, ctx) => {
+    disposers.push(letta.events.on("turn_end", (event, ctx2) => {
       const rfMode = process.env.MM_REFLECT;
       if (rfMode !== "staged" && rfMode !== "auto" || autoReflectInFlight)
         return;
@@ -6231,8 +6965,8 @@ STATUS · ${res.reason}`;
         return;
       }
       autoReflectInFlight = true;
-      runReflectiveReview(ctx ?? { agentId: event?.agentId }, { mode: rfMode, semanticFn: semanticFnFor(event?.agentId ?? ctx?.agent?.id) }).then(() => {
-        autoPruneIfEnabled(ctx ?? { agentId: event?.agentId });
+      runReflectiveReview(ctx2 ?? { agentId: event?.agentId }, { mode: rfMode, semanticFn: semanticFnFor(event?.agentId ?? ctx2?.agent?.id) }).then(() => {
+        autoPruneIfEnabled(ctx2 ?? { agentId: event?.agentId });
         try {
           panel?.update();
         } catch {}
@@ -6282,12 +7016,12 @@ STATUS · ${res.reason}`;
     disposers.push(letta.commands.register({
       id: "muscle-memory",
       description: "Show the Muscle Memory Decision Report or inspect learning details",
-      async run(ctx = {}) {
-        const argv = Array.isArray(ctx?.argv) ? ctx.argv : String(ctx?.args || "").trim().split(/\s+/).filter(Boolean);
+      async run(ctx2 = {}) {
+        const argv = Array.isArray(ctx2?.argv) ? ctx2.argv : String(ctx2?.args || "").trim().split(/\s+/).filter(Boolean);
         const sub = String(argv?.[0] || "").toLowerCase();
         if (!sub || sub === "report" || sub === "boxscore") {
           const summary = summarizePossessionLedger();
-          return { type: "output", output: renderDecisionReport(summary, ctx) };
+          return { type: "output", output: renderDecisionReport(summary, ctx2) };
         }
         if (sub === "instrument") {
           const action = String(argv?.[1] || "").trim();
@@ -6327,32 +7061,32 @@ Verified evidence is now reachable. The key itself is never printed or logged.` 
         if (sub === "prescribe") {
           const hasGap = String(argv?.[1] || "").toLowerCase() === "--gap";
           const task = argv.slice(hasGap ? 2 : 1).join(" ").trim();
-          return { type: "output", output: prescribeForTask(task, hasGap, ctx) };
+          return { type: "output", output: await prescribeForTask(task, hasGap, ctx2) };
         }
         if (sub === "ratings" || sub === "scoreboard") {
           return { type: "output", output: `FIELD RATINGS · next-task outcomes
 ${renderPlusMinus(loadPlusMinus())}` };
         }
         if (sub === "roster") {
-          return { type: "output", output: renderRosterReport(ctx) };
+          return { type: "output", output: renderRosterReport(ctx2) };
         }
         if (sub === "staged") {
           let s = [];
           try {
-            s = existsSync12(STAGED_DIR) ? readdirSync4(STAGED_DIR).filter((n) => existsSync12(join14(STAGED_DIR, n, "SKILL.md"))) : [];
+            s = existsSync13(STAGED_DIR) ? readdirSync4(STAGED_DIR).filter((n) => existsSync13(join15(STAGED_DIR, n, "SKILL.md"))) : [];
           } catch {}
           return { type: "output", output: s.length ? `staged skills (1-tap to graduate):
 ` + s.map((n) => `  · ${n}`).join(`
 `) : "(no staged skills yet — set MM_REFLECT=staged, work a few sessions)" };
         }
         if (sub === "coverage") {
-          const cov2 = coverageMap(loadExperience(), scanDirs(ctx));
+          const cov2 = coverageMap(loadExperience(), scanDirs(ctx2));
           const icon = (st) => st === "covered" ? "✓" : st === "uncovered" ? "＋" : st === "over-covered" ? "⧉" : "✗";
           return { type: "output", output: cov2.length ? cov2.map((c) => `${icon(c.status)} [${c.status}] ${c.domain}${c.skill ? ` → ${c.skill}` : ""}`).join(`
 `) : "NONE YET · task-classes appear once a pattern repeats" };
         }
         if (sub === "audit") {
-          const dirs = scanDirs(ctx);
+          const dirs = scanDirs(ctx2);
           const entries = [];
           for (const d of dirs) {
             const shelf = d === globalSkillsDir() ? "global" : "agent";
@@ -6389,7 +7123,7 @@ ${top}${r.flagged.length > 20 ? `
           const target = String((action === "preflight" ? argv?.[1] : argv?.[2]) || "").trim();
           if (!target)
             return { type: "output", output: "usage: /muscle-memory publish <skill> | publish stage <skill> | publish approve <skill>  (never auto-publishes)" };
-          const dirs = scanDirs(ctx);
+          const dirs = scanDirs(ctx2);
           let found = null;
           for (const d of dirs)
             for (const n of listSkillNames(d))
@@ -6406,7 +7140,7 @@ ${top}${r.flagged.length > 20 ? `
               appendMeshFeed({ type: "skill_published", skill: target, route: "PUBLISH", signals: 0 });
             } catch {}
             const vis = publishVisibilityReceipt(target, globalSkillsDir());
-            const live = liveSkillVisible(slug(target), ctx?.agent?.id || ctx?.agentId);
+            const live = liveSkillVisible(slug(target), ctx2?.agent?.id || ctx2?.agentId);
             return { type: "output", output: `✅ published — ${res.path}
   on disk: ${vis.exists ? "yes ✓" : "NO ❌"}
   live index: ${live.checked ? live.visible ? "✓ visible to the agent now" : "not loaded yet" : "not queried"}  ·  ${live.note}` };
@@ -6451,7 +7185,7 @@ ${issues}${reps}${dupline}
 (dry-run — nothing published.)` };
         }
         if (sub === "mine") {
-          const agentId = String(argv?.[1] || ctx?.agent?.id || ctx?.agentId || "").trim();
+          const agentId = String(argv?.[1] || ctx2?.agent?.id || ctx2?.agentId || "").trim();
           if (!agentId)
             return { type: "output", output: "usage: /muscle-memory mine [agent-id]  (defaults to the current agent)" };
           const batch = await mineAgentHistory(letta.client, agentId);
@@ -6461,18 +7195,18 @@ ${issues}${reps}${dupline}
         }
         if (sub === "shelf") {
           const v1 = String(argv?.[1] || "").toLowerCase();
-          const agentId = String(ctx?.agent?.id || ctx?.agentId || "");
+          const agentId = String(ctx2?.agent?.id || ctx2?.agentId || "");
           if (v1 === "publish") {
             const target = String(argv?.[2] || "").trim();
             if (!target)
               return { type: "output", output: "usage: /muscle-memory shelf publish <skill>  (publishes the SANITIZED staged copy — run `publish stage <skill>` first)" };
-            const stagedPath = join14(STATE_DIR, "publish-staged", slug(target), "SKILL.md");
-            if (!existsSync12(stagedPath))
+            const stagedPath = join15(STATE_DIR, "publish-staged", slug(target), "SKILL.md");
+            if (!existsSync13(stagedPath))
               return { type: "output", output: `\uD83D\uDEAB no sanitized staged copy for '${target}' — run \`/muscle-memory publish stage ${target}\` first (the shelf only ever receives sanitized content)` };
             const archiveId = await ensureSquadArchive(letta.client);
             if (!archiveId)
               return { type: "output", output: "\uD83D\uDEAB could not ensure the squad shelf archive (client lacks the archives surface?)" };
-            const res = await publishSkillToShelf(letta.client, archiveId, slug(target), readFileSync12(stagedPath, "utf8"), String(process.env.MM_AGENT || "agent"));
+            const res = await publishSkillToShelf(letta.client, archiveId, slug(target), readFileSync13(stagedPath, "utf8"), String(process.env.MM_AGENT || "agent"));
             return { type: "output", output: res.ok ? `\uD83D\uDCE1 shelf-published '${target}' → ${SQUAD_ARCHIVE_NAME} (${archiveId})
   squad agents: attach once, then \`/muscle-memory shelf pull ${target}\`` : `\uD83D\uDEAB shelf publish failed — ${res.reason}` };
           }
@@ -6500,14 +7234,14 @@ ${issues}${reps}${dupline}
           if (!target || dir !== "up" && dir !== "down" && dir !== "no_rate")
             return { type: "output", output: "usage: /muscle-memory rate <skill> up|down|no_rate [reason...]   (reason required for down/no_rate)" };
           const skill = slug(target);
-          if (!isInstalledSkill(skill, ctx))
+          if (!isInstalledSkill(skill, ctx2))
             return { type: "output", output: `\uD83D\uDEAB not recorded — skill '${skill}' is not installed on this agent` };
           const res = await rateSkill(letta.client, skill, dir, null, {
             reason,
             rater: process.env.MM_AGENT ?? "user",
             source: "manual",
-            model: modelIdentity(ctx?.model),
-            provider: providerIdentity(ctx?.model)
+            model: modelIdentity(ctx2?.model),
+            provider: providerIdentity(ctx2?.model)
           });
           if (!res.recorded)
             return { type: "output", output: `\uD83D\uDEAB not recorded — ${res.reason}` };
@@ -6517,7 +7251,7 @@ FIELD RATINGS · next-task outcomes
 ${renderPlusMinus(loadPlusMinus())}` };
         }
         if (sub === "engram") {
-          const dirs = scanDirs(ctx);
+          const dirs = scanDirs(ctx2);
           const plan = engramConsolidate(loadExperience(), managedView(dirs).map((m) => ({ name: m.name, body: m.body })));
           const head = `\uD83E\uDDE0 ENGRAM (CLS loop) · hippocampus ${plan.hippoSize} reps · ${plan.replay.length} replay · ${plan.rescued.length} rescued · ${plan.labile.length} labile`;
           return { type: "output", output: `${head}
@@ -6525,11 +7259,11 @@ ${renderPlusMinus(loadPlusMinus())}` };
 ${plan.digest}` };
         }
         if (sub === "lifecycle" || sub === "skills") {
-          const dirs = scanDirs(ctx);
+          const dirs = scanDirs(ctx2);
           const reg = buildRegistry(dirs);
           let staged2 = [];
           try {
-            staged2 = existsSync12(STAGED_DIR) ? readdirSync4(STAGED_DIR).filter((n) => existsSync12(join14(STAGED_DIR, n, "SKILL.md"))) : [];
+            staged2 = existsSync13(STAGED_DIR) ? readdirSync4(STAGED_DIR).filter((n) => existsSync13(join15(STAGED_DIR, n, "SKILL.md"))) : [];
           } catch {}
           const used = reg.skills.filter((s) => s.uses > 0);
           const idle = reg.skills.filter((s) => s.uses === 0 && s.state !== "archived");
@@ -6541,7 +7275,7 @@ ${plan.digest}` };
               return "";
             return ` · outcomes ${row.plus} helped / ${row.minus} missed`;
           };
-          const distribution = (name) => existsSync12(join14(globalSkillsDir(), name, "SKILL.md")) ? " · \uD83D\uDCE1 catalog" : "";
+          const distribution = (name) => existsSync13(join15(globalSkillsDir(), name, "SKILL.md")) ? " · \uD83D\uDCE1 catalog" : "";
           const L = ["\uD83D\uDCBE muscle-memory · skill lifecycle (creation → use → prune)"];
           L.push(`
 \uD83C\uDF31 staged · 1-tap to graduate (${staged2.length})`);
@@ -6587,17 +7321,17 @@ ${plan.digest}` };
         const lastReview = events.length ? summarizeReflectActions(events) : "NONE YET · review appears once a skill has rated possessions";
         let managed = 0, staged = 0;
         try {
-          for (const d of scanDirs(ctx))
+          for (const d of scanDirs(ctx2))
             for (const n of listSkillNames(d))
               if (isManaged(d, n))
                 managed++;
         } catch {}
         try {
-          staged = existsSync12(STAGED_DIR) ? readdirSync4(STAGED_DIR).filter((n) => existsSync12(join14(STAGED_DIR, n, "SKILL.md"))).length : 0;
+          staged = existsSync13(STAGED_DIR) ? readdirSync4(STAGED_DIR).filter((n) => existsSync13(join15(STAGED_DIR, n, "SKILL.md"))).length : 0;
         } catch {}
         const cov = (() => {
           try {
-            const c = coverageMap(rows, scanDirs(ctx));
+            const c = coverageMap(rows, scanDirs(ctx2));
             return `${c.filter((x) => x.status === "covered").length} covered / ${c.filter((x) => x.status === "uncovered").length} uncovered / ${c.filter((x) => x.status === "over-covered").length} over-covered`;
           } catch {
             return "n/a";
@@ -6688,17 +7422,17 @@ ${plan.digest}` };
       required: ["action"],
       additionalProperties: false
     };
-    const readRun = async (ctx) => {
-      const a = ctx?.args || {};
-      const dirs = scanDirs(ctx);
+    const readRun = async (ctx2) => {
+      const a = ctx2?.args || {};
+      const dirs = scanDirs(ctx2);
       const findSkillDir = (name) => {
         assertSafeSkillName(name);
-        return dirs.find((d) => existsSync12(join14(d, name, "SKILL.md")));
+        return dirs.find((d) => existsSync13(join15(d, name, "SKILL.md")));
       };
       try {
         if (a.action === "report" || a.action === "boxscore") {
           const summary = summarizePossessionLedger();
-          return renderDecisionReport(summary, ctx);
+          return renderDecisionReport(summary, ctx2);
         }
         if (a.action === "pending_possessions") {
           return renderPendingPossessions();
@@ -6708,10 +7442,10 @@ ${plan.digest}` };
           return JSON.stringify(buildShareCardPayload(summary, { period: String(a.period || "All time") }), null, 2);
         }
         if (a.action === "prescribe") {
-          return prescribeForTask(String(a.task || ""), a.gap_observed === true || a.verified_gap === true, ctx, a.task_class ? String(a.task_class) : undefined, a.difficulty ? String(a.difficulty) : "unknown", a.verification_task_id ? String(a.verification_task_id) : undefined);
+          return await prescribeForTask(String(a.task || ""), a.gap_observed === true || a.verified_gap === true, ctx2, a.task_class ? String(a.task_class) : undefined, a.difficulty ? String(a.difficulty) : "unknown", a.verification_task_id ? String(a.verification_task_id) : undefined);
         }
         if (a.action === "roster") {
-          return renderRosterReport(ctx, !advancedAgentSurface);
+          return renderRosterReport(ctx2, !advancedAgentSurface);
         }
         if (a.action === "candidates") {
           const rows = loadExperience();
@@ -6736,8 +7470,8 @@ ${plan.digest}` };
         }
         if (a.action === "defense_hits") {
           const hits = [];
-          if (existsSync12(DEFENSE_HITS))
-            for (const l of readFileSync12(DEFENSE_HITS, "utf8").trim().split(`
+          if (existsSync13(DEFENSE_HITS))
+            for (const l of readFileSync13(DEFENSE_HITS, "utf8").trim().split(`
 `).slice(-20)) {
               if (l)
                 try {
@@ -6766,7 +7500,7 @@ skipped: ${plan.skipped.length}`;
           const ev = buildCrossConversationEvidence(loadExperience());
           const reviewDirs = [...new Set([...dirs, STAGED_DIR])];
           const top = searchSkills(reviewDirs, ev.digest, 3);
-          const decision = routeSkill(top, [], (name) => reviewDirs.some((dir) => existsSync12(join14(dir, name, "SKILL.md"))), 18);
+          const decision = routeSkill(top, [], (name) => reviewDirs.some((dir) => existsSync13(join15(dir, name, "SKILL.md"))), 18);
           const route = decision.route === "update" && decision.target ? `UPDATE-FIRST → "${decision.target.name}" (score ${decision.target.score}, ${decision.target.matched} distinctive terms, dominant)` : decision.route === "park-ambiguous" ? "PARK (ambiguous overlap — refusing autonomous create)" : decision.route === "park-semantic" ? `PARK (possible semantic duplicate of "${decision.suspect}")` : "CREATE (no existing skill safely covers this)";
           return `reflective review preview — ${ev.convs} sessions, ${ev.items} durable signals
 routing: ${route}
@@ -6788,7 +7522,7 @@ ${ev.digest.slice(0, 700)}`;
 `) : "(no muscle-memory-managed skills yet — use muscle_memory_skill_write action:create)";
         }
         if (a.action === "curate") {
-          const rows = curateManagedSkills(ctx);
+          const rows = curateManagedSkills(ctx2);
           if (!rows.length)
             return "(no muscle-memory-managed skills yet — create one first)";
           return rows.map((r) => `${r.verdict.toUpperCase()} uses=${r.uses} ${r.name} — ${r.reason}`).join(`
@@ -6821,18 +7555,18 @@ ${d.body}` };
         return { status: "error", content: String(e?.message ?? e) };
       }
     };
-    const writeRun = async (ctx) => {
-      const a = ctx?.args || {};
-      const dir = agentSkillsDir(ctx);
-      const dirs = scanDirs(ctx);
+    const writeRun = async (ctx2) => {
+      const a = ctx2?.args || {};
+      const dir = agentSkillsDir(ctx2);
+      const dirs = scanDirs(ctx2);
       const findSkillDir = (name) => {
         assertSafeSkillName(name);
-        return dirs.find((d) => existsSync12(join14(d, name, "SKILL.md")));
+        return dirs.find((d) => existsSync13(join15(d, name, "SKILL.md")));
       };
       try {
         if (a.action === "autopilot_run") {
           const cfg = { ...AUTOPILOT_DEFAULT, mode: a.mode === "auto" ? "auto" : "staged" };
-          const r = await runAutopilot(ctx, cfg);
+          const r = await runAutopilot(ctx2, cfg);
           const res = r.result || { graduated: [], staged: [], refined: [], retired: [] };
           const ledgerWarnings = [
             ...res.graduated.map((name) => recordLifecycle("graduate", slug(name), "autopilot graduated skill after gates")),
@@ -6842,7 +7576,7 @@ ${d.body}` };
           return `autopilot ${cfg.mode}: graduated ${res.graduated.length} ${JSON.stringify(res.graduated)}, staged ${res.staged.length}, refined ${res.refined.length} ${JSON.stringify(res.refined)}, retired ${res.retired.length} ${JSON.stringify(res.retired)}. budget ${r.budget.used + res.graduated.length + res.staged.length}/${r.budget.limit}.${ledgerWarnings}`;
         }
         if (a.action === "reflect") {
-          const r = await runReflectiveReview(ctx, { mode: a.mode === "auto" ? "auto" : "staged", semanticFn: semanticFnFor(ctx?.agent?.id) });
+          const r = await runReflectiveReview(ctx2, { mode: a.mode === "auto" ? "auto" : "staged", semanticFn: semanticFnFor(ctx2?.agent?.id) });
           if (r.action === "none" || r.action === "reject")
             return `reflect: ${r.action} — ${r.reason || ""}`;
           const graduated = !!r.wrote && !String(r.wrote).startsWith(STAGED_DIR);
@@ -6852,14 +7586,14 @@ ${d.body}` };
         if (a.action === "graduate") {
           if (!a.name)
             return { status: "error", content: "name required" };
-          const p = graduateStagedSkill(String(a.name), ctx);
+          const p = graduateStagedSkill(String(a.name), ctx2);
           const ledgerWarning = recordLifecycle("graduate", slug(a.name), "graduated staged skill to active shelf");
           return `graduated '${slug(a.name)}' -> ${p}${ledgerWarning}`;
         }
         if (a.action === "catalog_sync") {
           if (!a.name)
             return { status: "error", content: "name required" };
-          const r = syncSkillToDesktopCatalog(String(a.name), ctx, { dryRun: !!a.dry_run, force: !!a.force });
+          const r = syncSkillToDesktopCatalog(String(a.name), ctx2, { dryRun: !!a.dry_run, force: !!a.force });
           return r;
         }
         if (a.action === "pin") {
@@ -6878,7 +7612,7 @@ ${d.body}` };
           if (!a.name)
             return { status: "error", content: "name required" };
           const reason = String(a.reason || "retired by muscle-memory");
-          const target = retireManagedSkill(slug(a.name), reason, ctx, a.absorbed_into ? slug(a.absorbed_into) : undefined);
+          const target = retireManagedSkill(slug(a.name), reason, ctx2, a.absorbed_into ? slug(a.absorbed_into) : undefined);
           const ledgerWarning = recordLifecycle("retire", slug(a.name), reason);
           return `Retired '${slug(a.name)}'${a.absorbed_into ? ` (absorbed into ${slug(a.absorbed_into)})` : ""} → ${target} (reversible quarantine)${ledgerWarning}`;
         }
@@ -6889,11 +7623,11 @@ ${d.body}` };
           const repair = repairForCandidate(c);
           const d = draftWithRepair(c, repair);
           const nm = slug(a.name || d.name);
-          const retiredBlock = retiredSkillBlocker(nm, ctx);
+          const retiredBlock = retiredSkillBlocker(nm, ctx2);
           if (retiredBlock)
             return { status: "error", content: `retire-sticky blocked: ${retiredBlock}`, candidate: c };
           const desc = String(a.description || d.description);
-          const dc = dedupCheck(nm, desc, createDedupeSurface(ctx));
+          const dc = dedupCheck(nm, desc, createDedupeSurface(ctx2));
           if (dc.dup)
             return { status: "error", content: `anti-bloat blocked: ${dc.reason}. Use action:patch on '${dc.name}' instead.`, candidate: c };
           const lint = lintSkillDraft({ name: nm, description: desc, body: d.body }, { needsPitfalls: !!c.fixes });
@@ -6913,7 +7647,7 @@ description: ${desc}
 ${d.body}${prov}
 `;
           const p = writeSkill(dir, nm, content);
-          syncSkillToDesktopCatalog(nm, ctx);
+          syncSkillToDesktopCatalog(nm, ctx2);
           const ledgerWarning = recordLifecycle("learn", nm, `created from mature candidate ${c.kind}`);
           return `created '${nm}' from candidate '${c.key}'${repair ? ` (w/ observed Pitfall: ${repair.errClass})` : ""} -> ${p}
 Load with muscle_memory_skill_read action:load, then invoke the normal Skill tool with skill="${nm}". Dedup max overlap ${Math.round(dc.overlap * 100)}% (${dc.name || "none"}); lint OK.${ledgerWarning}`;
@@ -6922,10 +7656,10 @@ Load with muscle_memory_skill_read action:load, then invoke the normal Skill too
           if (!a.name || !a.description || !a.body)
             return { status: "error", content: "need name, description, body" };
           const nm = slug(a.name);
-          const retiredBlock = retiredSkillBlocker(nm, ctx);
+          const retiredBlock = retiredSkillBlocker(nm, ctx2);
           if (retiredBlock)
             return { status: "error", content: `retire-sticky blocked: ${retiredBlock}` };
-          const dc = dedupCheck(nm, a.description, createDedupeSurface(ctx));
+          const dc = dedupCheck(nm, a.description, createDedupeSurface(ctx2));
           if (dc.dup)
             return { status: "error", content: `anti-bloat blocked: ${dc.reason}. Use action:patch on '${dc.name}' instead.` };
           const lint = lintSkillDraft({ name: nm, description: a.description, body: a.body });
@@ -6946,7 +7680,7 @@ description: ${a.description}
 ${body}
 `;
           const p = writeSkill(dir, nm, content);
-          syncSkillToDesktopCatalog(nm, ctx);
+          syncSkillToDesktopCatalog(nm, ctx2);
           const ledgerWarning = recordLifecycle("learn", nm, "created after authoring and anti-bloat gates");
           return `created '${nm}' -> ${p}
 Load with muscle_memory_skill_read action:load, then invoke the normal Skill tool with skill="${nm}" when you want to use it. Dedup max overlap ${Math.round(dc.overlap * 100)}% (${dc.name || "none"}).${ledgerWarning}`;
@@ -6965,7 +7699,7 @@ Load with muscle_memory_skill_read action:load, then invoke the normal Skill too
           if (!secP.ok)
             return { status: "error", content: `security blocked: ${secP.issues.join("; ")}` };
           writeSkill(d, a.name, nt);
-          syncSkillToDesktopCatalog(String(a.name), ctx);
+          syncSkillToDesktopCatalog(String(a.name), ctx2);
           const ledgerWarning = recordLifecycle("update", slug(a.name), "patched active skill after review");
           return `patched '${a.name}' in ${d}${ledgerWarning}`;
         }
@@ -6985,26 +7719,26 @@ Load with muscle_memory_skill_read action:load, then invoke the normal Skill too
           writeSkill(d, a.name, a.body.includes(MM_TAG) ? a.body : a.body + `
 <!-- ${MM_TAG}: edited ${new Date().toISOString().slice(0, 10)} -->
 `);
-          syncSkillToDesktopCatalog(String(a.name), ctx);
+          syncSkillToDesktopCatalog(String(a.name), ctx2);
           const ledgerWarning = recordLifecycle("update", slug(a.name), "full skill rewrite passed authoring gates");
           return `full-rewrote '${a.name}'${ledgerWarning}`;
         }
         if (a.action === "write_file") {
           if (!a.name || !a.file_path || a.file_content == null)
             return { status: "error", content: "need name, file_path, file_content" };
-          const full = writeSupportFile(slug(a.name), String(a.file_path), String(a.file_content), ctx);
+          const full = writeSupportFile(slug(a.name), String(a.file_path), String(a.file_content), ctx2);
           return `wrote support file ${a.file_path} -> ${full}`;
         }
         if (a.action === "remove_file") {
           if (!a.name || !a.file_path)
             return { status: "error", content: "need name, file_path" };
-          const grave = removeSupportFile(slug(a.name), String(a.file_path), ctx);
+          const grave = removeSupportFile(slug(a.name), String(a.file_path), ctx2);
           return `removed ${a.file_path} (reversible quarantine -> ${grave})`;
         }
         if (a.action === "restore") {
           if (!a.name)
             return { status: "error", content: "name required" };
-          const p = restoreManagedSkill(slug(a.name), ctx);
+          const p = restoreManagedSkill(slug(a.name), ctx2);
           const ledgerWarning = recordLifecycle("restore", slug(a.name), "restored quarantined skill to active shelf");
           return `Restored '${slug(a.name)}' to the active shelf → ${p}${ledgerWarning}`;
         }
@@ -7024,11 +7758,11 @@ Load with muscle_memory_skill_read action:load, then invoke the normal Skill too
       required: ["action"],
       additionalProperties: false
     };
-    const lifecycleRun = async (ctx) => {
-      const a = ctx?.args || {};
+    const lifecycleRun = async (ctx2) => {
+      const a = ctx2?.args || {};
       try {
         if (a.action === "reflect") {
-          const r = await runReflectiveReview(ctx, { mode: a.mode === "auto" ? "auto" : "staged", semanticFn: semanticFnFor(ctx?.agent?.id) });
+          const r = await runReflectiveReview(ctx2, { mode: a.mode === "auto" ? "auto" : "staged", semanticFn: semanticFnFor(ctx2?.agent?.id) });
           if (r.action === "none" || r.action === "reject")
             return `reflect: ${r.action} — ${r.reason || ""}`;
           const graduated = !!r.wrote && !String(r.wrote).startsWith(STAGED_DIR);
@@ -7045,7 +7779,7 @@ Load with muscle_memory_skill_read action:load, then invoke the normal Skill too
         if (a.action === "graduate") {
           if (!a.name)
             return { status: "error", content: "name required" };
-          const p = graduateStagedSkill(String(a.name), ctx);
+          const p = graduateStagedSkill(String(a.name), ctx2);
           const ledgerWarning = recordLifecycle("graduate", slug(a.name), "graduated staged skill to active shelf");
           return `Graduated '${slug(a.name)}' to the active shelf → ${p}${ledgerWarning}`;
         }
@@ -7058,11 +7792,11 @@ Load with muscle_memory_skill_read action:load, then invoke the normal Skill too
               content: `publish to the shared catalog needs explicit approval — re-run with approve: true to publish '${slug(String(a.name))}'`
             };
           }
-          const p = publishSkillToCatalog(String(a.name), ctx);
+          const p = publishSkillToCatalog(String(a.name), ctx2);
           return `Published '${slug(a.name)}' to the shared Custom Skills catalog → ${p}`;
         }
         if (a.action === "prune") {
-          const r = runAutonomousPrune(ctx, { maxRetire: 1 });
+          const r = runAutonomousPrune(ctx2, { maxRetire: 1 });
           const ledgerWarnings = r.retired.map((name) => recordLifecycle("retire", slug(name), "autonomous prune retired skill after evidence gate")).join("");
           return `prune: retired ${r.retired.length} ${JSON.stringify(r.retired)}, flagged ${r.flagged.length}, kept ${r.kept.length}${ledgerWarnings}`;
         }
@@ -7084,15 +7818,15 @@ Load with muscle_memory_skill_read action:load, then invoke the normal Skill too
       required: ["skill", "rating"],
       additionalProperties: false
     };
-    const rateRun = async (ctx) => {
-      const a = ctx?.args || {};
+    const rateRun = async (ctx2) => {
+      const a = ctx2?.args || {};
       const skill = slug(String(a.skill || "").trim());
       const rating = String(a.rating || "").toLowerCase();
       if (!skill)
         return "\uD83D\uDEAB skill is required";
       if (rating !== "up" && rating !== "down" && rating !== "no_rate")
         return "\uD83D\uDEAB rating must be up|down|no_rate";
-      if (!isInstalledSkill(skill, ctx))
+      if (!isInstalledSkill(skill, ctx2))
         return `\uD83D\uDEAB not recorded — skill '${skill}' is not installed on this agent`;
       const res = await rateSkill(letta.client, skill, rating, a.step_id ? String(a.step_id) : null, {
         reason: a.reason ? String(a.reason) : "",
@@ -7100,8 +7834,8 @@ Load with muscle_memory_skill_read action:load, then invoke the normal Skill too
         evidenceRef: a.evidence_ref ? String(a.evidence_ref) : "",
         task: a.task ? String(a.task) : "",
         source: "agent",
-        model: modelIdentity(ctx?.model),
-        provider: providerIdentity(ctx?.model)
+        model: modelIdentity(ctx2?.model),
+        provider: providerIdentity(ctx2?.model)
       });
       if (!res.recorded)
         return `\uD83D\uDEAB not recorded — ${res.reason}`;
@@ -7120,8 +7854,8 @@ Load with muscle_memory_skill_read action:load, then invoke the normal Skill too
       required: ["possession_id", "result", "evidence_tier", "reason"],
       additionalProperties: false
     };
-    const outcomeRun = async (ctx) => {
-      const a = ctx?.args || {};
+    const outcomeRun = async (ctx2) => {
+      const a = ctx2?.args || {};
       const possessionId = String(a.possession_id || "").trim();
       const result = String(a.result || "");
       const tier = String(a.evidence_tier || "");
@@ -7181,12 +7915,12 @@ ${receipt}` : receipt;
       required: ["possession_id", "result", "reason"],
       additionalProperties: false
     };
-    const closeRun = async (ctx) => {
-      const a = ctx?.args || {};
+    const closeRun = async (ctx2) => {
+      const a = ctx2?.args || {};
       const possessionId = String(a.possession_id || "").trim();
       const result = String(a.result || "");
       const recorded = await outcomeRun({
-        ...ctx,
+        ...ctx2,
         args: {
           possession_id: possessionId,
           result,
@@ -7224,7 +7958,7 @@ EVIDENCE · judged result added · not verified${receipt}`;
         else if (event.evidence_tier === "agent_judged" || event.evidence_tier === "human_judged")
           judged++;
       }
-      const proven = renderRosterSnapshot(ctx).provenNames.includes(skill);
+      const proven = renderRosterSnapshot(ctx2).provenNames.includes(skill);
       return `OUTCOME RECORDED · ${result} · agent-judged
 SKILL · ${skill}
 EVIDENCE · ${judged} judged · ${verified} verified · ${proven ? "proven" : "still unproven"}${receipt}`;
@@ -7240,8 +7974,8 @@ EVIDENCE · ${judged} judged · ${verified} verified · ${proven ? "proven" : "s
       required: ["task_id", "task_class", "target_rel", "expected_sha256"],
       additionalProperties: false
     };
-    const verifierRegistrationRun = async (ctx) => {
-      const a = ctx?.args || {};
+    const verifierRegistrationRun = async (ctx2) => {
+      const a = ctx2?.args || {};
       try {
         const created = createExactFileVerificationTask({
           taskId: String(a.task_id || ""),
@@ -7262,8 +7996,8 @@ EVIDENCE · ${judged} judged · ${verified} verified · ${proven ? "proven" : "s
       required: ["possession_id"],
       additionalProperties: false
     };
-    const verifierRun = async (ctx) => {
-      const possessionId = String(ctx?.args?.possession_id || "").trim();
+    const verifierRun = async (ctx2) => {
+      const possessionId = String(ctx2?.args?.possession_id || "").trim();
       const events = loadPossessionEvents();
       const decision = events.find((event) => event.type === "decision" && event.possession_id === possessionId);
       if (!decision)
@@ -7290,7 +8024,8 @@ EVIDENCE · ${judged} judged · ${verified} verified · ${proven ? "proven" : "s
           flashEarnedMinute(affectedSkill || "prescribed skill", affectedSkill);
         } else
           writeUiState({ phase: "idle", last: "", skill: "", route: "" });
-        const head = verified.procedural_credit ? `\uD83D\uDD2C BOUND-VERIFIED 'helped'` : verified.artifact_verified ? `\uD83D\uDD2C ARTIFACT-VERIFIED · no procedural credit` : `\uD83D\uDD2C BOUND-VERIFIED 'harmed'`;
+        const abstained = decision.action === "abstain";
+        const head = abstained ? verified.procedural_credit ? `\uD83D\uDD2C BOUND-VERIFIED 'succeeded_unaided' · instrument saw NO skill run` : `\uD83D\uDD2C BOUND-VERIFIED 'failed_unaided'` : verified.procedural_credit ? `\uD83D\uDD2C BOUND-VERIFIED 'helped'` : verified.artifact_verified ? `\uD83D\uDD2C ARTIFACT-VERIFIED · no procedural credit` : `\uD83D\uDD2C BOUND-VERIFIED 'harmed'`;
         const why = verified.procedural_credit ? "" : ` · ${verified.reason}`;
         return `${notice ? `⚠️ ${notice}
 ` : ""}${head} for ${possessionId} · adapter ${verified.verification.adapter_id} · manifest ${verified.verification.manifest_sha256.slice(0, 12)}… · event ${recorded.event_id}${why}`;
@@ -7303,8 +8038,8 @@ EVIDENCE · ${judged} judged · ${verified} verified · ${proven ? "proven" : "s
       description: advancedAgentSurface ? "Read Muscle Memory state. START with action:report for the private Decision Report (boxscore is a legacy alias). Use action:pending_possessions to resume open work, action:roster for conservative outcome review, and action:reflect_plan before learning. For a current task gap, prefer the dedicated muscle_memory_prescribe tool; legacy action:prescribe remains compatible. Coverage and low-level tape are diagnostics, not the primary workflow." : "Read the private Decision Report, resume a pending possession, review the skill roster, or load one known skill. For a current task gap, use muscle_memory_prescribe.",
       parameters: advancedAgentSurface ? readParams : leanReadParams,
       requiresApproval: false,
-      async run(ctx) {
-        return readRun(ctx);
+      async run(ctx2) {
+        return readRun(ctx2);
       }
     }));
     disposers.push(letta.tools.register({
@@ -7312,8 +8047,8 @@ EVIDENCE · ${judged} judged · ${verified} verified · ${proven ? "proven" : "s
       description: "Use after you observe a real procedural miss, or when you know you lack the procedure for the current task. Provide only the task and your explicit gap attestation. Returns exactly ONE installed Skill or ABSTAIN and opens one private possession. It never dumps the shelf, creates a skill, or infers hidden model capability. If you already know the recovery, do not call this tool; continue unaided. After a prescription, invoke the exact Skill tool, complete the task, then use muscle_memory_close.",
       parameters: prescribeParams,
       requiresApproval: false,
-      async run(ctx) {
-        return readRun({ ...ctx, args: { task: ctx?.args?.task, gap_observed: ctx?.args?.gap_observed, action: "prescribe" } });
+      async run(ctx2) {
+        return readRun({ ...ctx2, args: { task: ctx2?.args?.task, gap_observed: ctx2?.args?.gap_observed, action: "prescribe" } });
       }
     }));
     disposers.push(letta.tools.register({
@@ -7321,8 +8056,8 @@ EVIDENCE · ${judged} judged · ${verified} verified · ${proven ? "proven" : "s
       description: "Lightweight default closeout for a Muscle Memory possession. Provide the returned possession_id, the observed result, and one concrete reason. The tool records agent_judged evidence automatically, reports whether the skill remains unproven, and cannot accept or self-award verified evidence. Use record_agent_possession only for human-judged closeout, evidence references, or append-only corrections; use verify_agent_possession for pre-bound instrument proof.",
       parameters: closeParams,
       requiresApproval: false,
-      async run(ctx) {
-        return closeRun(ctx);
+      async run(ctx2) {
+        return closeRun(ctx2);
       }
     }));
     if (advancedAgentSurface) {
@@ -7331,8 +8066,8 @@ EVIDENCE · ${judged} judged · ${verified} verified · ${proven ? "proven" : "s
         description: "Advanced judged closeout and correction surface. Prefer muscle_memory_close for ordinary agent-judged outcomes. Use this full tool when a human owns the judgment, an evidence reference must be attached, or an append-only correction must supersede the exact active outcome event. Caller-recorded evidence remains human_judged or agent_judged only; verified is reserved for an instrument-owned adapter and cannot be self-awarded. Never promotes, publishes, or mutates a skill.",
         parameters: outcomeParams,
         requiresApproval: false,
-        async run(ctx) {
-          return outcomeRun(ctx);
+        async run(ctx2) {
+          return outcomeRun(ctx2);
         }
       }));
       disposers.push(letta.tools.register({
@@ -7340,8 +8075,8 @@ EVIDENCE · ${judged} judged · ${verified} verified · ${proven ? "proven" : "s
         description: "Pre-register one immutable exact-file SHA-256 verification task before a prescribed edit begins. The caller defines the task class, trusted-root-relative target, and expected final digest; the mod writes a read-only manifest and returns its hash. It accepts no outcome/evidence tier and cannot close a possession.",
         parameters: verifierRegistrationParams,
         requiresApproval: false,
-        async run(ctx) {
-          return verifierRegistrationRun(ctx);
+        async run(ctx2) {
+          return verifierRegistrationRun(ctx2);
         }
       }));
       disposers.push(letta.tools.register({
@@ -7349,8 +8084,8 @@ EVIDENCE · ${judged} judged · ${verified} verified · ${proven ? "proven" : "s
         description: "Instrument-owned exact-file SHA-256 closeout for a possession that was bound to a pre-registered immutable verification task before work began. Accepts only possession_id; the adapter derives the trusted root, task, manifest, target, hash, result, evidence tier, reason, and receipt. Refuses unbound, tampered, replayed, symlinked, traversing, or already-closed possessions.",
         parameters: verifierParams,
         requiresApproval: false,
-        async run(ctx) {
-          return verifierRun(ctx);
+        async run(ctx2) {
+          return verifierRun(ctx2);
         }
       }));
       disposers.push(letta.tools.register({
@@ -7358,8 +8093,8 @@ EVIDENCE · ${judged} judged · ${verified} verified · ${proven ? "proven" : "s
         description: "muscle-memory writes (approval-gated, reversible). THE CORE LOOP: action:reflect distills a class-level skill from your cross-conversation work → update-first anti-bloat, security/lint-gated, staged by default. graduate promotes a staged skill to your active skill shelf. Plus create/patch/edit_full/retire/restore/pin lifecycle + write_file for support files. Preview first with reflect_plan (the read tool). For no-approval reflect/graduate/publish/prune, use muscle_memory_lifecycle_run.",
         parameters: writeParams,
         requiresApproval: true,
-        async run(ctx) {
-          return writeRun(ctx);
+        async run(ctx2) {
+          return writeRun(ctx2);
         }
       }));
       disposers.push(letta.tools.register({
@@ -7367,8 +8102,8 @@ EVIDENCE · ${judged} judged · ${verified} verified · ${proven ? "proven" : "s
         description: "muscle-memory autonomous lifecycle. reflect (distill a skill from your work), graduate (promote a staged skill → active shelf) and prune (retire stale/unused skills) are reversible and need no approval. publish (mirror a skill → shared Custom Skills catalog) is the exception: it writes outside your own shelf, so it requires approve: true unless the operator has set MM_PUBLISH=auto. This is the full self-improvement loop. Broad/manual skill edits → muscle_memory_skill_write; preview → reflect_plan in muscle_memory_skill_read.",
         parameters: lifecycleParams,
         requiresApproval: false,
-        async run(ctx) {
-          return lifecycleRun(ctx);
+        async run(ctx2) {
+          return lifecycleRun(ctx2);
         }
       }));
       disposers.push(letta.tools.register({
@@ -7376,8 +8111,8 @@ EVIDENCE · ${judged} judged · ${verified} verified · ${proven ? "proven" : "s
         description: "Rate a muscle-memory skill from YOUR experience of whether it helped the NEXT possession — the field-referee signal (both agents rate at their own natural boundaries). rating: up (it helped), down (it misled / wasted time / added drag), no_rate (you used it but it was genuinely neutral). reason REQUIRED for down/no_rate — state the OUTCOME you saw; never rate because you remembered the skill or to self-congratulate (that is Goodhart on our own instrument). rater is auto-set to the calling agent. Writes an append-only reasoned event (rating-reasons.jsonl) + the backward-compatible plus-minus aggregate, feeding the read-only roster recommendations. Field ratings are ASSOCIATIONAL — they can flag a skill for patch/bench, never auto-promote or auto-retire it.",
         parameters: rateParams,
         requiresApproval: false,
-        async run(ctx) {
-          return rateRun(ctx);
+        async run(ctx2) {
+          return rateRun(ctx2);
         }
       }));
     }

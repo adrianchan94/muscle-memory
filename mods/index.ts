@@ -38,17 +38,18 @@ import { assertSafeSkillName, globalSkillsDir, LOG_PATH, MM, MM_TAG, NEOCORTEX_B
 import { buildCrossConversationEvidence, classifyError, commandTemplate, correlateOutcomes, detect, detectAntiPatterns, detectInvocationGotchas, detectRepairChains, detectSequences, detectTemplates, fingerprint, impactScore, inferOutcomes, isDurableLesson, isValidSkillName, maturityScore, mergeOutcomes, stepSig } from "./detect";
 import { auditSkills, buildDiffFragment, candidateDescription, candidateName, crossShelfDuplicates, dedupCheck, draftSkillFromCandidate, draftWithRepair, effectivenessVerdict, findCandidate, lintSkillDraft, repairForCandidate, sotaQualityGaps } from "./gate";
 import { approveStagedPublish, catalogPrivacyScan, findSimilarSkills, liveSkillVisible, publishHardBlocks, publishMetadata, publishPlan, publishSkillToCatalog, publishTier, publishVisibilityReceipt, publishabilityScore, sanitizeForPublish, stageSanitizedPublish } from "./publish";
-import { Defense, ENGRAM, GuardMode, buildDefenses, buildNeocortexBlock, captureTagged, coachOnFailure, engramConsolidate, expectationFor, guardDecision, interleave, labileSkills, nativeEnabled, preActionDefense, predictionError, renderEngramDigest, replayQueue, reverseReplay, semanticSkillCandidates, skillRetrieved, syncNeocortexBlock, syncSkillPassages, tagExperience } from "./engram";
+import { Defense, ENGRAM, GuardMode, buildDefenses, buildNeocortexBlock, captureTagged, coachOnFailure, engramConsolidate, expectationFor, guardDecision, interleave, labileSkills, nativeEnabled, preActionDefense, predictionError, renderEngramDigest, replayQueue, reverseReplay, semanticSkillCandidates, skillRetrieved, syncNeocortexBlock, syncNeocortexMemfs, syncSkillPassages, tagExperience } from "./engram";
 import { CURATOR, aggregateTelemetry, buildRegistry, bumpUsage, churnSignal, coverageMap, curateManagedSkills, curatorPass, isPinned, lifecycleTransition, managedSkillUsage, restoreManagedSkill, retireManagedSkill, retiredSkillBlocker, runAutonomousPrune, setPinned, skillVerbs, specDrift } from "./lifecycle";
-import { AUTOPILOT_DEFAULT, AutopilotMode, REVIEW_PROMPT, SemanticFn, applySemanticEvidence, autopilotPlan, buildEvidenceManifest, executeAutopilotPlan, forkAuthor, graduateStagedSkill, isHighConfidenceCreate, loadHandledReflects, managedView, normalizePrescriptionQuery, pickUpdateTarget, reflectSignature, retrievePreferences, reviewAndAuthor, routeSkill, runAutopilot, runReflectiveReview, searchSkills, streamChunkText } from "./autopilot";
+import { AUTOPILOT_DEFAULT, AutopilotMode, REVIEW_PROMPT, SemanticFn, applySemanticEvidence, autopilotPlan, buildEvidenceManifest, executeAutopilotPlan, forkAuthor, graduateStagedSkill, isHighConfidenceCreate, loadHandledReflects, managedView, normalizePrescriptionQuery, RERANK_CONF_FLOOR, RERANK_SYSTEM_PROMPT, rerankUserPrompt, PRESCRIBE_SYSTEM_PROMPT, prescribeUserPrompt, parseJudgement, wideCandidates, RerankJudgement, composeEnabled, composePrescription, composeAroundPrimary, selectCompanions, searchSkillsWithContext, flattenContextText, contextCharCap, pickUpdateTarget, reflectSignature, retrievePreferences, reviewAndAuthor, routeSkill, runAutopilot, runReflectiveReview, searchSkills, streamChunkText } from "./autopilot";
 import { friendlyRouteLabel, renderAgentBoxScore, renderMuscleMemoryPanel, summarizeReflectActions } from "./ui";
 import { observeToolStart, observeToolEnd } from "./invocation";
+import { closeNudgeEnabled, closeoutNudge, prescribeNudgeEnabled, prescribeNudge } from "./nudge";
 import { initInstrumentKey, instrumentSessionNotice } from "./instrument";
 import { claimBearingVerdict, buildShareCardPayload, loadPossessionEvents, pendingPossessionViews, recordInstrumentVerifiedOutcome, recordPossessionEvent, summarizePossessionLedger, type DecisionRoute, type DifficultyTier, type OutcomeResult, type EvidenceTier, type LifecycleAction, type PossessionDecisionEvent } from "./possessions";
 import { bindExactFileVerificationTask, createExactFileVerificationTask, verifyExactFilePossession } from "./verification";
 import { collectWins, renderWins } from "./wins";
 import { mineAgentHistory } from "./history";
-import { loadPlusMinus, loadRatingEvents, modelIdentity, providerIdentity, rateSkill, renderPlusMinus } from "./referee";
+import { loadPlusMinus, loadRatingEvents, recordObservedSkillFailure, modelIdentity, providerIdentity, rateSkill, renderPlusMinus } from "./referee";
 import { attachSquadShelf, ensureSquadArchive, publishSkillToShelf, pullShelfSkill, SQUAD_ARCHIVE_NAME } from "./shelf";
 
 
@@ -84,6 +85,35 @@ function autoPruneIfEnabled(ctx: any): void {
 
 export default function activate(letta: any) {
   const disposers: Array<() => void> = [];
+
+  /** PUSH THE SKILL INDEX AT CONVERSATION OPEN — before the first system-prompt compile.
+   *
+   * Measured 2026-08-09: pushing at turn_start writes the block correctly but the agent never sees
+   * it in a one-shot run, because letta compiles the system prompt for that same turn at/just
+   * before turn_start. The committed block therefore lands ONE TURN LATE, and a `-p` benchmark run
+   * has no later turn. conversation_open fires earlier in the lifecycle; injection is not supported
+   * there (notification only) but a FILE WRITE is, and the projection is read at compile time.
+   * Best-effort and gated on MM_NATIVE=blocks; a failure must never affect the conversation. */
+  const pushSkillIndex = (agentId: unknown, ctx?: any) => {
+    try {
+      if (!nativeEnabled("blocks")) return;
+      const dirs2 = scanDirs(ctx ?? {});
+      const shelf = [...new Set(dirs2.flatMap((d) => { try { return listSkillNames(d); } catch { return []; } }))]
+        .sort()
+        .map((n) => {
+          const d = dirs2.find((dir) => existsSync(join(dir, n, "SKILL.md")));
+          return { name: n, description: d ? skillDesc(d, n) : "" };
+        });
+      if (shelf.length) syncNeocortexMemfs(String(agentId || "") || null, buildNeocortexBlock(shelf));
+    } catch { /* advisory */ }
+  };
+  try {
+    if (letta?.events?.on) {
+      disposers.push(letta.events.on("conversation_open", (event: any, ctx: any) => {
+        pushSkillIndex(event?.agentId ?? ctx?.agent?.id ?? ctx?.agentId, ctx);
+      }) || (() => {}));
+    }
+  } catch { /* lifecycle events may be unavailable; push then falls back to turn_start */ }
   let panel: any = null; // live scoreboard panel (assigned below; referenced by event handlers)
   let panelBeatTimer: ReturnType<typeof setTimeout> | null = null;
   const flashEarnedMinute = (label: string, skill = "") => {
@@ -152,7 +182,79 @@ export default function activate(letta: any) {
     });
   };
   let possessionCounter = 0;
-  const prescribeForTask = (task: string, gapDeclared: boolean, ctx: any, taskClassInput?: string, difficultyInput?: DifficultyTier, verificationTaskId?: string) => {
+
+// ── V1 rerank plumbing ─────────────────────────────────────────────────────────
+// OFF by default (MM_RERANK=on). The judge is a local command so this works on a --backend local
+// box with no cloud embeddings: MM_RERANK_CMD reads the prompt on stdin and prints STRICT JSON.
+function rerankEnabled(): boolean {
+  return String(process.env.MM_RERANK || "").toLowerCase() === "on" && !!process.env.MM_RERANK_CMD;
+}
+
+// ── L2 CONTEXT-AS-QUERY cache ──────────────────────────────────────────────────────────────────
+// ONE entry, replaced at every turn_start. Not a map: a stale key that silently misses is worse than no
+// cache at all (that is exactly why PROD-JUDGE-DESIGN rejected caching a GUESSED query in
+// turn_start). Here the cached thing is the turn's raw context, which is correct for whatever the
+// model eventually asks — so the cache key is only "which turn", and it is refreshed every turn.
+// TTL is a second safety net: if turn_start ever stops firing (capability off, host change), the
+// context expires rather than being applied to an unrelated later turn.
+type TurnContextCache = { conv: string; ts: number; text: string };
+let TURN_CONTEXT: TurnContextCache | null = null;
+function contextAsQueryEnabled(): boolean {
+  return String(process.env.MM_CTX_QUERY || "").toLowerCase() === "on";
+}
+function contextTtlMs(): number {
+  const raw = Number(process.env.MM_CTX_TTL_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : 300_000;
+}
+function setTurnContext(conv: string, text: string): void {
+  TURN_CONTEXT = text ? { conv, ts: Date.now(), text } : null;
+}
+function clearTurnContext(): void { TURN_CONTEXT = null; }
+/** The current turn's context, or "" — and "" means prescribe behaves exactly as it ships today. */
+function currentTurnContext(ctx: any): string {
+  if (!contextAsQueryEnabled() || !TURN_CONTEXT) return "";
+  if (Date.now() - TURN_CONTEXT.ts > contextTtlMs()) { TURN_CONTEXT = null; return ""; }
+  const conv = String(ctx?.sessionId ?? ctx?.conversationId ?? "");
+  // Cross-conversation bleed would be a real harm (one session's context routing another's skills).
+  if (conv && TURN_CONTEXT.conv && conv !== TURN_CONTEXT.conv) return "";
+  return TURN_CONTEXT.text;
+}
+
+async function runJudge(evidence: string, name: string, description: string): Promise<RerankJudgement | null> {
+  const cmd = String(process.env.MM_RERANK_CMD || "");
+  if (!cmd) return null;
+  // node:child_process works under both bun and node — never assume the host runtime.
+  try {
+    const { spawnSync } = await import("node:child_process");
+    const res = spawnSync("/bin/sh", ["-lc", cmd], {
+      input: PRESCRIBE_SYSTEM_PROMPT + "\n\n" + prescribeUserPrompt(evidence, name, description),
+      encoding: "utf8", timeout: Number(process.env.MM_RERANK_TIMEOUT_MS || 120000), maxBuffer: 8 * 1024 * 1024,
+    });
+    if (res.error || typeof res.stdout !== "string") return null;
+    return parseJudgement(res.stdout);
+  } catch { return null; }
+}
+
+/** Wide lexical recall -> judge each candidate in rank order -> first confident same_job wins. */
+async function judgePrescription(dirs: string[], query: string, ctx: any): Promise<{ name: string; confidence: number } | null> {
+  const budget = Math.max(1, Number(process.env.MM_RERANK_MAX_JUDGE || 3));
+  const cands = wideCandidates(dirs, query, (dir) => listSkillNames(dir), budget);
+  // Score EVERY candidate and take the most confident, never the first past the post. Adjacent
+  // skills ("emit a sorted structured file") both answer yes; lexical order then decides, which is
+  // arbitrary. Measured: first-yes produced 4 wrong prescriptions, 3 of them one adjacent pair.
+  let best: { name: string; confidence: number } | null = null;
+  for (const c of cands) {
+    const desc = skillDesc(c.dir, c.name);
+    const j = await runJudge(query, c.name, desc);
+    if (!j) continue;                       // judge error -> skip, never guess
+    if (j.same_job === true && j.confidence >= RERANK_CONF_FLOOR) {
+      if (!best || j.confidence > best.confidence) best = { name: c.name, confidence: j.confidence };
+    }
+  }
+  return best;
+}
+
+  const prescribeForTask = async (task: string, gapDeclared: boolean, ctx: any, taskClassInput?: string, difficultyInput?: DifficultyTier, verificationTaskId?: string) => {
     const query = String(task || "").trim();
     if (!query) return "ABSTAIN — describe the observed task/procedure gap before requesting a prescription.";
     const taskClass = /^[a-z0-9][a-z0-9-]{0,79}$/.test(String(taskClassInput || ""))
@@ -162,7 +264,10 @@ export default function activate(letta: any) {
       const stamp = Date.now();
       const possessionId = `p-${stamp.toString(36)}-${++possessionCounter}-${hash(`${taskClass}:${route}:${stamp}`)}`;
       try {
-        const verification = action === "prescribe" && verificationTaskId
+        // Bind on BOTH actions. A prescribe binding asks "did the skill cause the artifact";
+        // an abstain binding asks "is the artifact right and did NO skill run" — the instrument
+        // deriving a correct abstention instead of the caller asserting one.
+        const verification = verificationTaskId
           ? bindExactFileVerificationTask(String(verificationTaskId))
           : undefined;
         recordPossessionEvent({
@@ -191,9 +296,55 @@ export default function activate(letta: any) {
     };
     if (!gapDeclared) return track("ABSTAIN — no observed/known procedure gap was declared. Relevance alone is not an indication; let the model work unaided.", "abstain", "no-gap");
     const dirs = scanDirs(ctx);
-    const top = searchSkills(dirs, normalizePrescriptionQuery(query), 3);
+    const normalizedQuery = normalizePrescriptionQuery(query);
+    // L2: retrieve on the agent's query PLUS the turn's real context. `turnCtx` is "" whenever the
+    // feature is off, the turn_start hook failed, the TTL lapsed, or the conversation does not match
+    // — and searchSkillsWithContext(dirs, q, "") is byte-identical to searchSkills(dirs, q).
+    // Invariant I1 (autopilot.ts) means context can only re-rank candidates the agent's own query
+    // already reached; it can never introduce a skill the query shares no term with.
+    const turnCtx = currentTurnContext(ctx);
+    const top = searchSkillsWithContext(dirs, normalizedQuery, turnCtx, 3);
     const decision = routeSkill(top, [], (name) => dirs.some((dir) => existsSync(join(dir, name, "SKILL.md"))), 18);
+    // V1 rerank lane — fires ONLY after lexical failed to route, exactly as reranker-v2 specifies.
+    // A dead/absent judge changes nothing: shipped semantics are preserved by construction.
+    if (decision.route !== "update" && rerankEnabled()) {
+      const judged = await judgePrescription(dirs, normalizedQuery, ctx);
+      if (judged) {
+        // COMPOSITION STACKS ON TOP OF THE JUDGE. Measured 2026-08-09: the judge lane used to
+        // return here unconditionally, so on a composition task (travel-planning: six search-*
+        // skills, three of them required) MM_RERANK=on SILENTLY DISABLED MM_COMPOSE — the two
+        // upgrades did not stack and judge+compose scored the same as judge alone. The judge fixes
+        // ABSTENTION (vocabulary mismatch); composition fixes the SHAPE (tasks needing 2+ skills).
+        // They are orthogonal and must both apply.
+        const jc = composeAroundPrimary(dirs, normalizedQuery, judged.name);
+        const jcLines = jc.length > 1
+          ? `\nCOMPOSE · apply in order: ${jc.map((n) => `"${n}"`).join(" → ")}; each companion earned its slot with task vocabulary the earlier picks do not cover`
+          : "";
+        return track(`PRESCRIBE "${judged.name}" — semantic precision gate (judge same_job, confidence ${judged.confidence.toFixed(2)}); lexical overlap alone did not route${jcLines}\nNEXT · invoke the normal Skill tool with skill="${judged.name}", perform the task, then call muscle_memory_close with the observed result\ngap diagnosis: caller-attested observed/known procedure gap\ncontrol: do not inject sibling skills or the full shelf`, "prescribe", "matched-semantic", judged.name);
+      }
+    }
     if (decision.route === "update" && decision.target) {
+      // ── EXPERIMENTAL CONTROL ARM (MM_SHAM). NOT a product path. ────────────────────────────
+      // MM changes two things at once: it injects governance CONTEXT (+2348 prompt tokens,
+      // measured) and it SELECTS a skill. MM-on vs MM-off cannot separate those, so a win might
+      // be "the agent deliberated more" rather than "the right skill was chosen".
+      // The sham keeps every observable property of the MM arm and destroys ONLY the information
+      // in the choice. It MUST draw from the WHOLE SHELF, not from the surviving lexical
+      // candidates: an earlier version drew from `matches` and was silently deterministic,
+      // because the I1 overlap filter usually leaves exactly one candidate. A control that always
+      // reproduces the real choice is not a control.
+      //   real > sham  => the SELECTION carries the effect  (the claim)
+      //   real ~ sham  => the effect is context/deliberation and the selection claim is FALSE
+      if (String(process.env.MM_SHAM || "").toLowerCase() === "on") {
+        const shelf = [...new Set(dirs.flatMap((d) => { try { return listSkillNames(d); } catch { return []; } }))].sort();
+        if (shelf.length > 0) {
+          const seed = Number(process.env.MM_SHAM_SEED || 0) || 1;
+          let h = seed >>> 0;
+          for (const s of shelf) for (let k = 0; k < s.length; k++) h = (Math.imul(h, 31) + s.charCodeAt(k)) >>> 0;
+          const shamName = shelf[h % shelf.length];
+          return track(`PRESCRIBE "${shamName}" — one smallest matching installed skill (sham control)\nNEXT · invoke the normal Skill tool with skill="${shamName}", perform the task, then call muscle_memory_close with the observed result\ncontrol: do not inject sibling skills or the full shelf`, "prescribe", "matched", shamName);
+        }
+      }
       const t = decision.target;
       const model = modelIdentity(ctx?.model);
       const modelEvents = loadRatingEvents().filter((ev) => ev.skill === t.name && ev.rating !== "no_rate" && model !== "unknown" && ev.model === model);
@@ -206,7 +357,36 @@ export default function activate(letta: any) {
         : modelEvents.length
           ? `runtime model ${model}: field ${modelNet >= 0 ? "+" : ""}${modelNet} across ${modelEvents.length} rated possession${modelEvents.length === 1 ? "" : "s"}`
           : `runtime model ${model}: unproven for this skill; caller owns the gap diagnosis`;
-      return track(`PRESCRIBE "${t.name}" — one smallest matching installed skill (score ${t.score}, ${t.matched} distinctive terms)\nNEXT · invoke the normal Skill tool with skill="${t.name}", perform the task, then call muscle_memory_close with the observed result\n${modelLine}\ngap diagnosis: caller-attested observed/known procedure gap; the router does not infer hidden model capability\ncontrol: do not inject sibling skills or the full shelf`, "prescribe", "matched", t.name);
+      // ── G1 · MM_COMPOSE (default OFF ⇒ composeLines === "" ⇒ byte-identical message). ─────────
+      // Companion pool is the SAME scorer over the SAME query/context, just a wider k; each
+      // companion must clear the SAME gate (pickUpdateTarget) and add uncovered task terms.
+      // Computed only after a primary routed, so ABSTAIN behaviour is untouched by construction.
+      let composeLines = "";
+      if (composeEnabled()) {
+        const pool = searchSkillsWithContext(dirs, normalizedQuery, turnCtx, 10);
+        const companions = selectCompanions(normalizedQuery, { name: t.name, description: (t as any).description || "" }, pool, { threshold: 18 });
+        if (companions.length) {
+          composeLines = `\nCOMPOSE · this task spans ${companions.length + 1} skills; after "${t.name}", also apply in order: `
+            + companions.map((c) => `"${c.name}" (covers task terms this set otherwise misses: ${c.newTerms.slice(0, 4).join(", ")})`).join("; ")
+            + `\ncompose control: at most 3 skills total, each cleared the same match gate as the primary and earned its slot with uncovered task vocabulary — this is a reasoned set, never the shelf`;
+        }
+      }
+      return track(`PRESCRIBE "${t.name}" — one smallest matching installed skill (score ${t.score}, ${t.matched} distinctive terms)\nNEXT · invoke the normal Skill tool with skill="${t.name}", perform the task, then call muscle_memory_close with the observed result\n${modelLine}\ngap diagnosis: caller-attested observed/known procedure gap; the router does not infer hidden model capability\ncontrol: do not inject sibling skills or the full shelf${composeLines}`, "prescribe", "matched", t.name);
+    }
+    // ── G1 · MM_COMPOSE tie-rescue (default OFF ⇒ this block never runs; abstain unchanged). ──
+    // The pure ambiguous case the shipped router abstains on covers TWO worlds: near-duplicates
+    // tying (margin is right, abstain) and coverage-COMPLEMENTS tying (the itinerary case, where
+    // no single skill can be the answer because the answer is the set). composePrescription keeps
+    // the first world abstaining — complements are required to EARN slots with uncovered task
+    // vocabulary through the same gate — and prescribes an ordered set of <=3 for the second.
+    if (composeEnabled()) {
+      const pool = searchSkillsWithContext(dirs, normalizedQuery, turnCtx, 10);
+      const composed = composePrescription(normalizedQuery, pool, 18);
+      if (composed && composed.rescuedTie) {
+        const order = [composed.primary.name, ...composed.companions.map((c) => c.name)];
+        const reasons = composed.companions.map((c) => `"${c.name}" (covers task terms the set otherwise misses: ${c.newTerms.slice(0, 4).join(", ")})`).join("; ");
+        return track(`PRESCRIBE "${composed.primary.name}" — first of a ${order.length}-skill composition; this task spans complementary skills that tied because no single one covers it\nCOMPOSE · apply in order: ${order.map((n) => `"${n}"`).join(" → ")}; ${reasons}\nNEXT · invoke the normal Skill tool with skill="${composed.primary.name}", continue through the composition, then call muscle_memory_close with the observed result\ngap diagnosis: caller-attested observed/known procedure gap\ncompose control: at most 3 skills total, each cleared the same match gate, each earned its slot with uncovered task vocabulary — this is a reasoned set, never the shelf\ncontrol: do not inject sibling skills or the full shelf`, "prescribe", "matched", composed.primary.name);
+      }
     }
     const strongTie = top.length > 1 && top[0].score >= 18 && top[1].score >= 18 && Math.abs(top[0].score - top[1].score) <= 3;
     const route: DecisionRoute = decision.route === "park-ambiguous" || strongTie ? "ambiguous" : decision.route === "park-semantic" ? "weak-match" : "no-safe-match";
@@ -215,10 +395,23 @@ export default function activate(letta: any) {
       : decision.route === "park-semantic"
         ? `possible duplicate/neighbor "${decision.suspect}" without enough lexical proof`
         : "no installed skill cleared the safe-match gate";
+    // "Closest: none" previously covered two different worlds: a genuinely empty shelf, and a shelf
+    // full of skills that simply shared no distinctive term with how the caller phrased the task.
+    // Measured in dogfood: a first-time user lost 40 minutes to that ambiguity. Name the world.
+    const shelfNames = dirs.flatMap((d) => listSkillNames(d));
     const closest = top.length
       ? top.map((m, index) => `${index + 1}. ${m.name} — ${index === 0 ? "strongest" : m.score === top[0].score ? "tied strongest" : "close neighbor"}; ${m.matched} distinctive term${m.matched === 1 ? "" : "s"}`).join("\n")
-      : "none";
-    return track(`ABSTAIN — ${why}.\n\nClosest:\n${closest}\n\nNext: continue unaided, or inspect one candidate without loading the full shelf.`, "abstain", route);
+      : shelfNames.length
+        ? `none scored — ${shelfNames.length} skill${shelfNames.length === 1 ? "" : "s"} installed but 0 shared a distinctive term with this wording:\n` +
+          shelfNames.slice(0, 5).map((n) => `  · ${n}`).join("\n") +
+          (shelfNames.length > 5 ? `\n  · …${shelfNames.length - 5} more` : "")
+        : `none installed — shelves scanned: ${dirs.join(", ") || "(none)"}`;
+    const hint = top.length
+      ? "Next: continue unaided, or inspect one candidate without loading the full shelf."
+      : shelfNames.length
+        ? "Next: continue unaided. If one of these should have matched, its description does not share vocabulary with how this task was described — rephrase the task or widen the skill description."
+        : "Next: continue unaided. No SKILL.md was found on any scanned shelf — check the skill is installed in one of the directories listed above.";
+    return track(`ABSTAIN — ${why}.\n\nClosest:\n${closest}\n\n${hint}`, "abstain", route);
   };
   const renderPendingPossessions = () => {
     const rows = pendingPossessionViews(loadPossessionEvents());
@@ -336,10 +529,18 @@ export default function activate(letta: any) {
     // step fingerprint by callId (bounded — reflex lookups are same-turn, never historical).
     const stepByCallId = new Map<string, { tool: string; fp: string; tmpl: string | null }>();
     const coachedOnce = new Set<string>(); // one coaching per conversation per trigger — never spam
+    // G3 SHELF-CONSULT nudge (mods/nudge.ts) — one advisory per conversation, opt-in, and
+    // suppressed forever once the agent goes to the shelf on its own (Skill / muscle_memory_*).
+    const consultNudged = new Set<string>();   // conversations whose advisory already fired
+    const shelfConsulted = new Set<string>();  // conversations that already consulted MM or a Skill
     disposers.push(letta.events.on("tool_start", (event: any) => {
       try {
         const tool = String(event?.toolName ?? "");
         if (!tool) return;
+        // G3: a self-started shelf visit (Skill) or any MM consult permanently silences the advisory.
+        if (tool === "Skill" || tool.startsWith("muscle_memory") || tool === "rate_skill" || tool.startsWith("record_agent") || tool.startsWith("verify_agent") || tool.startsWith("register_exact_file")) {
+          shelfConsulted.add(String(event?.conversationId ?? "?"));
+        }
         const { fp, tmpl } = fingerprint(tool, event?.args ?? {});
         const callId = String(event?.toolCallId ?? "");
         if (callId) {
@@ -369,6 +570,10 @@ export default function activate(letta: any) {
     try {
       disposers.push(letta.events.on("tool_end", (event: any) => {
         let coached: { status: string; output: string } | null = null;
+        // FORCED LOOP-CLOSURE (mods/nudge.ts): set when the instrument witnesses the prescribed
+        // skill run inside an open possession. 0/9 agents close unforced vs 9/9 asked — so the
+        // ask is delivered here, on the invocation's own output, while the outcome is in view.
+        let closePrompt: { status: string; output: string } | null = null;
         try {
           // Real Letta tool_end contract (src/mods/types.ts): { status:"success"|"error", output }.
           const status = String(event?.status ?? "");
@@ -380,10 +585,41 @@ export default function activate(letta: any) {
           try {
             const open = loadPossessionEvents();
             const closed = new Set(open.filter((row) => row.type === "outcome").map((row) => row.possession_id));
-            observeToolEnd(event, open
+            const invocation = observeToolEnd(event, open
               .filter((row): row is PossessionDecisionEvent => row.type === "decision" && row.action === "prescribe" && !closed.has(row.possession_id))
               .map((row) => ({ possession_id: row.possession_id, event_id: row.event_id, skill: row.skill })));
+            // The instrument just bound this successful Skill call to exactly ONE open prescribed
+            // possession — the one moment the close ask is unambiguous. Append the enumerated
+            // muscle_memory_close reminder to the call's own output (cache-safe, same channel as
+            // the reflex coach). Text only: credit still requires a real close through the ledger.
+            if (invocation && closeNudgeEnabled()) {
+              closePrompt = { status: status || "success", output: outText + closeoutNudge({ skill: invocation.skill, possessionId: invocation.possession_id }) };
+            }
           } catch { /* observation must never break the tool stream */ }
+          // MIRROR LOOP: a FAILED `Skill` invocation of a still-open prescription becomes per-model
+          // negative field evidence, so the next prescribeForTask can refuse to repeat observed harm
+          // via the existing `negative-field` gate. Narrow by construction — see
+          // recordObservedSkillFailure() for why unrelated tool errors are never attributed.
+          try {
+            if (!ok && String(event?.toolName ?? "") === "Skill") {
+              const invoked = String((event?.args as any)?.skill ?? (event?.args as any)?.name ?? "").trim();
+              if (invoked) {
+                const rows = loadPossessionEvents();
+                const settled = new Set(rows.filter((row) => row.type === "outcome").map((row) => row.possession_id));
+                const openForSkill = rows.some((row): row is PossessionDecisionEvent =>
+                  row.type === "decision" && row.action === "prescribe"
+                  && row.skill === invoked && !settled.has(row.possession_id));
+                if (openForSkill) {
+                  recordObservedSkillFailure({
+                    skill: invoked, model: modelIdentity(ctx?.model), provider: String(ctx?.provider ?? "unknown"),
+                    agent: String(ctx?.agent?.id ?? ctx?.agentId ?? "unknown"),
+                    toolCallId: event?.toolCallId ?? null,
+                    detail: classifyError(outText, false)?.kind ?? undefined,
+                  });
+                }
+              }
+            }
+          } catch { /* field evidence is best-effort; never break the tool stream */ }
           appendJsonl(OUTCOME_PATH, { ts: Date.now(), id: event?.toolCallId ?? null, tool: event?.toolName ?? null, conv: event?.conversationId ?? null, ok, err, ...(errMsg ? { errMsg } : {}) });
           if (process.env.MM_REFLEX === "on" && !ok && defensesCache.length) {
             const step = stepByCallId.get(String(event?.toolCallId ?? ""));
@@ -397,7 +633,32 @@ export default function activate(letta: any) {
             }
           }
         } catch { /* best-effort */ }
-        return coached ? { result: coached } : undefined; // reflex-coached result, or untouched
+        // G3 SHELF-CONSULT nudge — opt-in advisory on the FIRST successful ordinary tool result of
+        // a conversation with a non-empty shelf and no shelf visit yet. Lowest priority: it must
+        // never displace reflex coaching or a close ask, and a thrown error must change nothing.
+        let shelfNudge: { status: string; output: string } | null = null;
+        try {
+          if (prescribeNudgeEnabled()) {
+            const conv = String(event?.conversationId ?? "?");
+            const tool = String(event?.toolName ?? "");
+            const status = String(event?.status ?? "");
+            const ok = status ? status === "success" : (event?.ok ?? !(event?.isError || event?.error));
+            const ordinary = tool && tool !== "Skill" && !tool.startsWith("muscle_memory") && tool !== "rate_skill" && !tool.startsWith("record_agent") && !tool.startsWith("verify_agent") && !tool.startsWith("register_exact_file");
+            if (ok && ordinary && !consultNudged.has(conv) && !shelfConsulted.has(conv)) {
+              const shelfNames = new Set<string>();
+              for (const d of scanDirs()) for (const n of listSkillNames(d)) shelfNames.add(n); // NOTE: no `ctx` here — it is not a tool_end handler param and a free reference would throw into the catch
+              if (shelfNames.size > 0) {
+                consultNudged.add(conv); // marked before compose: a later throw must not retry-spam
+                if (consultNudged.size > 256) { const first = consultNudged.keys().next().value; if (first !== undefined) consultNudged.delete(first); }
+                const outText = String(event?.output ?? event?.resultText ?? "");
+                shelfNudge = { status: status || "success", output: outText + prescribeNudge(shelfNames.size) };
+              }
+            }
+          }
+        } catch { /* advisory is best-effort; never break the tool stream */ }
+        // reflex coaching (failure lane) and the close nudge (success lane) are mutually
+        // exclusive by construction: an invocation only exists for a successful call.
+        return coached ? { result: coached } : closePrompt ? { result: closePrompt } : shelfNudge ? { result: shelfNudge } : undefined;
       }));
     } catch { /* tool_end not available on this surface */ }
   }
@@ -483,6 +744,69 @@ export default function activate(letta: any) {
   // turn_end is gated at runtime by capabilities.events.turns (NOT lifecycle) — guard it separately so the
   // in-session autonomous loop registers correctly on backends where turns and lifecycle diverge.
   if (letta.capabilities?.events?.turns) {
+    // ── L2 CONTEXT-AS-QUERY ─────────────────────────────────────────────────────────────────────
+    // The agent's `task` string is a PARAPHRASE of the turn, and paraphrasing costs -13.50 nDCG
+    // (n=280 paired, p=2.8e-07) by VOCABULARY SUBSTITUTION — the agent's words are not fewer, they
+    // are different, so lexical retrieval misses. The loss is at RETRIEVAL: a reranker over the same
+    // candidate set recovered +0.00. So we stop trusting the paraphrase as the whole query and read
+    // the turn's REAL text once per turn, here, before the model has said anything.
+    //
+    // COST NOTE: `event.input` is the turn's own messages, already in hand — reading it is FREE (no
+    // round trip). The hidden fork is the EXPENSIVE path and is therefore separately opt-in
+    // (MM_CTX_FORK=on); it buys prior-turn history at the price of a POST /v1/conversations/{id}/fork.
+    // Default off means the shipped p50 cost of this mechanism is a string concat.
+    //
+    // AND THE FORK PATH IS NOT JUST EXPENSIVE, IT IS THE DANGEROUS ONE. Measured on 96 real traces:
+    // of 29 recovered routing decisions, assistant THINKING contributed 0 and prior TOOL RESULTS
+    // contributed 4 (p=0.125, not significant). The entire effect is the USER'S OWN MESSAGE — which
+    // is precisely what `event.input` already holds. Meanwhile the red team showed prior tool results
+    // are where the poison lives: splice the router's own past output back in and 11 of 12 correct
+    // abstentions flip to false prescriptions. So conversation history costs a round trip, buys
+    // nothing measurable, and carries the whole known failure mode. Off by default is the finding,
+    // not a default we never got around to changing.
+    disposers.push(letta.events.on("turn_start", async (event: any, ctx: any) => {
+      // PUSH FIRST, and OUTSIDE the context-as-query gate. An earlier version placed this after
+      // the guard below, so it silently never ran unless MM_CTX_QUERY was also on — two unrelated
+      // features accidentally coupled. Gated only on MM_NATIVE=blocks; best-effort; never throws.
+      try {
+        if (nativeEnabled("blocks")) {
+          // Push what is ACTUALLY ON THE SHELF, not only MM-authored skills. managedView() filters
+          // to skills MM itself created (isManaged), which on a real task shelf is EMPTY — the push
+          // silently no-opped. The agent needs to know what it HAS; provenance is irrelevant to that.
+          const dirs2 = scanDirs(ctx ?? {});
+          const shelf = [...new Set(dirs2.flatMap((d) => { try { return listSkillNames(d); } catch { return []; } }))]
+            .sort()
+            .map((n) => {
+              const d = dirs2.find((dir) => existsSync(join(dir, n, "SKILL.md")));
+              return { name: n, description: d ? skillDesc(d, n) : "" };
+            });
+          if (shelf.length) syncNeocortexMemfs(event?.agentId ?? ctx?.agent?.id ?? ctx?.agentId ?? null, buildNeocortexBlock(shelf));
+        }
+      } catch { /* push is advisory; a failure must never break the turn */ }
+      if (!contextAsQueryEnabled()) return;               // opt-in; off => byte-identical to today
+      try {
+        const conv = String(event?.conversationId ?? ctx?.sessionId ?? "");
+        // (1) FREE path: the turn's own input, no backend call.
+        let text = flattenContextText(event?.input ?? [], contextCharCap() * 4);
+        // (2) OPT-IN path: a hidden fork so reading history can never mutate or surface in the real
+        // conversation. updateLlmConfig is NEVER called here — we read, we do not run a model.
+        if (String(process.env.MM_CTX_FORK || "").toLowerCase() === "on" && ctx?.conversation?.fork) {
+          if (ctx?.signal?.aborted) return;               // caller already gave up; do no work
+          const forked = await ctx.conversation.fork({ hidden: true });
+          if (ctx?.signal?.aborted) return;
+          const history = await forked.getHistory?.();
+          const prior = flattenContextText(history ?? [], contextCharCap() * 4);
+          if (prior) text = `${prior}\n${text}`;
+        }
+        setTurnContext(conv, text);
+      } catch {
+        // A dead fork, a dead backend, a shape change: the cache simply stays stale/empty and
+        // prescribe falls back to the agent's `task` string — i.e. exactly today's shipped
+        // behaviour. This handler can never change a routing decision by failing.
+        try { clearTurnContext(); } catch { /* never break a turn */ }
+      }
+    }));
+
     // ── AUTONOMOUS DISTILLATION (Hermes-style background review) ──────────────────────────────────
     // conversation_close (above) only fires at SESSION END. Hermes also nudges DURING a session
     // ("periodic nudge ... fires without user input"). Mirror that: after EACH turn, cheaply check
@@ -587,7 +911,7 @@ export default function activate(letta: any) {
         if (sub === "prescribe") {
           const hasGap = String(argv?.[1] || "").toLowerCase() === "--gap";
           const task = argv.slice(hasGap ? 2 : 1).join(" ").trim();
-          return { type: "output", output: prescribeForTask(task, hasGap, ctx) };
+          return { type: "output", output: await prescribeForTask(task, hasGap, ctx) };
         }
         if (sub === "ratings" || sub === "scoreboard") {
           return { type: "output", output: `FIELD RATINGS · next-task outcomes\n${renderPlusMinus(loadPlusMinus())}` };
@@ -875,7 +1199,7 @@ export default function activate(letta: any) {
           return JSON.stringify(buildShareCardPayload(summary, { period: String(a.period || "All time") }), null, 2);
         }
         if (a.action === "prescribe") {
-          return prescribeForTask(String(a.task || ""), a.gap_observed === true || a.verified_gap === true, ctx, a.task_class ? String(a.task_class) : undefined, a.difficulty ? String(a.difficulty) as DifficultyTier : "unknown", a.verification_task_id ? String(a.verification_task_id) : undefined);
+          return await prescribeForTask(String(a.task || ""), a.gap_observed === true || a.verified_gap === true, ctx, a.task_class ? String(a.task_class) : undefined, a.difficulty ? String(a.difficulty) as DifficultyTier : "unknown", a.verification_task_id ? String(a.verification_task_id) : undefined);
         }
         if (a.action === "roster") {
           return renderRosterReport(ctx, !advancedAgentSurface);
@@ -1379,11 +1703,18 @@ export default function activate(letta: any) {
         } else writeUiState({ phase: "idle", last: "", skill: "", route: "" });
         // The agent reads this string and learns from it, so it must not say "helped" when the
         // target was already correct. Artifact truth and procedural credit are reported apart.
-        const head = verified.procedural_credit
-          ? `🔬 BOUND-VERIFIED 'helped'`
-          : verified.artifact_verified
-            ? `🔬 ARTIFACT-VERIFIED · no procedural credit`
-            : `🔬 BOUND-VERIFIED 'harmed'`;
+        // The abstain lane gets its own words: there is no "helped" and no "harmed" without a
+        // skill, and telling the agent otherwise mis-trains the exact decision we want it to make.
+        const abstained = decision.action === "abstain";
+        const head = abstained
+          ? (verified.procedural_credit
+            ? `🔬 BOUND-VERIFIED 'succeeded_unaided' · instrument saw NO skill run`
+            : `🔬 BOUND-VERIFIED 'failed_unaided'`)
+          : verified.procedural_credit
+            ? `🔬 BOUND-VERIFIED 'helped'`
+            : verified.artifact_verified
+              ? `🔬 ARTIFACT-VERIFIED · no procedural credit`
+              : `🔬 BOUND-VERIFIED 'harmed'`;
         const why = verified.procedural_credit ? "" : ` · ${verified.reason}`;
         return `${notice ? `⚠️ ${notice}\n` : ""}${head} for ${possessionId} · adapter ${verified.verification.adapter_id} · manifest ${verified.verification.manifest_sha256.slice(0, 12)}… · event ${recorded.event_id}${why}`;
       } catch (error: any) {
