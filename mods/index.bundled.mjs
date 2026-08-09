@@ -6517,8 +6517,16 @@ tracking: decision not recorded — ${String(error?.message || error)}`;
       const judged = await judgePrescription(dirs, normalizedQuery, ctx2);
       if (judged) {
         const jc = composeAroundPrimary(dirs, normalizedQuery, judged.name);
-        const jcLines = jc.length > 1 ? `
-COMPOSE · apply in order: ${jc.map((n) => `"${n}"`).join(" → ")}; each companion earned its slot with task vocabulary the earlier picks do not cover` : "";
+        const judgedCompanions = [];
+        for (const cn of jc.slice(1)) {
+          const cd = dirs.find((dir) => existsSync13(join15(dir, cn, "SKILL.md")));
+          const j = await runJudge(normalizedQuery, cn, cd ? skillDesc(cd, cn) : "");
+          if (j && j.same_job === true && j.confidence >= RERANK_CONF_FLOOR)
+            judgedCompanions.push({ name: cn, confidence: j.confidence });
+        }
+        const jcLines = judgedCompanions.length ? `
+COMPOSE · apply in order: ${[judged.name, ...judgedCompanions.map((c) => c.name)].map((n) => `"${n}"`).join(" → ")}; each companion earned its slot with task vocabulary the earlier picks do not cover and was judged same-job against this task
+compose confidence: ${Math.min(...judgedCompanions.map((c) => c.confidence)).toFixed(2)} (min over judged companions; primary confidence is NOT a claim about the set)` : "";
         return track(`PRESCRIBE "${judged.name}" — semantic precision gate (judge same_job, confidence ${judged.confidence.toFixed(2)}); lexical overlap alone did not route${jcLines}
 NEXT · invoke the normal Skill tool with skill="${judged.name}", perform the task, then call muscle_memory_close with the observed result
 gap diagnosis: caller-attested observed/known procedure gap
@@ -6561,6 +6569,7 @@ control: do not inject sibling skills or the full shelf`, "prescribe", "matched"
         if (companions.length) {
           composeLines = `
 COMPOSE · this task spans ${companions.length + 1} skills; after "${t.name}", also apply in order: ` + companions.map((c) => `"${c.name}" (covers task terms this set otherwise misses: ${c.newTerms.slice(0, 4).join(", ")})`).join("; ") + `
+compose confidence: unjudged (lexical coverage only)` + `
 compose control: at most 3 skills total, each cleared the same match gate as the primary and earned its slot with uncovered task vocabulary — this is a reasoned set, never the shelf`;
         }
       }
@@ -6578,6 +6587,7 @@ control: do not inject sibling skills or the full shelf${composeLines}`, "prescr
         const reasons = composed.companions.map((c) => `"${c.name}" (covers task terms the set otherwise misses: ${c.newTerms.slice(0, 4).join(", ")})`).join("; ");
         return track(`PRESCRIBE "${composed.primary.name}" — first of a ${order.length}-skill composition; this task spans complementary skills that tied because no single one covers it
 COMPOSE · apply in order: ${order.map((n) => `"${n}"`).join(" → ")}; ${reasons}
+compose confidence: unjudged (lexical coverage only)
 NEXT · invoke the normal Skill tool with skill="${composed.primary.name}", continue through the composition, then call muscle_memory_close with the observed result
 gap diagnosis: caller-attested observed/known procedure gap
 compose control: at most 3 skills total, each cleared the same match gate, each earned its slot with uncovered task vocabulary — this is a reasoned set, never the shelf
