@@ -317,8 +317,19 @@ async function judgePrescription(dirs: string[], query: string, ctx: any): Promi
         // ABSTENTION (vocabulary mismatch); composition fixes the SHAPE (tasks needing 2+ skills).
         // They are orthogonal and must both apply.
         const jc = composeAroundPrimary(dirs, normalizedQuery, judged.name);
-        const jcLines = jc.length > 1
-          ? `\nCOMPOSE · apply in order: ${jc.map((n) => `"${n}"`).join(" → ")}; each companion earned its slot with task vocabulary the earlier picks do not cover`
+        // Companions get the SAME judge scrutiny as the primary (reuse runJudge, no second judge).
+        // Measured defect: the printed confidence scored ONLY the primary, so a 0.33-precision
+        // companion set shipped under a printed 1.00. Each companion must be same_job at
+        // >= RERANK_CONF_FLOOR or it is dropped; the surviving set carries its OWN
+        // "compose confidence" = min over judged companions — never the primary's number.
+        const judgedCompanions: Array<{ name: string; confidence: number }> = [];
+        for (const cn of jc.slice(1)) {
+          const cd = dirs.find((dir) => existsSync(join(dir, cn, "SKILL.md")));
+          const j = await runJudge(normalizedQuery, cn, cd ? skillDesc(cd, cn) : "");
+          if (j && j.same_job === true && j.confidence >= RERANK_CONF_FLOOR) judgedCompanions.push({ name: cn, confidence: j.confidence });
+        }
+        const jcLines = judgedCompanions.length
+          ? `\nCOMPOSE · apply in order: ${[judged.name, ...judgedCompanions.map((c) => c.name)].map((n) => `"${n}"`).join(" → ")}; each companion earned its slot with task vocabulary the earlier picks do not cover and was judged same-job against this task\ncompose confidence: ${Math.min(...judgedCompanions.map((c) => c.confidence)).toFixed(2)} (min over judged companions; primary confidence is NOT a claim about the set)`
           : "";
         return track(`PRESCRIBE "${judged.name}" — semantic precision gate (judge same_job, confidence ${judged.confidence.toFixed(2)}); lexical overlap alone did not route${jcLines}\nNEXT · invoke the normal Skill tool with skill="${judged.name}", perform the task, then call muscle_memory_close with the observed result\ngap diagnosis: caller-attested observed/known procedure gap\ncontrol: do not inject sibling skills or the full shelf`, "prescribe", "matched-semantic", judged.name);
       }
@@ -368,6 +379,7 @@ async function judgePrescription(dirs: string[], query: string, ctx: any): Promi
         if (companions.length) {
           composeLines = `\nCOMPOSE · this task spans ${companions.length + 1} skills; after "${t.name}", also apply in order: `
             + companions.map((c) => `"${c.name}" (covers task terms this set otherwise misses: ${c.newTerms.slice(0, 4).join(", ")})`).join("; ")
+            + `\ncompose confidence: unjudged (lexical coverage only)`
             + `\ncompose control: at most 3 skills total, each cleared the same match gate as the primary and earned its slot with uncovered task vocabulary — this is a reasoned set, never the shelf`;
         }
       }
@@ -385,7 +397,7 @@ async function judgePrescription(dirs: string[], query: string, ctx: any): Promi
       if (composed && composed.rescuedTie) {
         const order = [composed.primary.name, ...composed.companions.map((c) => c.name)];
         const reasons = composed.companions.map((c) => `"${c.name}" (covers task terms the set otherwise misses: ${c.newTerms.slice(0, 4).join(", ")})`).join("; ");
-        return track(`PRESCRIBE "${composed.primary.name}" — first of a ${order.length}-skill composition; this task spans complementary skills that tied because no single one covers it\nCOMPOSE · apply in order: ${order.map((n) => `"${n}"`).join(" → ")}; ${reasons}\nNEXT · invoke the normal Skill tool with skill="${composed.primary.name}", continue through the composition, then call muscle_memory_close with the observed result\ngap diagnosis: caller-attested observed/known procedure gap\ncompose control: at most 3 skills total, each cleared the same match gate, each earned its slot with uncovered task vocabulary — this is a reasoned set, never the shelf\ncontrol: do not inject sibling skills or the full shelf`, "prescribe", "matched", composed.primary.name);
+        return track(`PRESCRIBE "${composed.primary.name}" — first of a ${order.length}-skill composition; this task spans complementary skills that tied because no single one covers it\nCOMPOSE · apply in order: ${order.map((n) => `"${n}"`).join(" → ")}; ${reasons}\ncompose confidence: unjudged (lexical coverage only)\nNEXT · invoke the normal Skill tool with skill="${composed.primary.name}", continue through the composition, then call muscle_memory_close with the observed result\ngap diagnosis: caller-attested observed/known procedure gap\ncompose control: at most 3 skills total, each cleared the same match gate, each earned its slot with uncovered task vocabulary — this is a reasoned set, never the shelf\ncontrol: do not inject sibling skills or the full shelf`, "prescribe", "matched", composed.primary.name);
       }
     }
     const strongTie = top.length > 1 && top[0].score >= 18 && top[1].score >= 18 && Math.abs(top[0].score - top[1].score) <= 3;
