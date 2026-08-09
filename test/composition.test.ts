@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   composeEnabled, composeMaxSkills, composeMinNewTerms, selectCompanions, composePrescription,
-  searchSkills, routeSkill, pickUpdateTarget,
+  searchSkills, routeSkill, pickUpdateTarget, distinctiveTerms,
 } from "../mods/autopilot";
 
 function shelf(skills: Array<{ name: string; description: string; body?: string }>): string {
@@ -124,5 +124,47 @@ describe("MM_COMPOSE: abstain case — no match still means abstain", () => {
     expect(decision.route).not.toBe("update"); // index.ts abstains on this route, unchanged
     expect(decision.target).toBeNull();        // composeLines is only built under a routed primary
     expect(composePrescription(noneTask, pool, 18)).toBeNull(); // composition cannot rescue a no-match
+  });
+});
+
+// ── REGRESSION — companion pollution (measured 2026-08-09 shelf-scaling probes) ──────────────
+// Companion precision fell 1.00 → 0.67 → 0.33 as the shelf grew 4 → 24 → 56 because
+// selectCompanions gated only on covering the QUERY's distinctive terms, never on similarity to
+// the chosen PRIMARY. At shelf 56 both companions were cross-domain: a power-grid-MILP skill was
+// injected into a Civ6 map task (it "earned" query terms like grid/power/maximize/output). The
+// primary stayed correct throughout, and the judge printed 1.00 because it scores only the
+// primary — the failure was SILENT. These tests pin the fix: minPrimaryOverlap (default 1)
+// rejects the polluter; minPrimaryOverlap: 0 reproduces the old behavior and ADMITS it, proving
+// the gate is the discriminator (this exact assertion fails against the pre-fix code).
+describe("MM_COMPOSE regression: cross-domain companion pollution", () => {
+  const civQuery = "optimize the civ6 map layout grid to maximize district power and adjacency output";
+  const primary = { name: "civ6-map-layout", description: "Use when planning civ6 district adjacency bonuses on a hex board" };
+  // Shares >=2 distinctive QUERY terms (grid, power, maximize, output) but ZERO distinctive
+  // terms with the primary's name+description — the measured cross-domain polluter shape.
+  const polluter = { name: "power-grid-milp", description: "Use when solving electricity grid MILP problems to maximize generator output across the network", score: 40, matched: 4 };
+  // Same-domain companion: shares primary terms (civ6, district) AND earns new query terms.
+  const sameDomain = { name: "civ6-district-optimizer", description: "Use when you optimize civ6 district placement to maximize output on the map grid", score: 40, matched: 4 };
+
+  test("polluter shares no distinctive term with the primary (fixture sanity)", () => {
+    const pTerms = distinctiveTerms(`${primary.name} ${primary.description}`);
+    const candText = `${polluter.name} ${polluter.description}`.toLowerCase();
+    expect(pTerms.filter((t) => candText.includes(t))).toEqual([]);
+    // ...while it clears the shipped candidate gate and covers >=2 uncovered query terms:
+    expect(pickUpdateTarget([polluter], 18)).not.toBeNull();
+  });
+
+  test("gate ON (default): the cross-domain polluter is REJECTED", () => {
+    const out = selectCompanions(civQuery, primary, [polluter], {});
+    expect(out).toEqual([]);
+  });
+
+  test("gate OFF (minPrimaryOverlap: 0) reproduces the old polluted behavior — the gate is the discriminator", () => {
+    const out = selectCompanions(civQuery, primary, [polluter], { minPrimaryOverlap: 0 });
+    expect(out.map((c) => c.name)).toEqual(["power-grid-milp"]);
+  });
+
+  test("same-domain companion still passes the default gate — no recall loss on legitimate sets", () => {
+    const out = selectCompanions(civQuery, primary, [sameDomain, polluter], {});
+    expect(out.map((c) => c.name)).toEqual(["civ6-district-optimizer"]);
   });
 });
