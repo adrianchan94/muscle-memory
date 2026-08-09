@@ -356,10 +356,136 @@ export function canonicalSkillIdentity(name: string): string {
   return [...new Set(slug(name).split("-").filter((token) => token && !IDENTITY_STOP.has(token)))].join("-");
 }
 
+/** ── CONTEXT-AS-QUERY (L2) ────────────────────────────────────────────────────────────────────
+ * Measured: agent-authored `task` strings cost -13.50 nDCG vs the user's own wording (n=280 paired,
+ * p=2.8e-07). The loss is at RETRIEVAL, not ranking — a reranker over the same candidate set
+ * recovered +0.00. So the fix cannot live downstream of candidate generation: the retrieval query
+ * itself must carry the turn's real context, not just the agent's paraphrase of it.
+ *
+ * SAFETY INVARIANTS (these are what stop context from manufacturing false prescriptions):
+ *   I1  A skill with ZERO agent-query term overlap can never enter the candidate set. Context
+ *       re-ranks and boosts; it can never conjure a candidate out of nothing.
+ *   I2  Context terms contribute alpha * their normal score (alpha default 0.5, MM_CTX_ALPHA).
+ *   I3  Context may add at most CTX_MATCHED_CAP (default 2, MM_CTX_MATCHED_CAP) to the distinctive
+ *       `matched` count that feeds the >=SEARCH_DISTINCT_MIN precision floor. With the floor at 3
+ *       and the cap at 2, at least one distinctive term must always come from the agent's own query.
+ *   I4  Context text is capped at CTX_CAP chars (default 2000, MM_CTX_CAP) — unbounded context is
+ *       a threshold-inflation attack surface, not extra signal.
+ * With context === "" every one of these is inert and searchSkills is byte-identical to before.
+ */
+export function contextWeightAlpha(): number {
+  const raw = Number(process.env.MM_CTX_ALPHA);
+  // 0.25 is not a taste call. Measured on 96 real traces (L2/S2): at alpha=1.0 (naive concat) the
+  // ABSTAIN-correct control collapses 24 -> 12 true negatives (p=4.9e-4) — naive concatenation
+  // HALVES correct abstention. alpha=0.25 held 42/42 on the positive arm AND 24/24 on the control.
+  return Number.isFinite(raw) && raw >= 0 && raw <= 1 ? raw : 0.25;
+}
+export function contextCharCap(): number {
+  const raw = Number(process.env.MM_CTX_CAP);
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 2000;
+}
+export function contextMatchedCap(): number {
+  const raw = Number(process.env.MM_CTX_MATCHED_CAP);
+  return Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : 2;
+}
+/** Flatten heterogeneous message/history shapes into plain retrieval text.
+ * Handles: string, {content:string}, {content:[{type:"text",text}|{type:"thinking",thinking}|
+ * {type:"toolCall",name,arguments}]}, and toolResult rows (role "toolResult", NOT "tool" — the
+ * shape trap that has burned two lanes). Unknown shapes contribute nothing rather than JSON noise. */
+export function flattenContextText(input: any, cap = 8000): string {
+  const parts: string[] = [];
+  const push = (s: any) => { if (typeof s === "string" && s.trim()) parts.push(s.trim()); };
+  const walkBlock = (b: any) => {
+    if (typeof b === "string") return push(b);
+    if (!b || typeof b !== "object") return;
+    if (typeof b.text === "string") return push(b.text);
+    if (typeof b.thinking === "string") return push(b.thinking);
+    // toolCall .name/.arguments are DELIBERATELY excluded. Measured (L2/S2): including them cost 2
+    // true negatives on the abstain control at identical recall — tool names and argument blobs are
+    // machine vocabulary that matches skill titles without meaning the task needs that skill.
+  };
+  const walkMessage = (m: any) => {
+    if (typeof m === "string") return push(m);
+    if (!m || typeof m !== "object") return;
+    if (m.message && typeof m.message === "object") return walkMessage(m.message);
+    if (typeof m.content === "string") return push(m.content);
+    if (Array.isArray(m.content)) return m.content.forEach(walkBlock);
+    walkBlock(m);
+  };
+  (Array.isArray(input) ? input : [input]).forEach(walkMessage);
+  // <system-reminder> blocks are harness scaffolding, not the user's task. On RC6 they literally
+  // contained the fixture family name (task_class="anchor-repair-scope-reversal"), which donates
+  // gold vocabulary for free — S3 retracted a 6/12 false-prescription number caused by exactly this.
+  // Newest-last is how a turn reads; keep the TAIL when we have to cut, because the most recent
+  // text is the task at hand. Cutting the head is how you lose the actual request.
+  const joined = parts.join("\n").replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, " ");
+  return joined.length > cap ? joined.slice(joined.length - cap) : joined;
+}
+
+/** Distinctive terms, same tokenizer/stoplist the shipped scorer already uses. */
+export function distinctiveTerms(text: string): string[] {
+  return [...new Set(String(text).toLowerCase().split(/[^a-z0-9.]+/).filter((t) => t.length > 2 && !SEARCH_STOP.has(t)))];
+}
+
+/** Strip the router's OWN output out of context before it is used as a retrieval query.
+ * RED TEAM (L2/S3, RC6 P3 where abstaining is correct): with real prior tool results spliced in,
+ * 11 of 12 correct abstentions flipped to false prescriptions. The poison was not volume — sweeping
+ * context length found ZERO false prescriptions from ordinary text at any cap. The poison was
+ * IDENTITY ECHO: `muscle_memory_skill_read` itself prints `Closest: 1. <skill-name>` on an ABSTAIN
+ * and names the skill twice on a PRESCRIBE, so the mod's own transcript hands the scorer the answer
+ * it is supposed to derive. A retrieval system that reads its own past output is measuring itself. */
+export const MOD_ECHO_LINE = /^\s*(?:\d+\.\s|[·•-]\s)?.*$/;
+export function stripModEcho(context: string): string {
+  const lines = String(context || "").split(/\r?\n/);
+  const out: string[] = [];
+  let inClosest = false;
+  for (const line of lines) {
+    const t = line.trim();
+    if (/^Closest:/i.test(t)) { inClosest = true; continue; }
+    if (inClosest) {
+      // the Closest block is an enumerated candidate list; it ends at the first non-list line
+      if (!t || /^\d+\.\s/.test(t) || /^[·•-]\s/.test(t)) { if (!t) inClosest = false; continue; }
+      inClosest = false;
+    }
+    if (/^(ABSTAIN|PRESCRIBE)\b/.test(t)) continue;             // decision lines name the skill
+    if (/^possession:\s*p-/.test(t)) continue;                   // tracking line
+    if (/^NEXT · invoke/.test(t) || /^control: do not inject/.test(t)) continue;
+    if (/^(gap diagnosis|runtime model|Next:)\b/.test(t)) continue;
+    if (/skill="/.test(t)) continue;
+    out.push(line);
+  }
+  return out.join("\n");
+}
+
 export function searchSkills(dirs: string[], query: string, k = 5): Array<{ name: string; description: string; dir: string; score: number; matched: number }> {
-  const terms = [...new Set(String(query).toLowerCase().split(/[^a-z0-9.]+/).filter((t) => t.length > 2 && !SEARCH_STOP.has(t)))];
+  return searchSkillsWithContext(dirs, query, "", k);
+}
+
+/** searchSkills, plus the turn's surrounding context as a DOWN-WEIGHTED second term group.
+ * `context` "" reproduces the shipped scorer exactly (asserted in test/context-as-query.test.ts). */
+export function searchSkillsWithContext(
+  dirs: string[], query: string, context: string, k = 5,
+  opts?: { alpha?: number; cap?: number; matchedCap?: number; stripEcho?: boolean },
+): Array<{ name: string; description: string; dir: string; score: number; matched: number }> {
+  const terms = distinctiveTerms(query);
+  const alpha = opts?.alpha ?? contextWeightAlpha();
+  const cap = opts?.cap ?? contextCharCap();
+  const matchedCap = opts?.matchedCap ?? contextMatchedCap();
+  const queryTerms = new Set(terms);
+  // I4: cap the context, then I1/I3 do the rest. Drop terms the query already carries.
+  const rawCtx = String(context || "");
+  const cleanCtx = (opts?.stripEcho ?? true) ? stripModEcho(rawCtx) : rawCtx;
+  const ctxTerms = alpha > 0 && matchedCap >= 0
+    ? distinctiveTerms(cleanCtx.length > cap ? cleanCtx.slice(cleanCtx.length - cap) : cleanCtx).filter((t) => !queryTerms.has(t))
+    : [];
   const out: Array<{ name: string; description: string; dir: string; score: number; matched: number }> = [];
   const seen = new Set<string>();
+  const hit = (nl: string, dl: string, body: string, t: string) => {
+    const esc = t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const inName = nl.includes(t), inDesc = dl.includes(t);
+    const bc = Math.min((body.match(new RegExp("\\b" + esc, "g")) || []).length, 3);
+    return { named: inName || inDesc, score: (inName ? 8 : 0) + (inDesc ? 4 : 0) + bc };
+  };
   for (const d of dirs) for (const n of listSkillNames(d)) {
     if (seen.has(n)) continue;
     seen.add(n); // precedence-ordered shelves: one skill gets one routing vote, even when mirrored globally
@@ -368,13 +494,25 @@ export function searchSkills(dirs: string[], query: string, k = 5): Array<{ name
     const nl = n.toLowerCase(), dl = desc.toLowerCase();
     let score = 0, matched = 0; // matched = # of distinctive query terms present in name/description
     for (const t of terms) {
-      const esc = t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const inName = nl.includes(t), inDesc = dl.includes(t);
-      if (inName || inDesc) matched++;
-      const bc = Math.min((body.match(new RegExp("\\b" + esc, "g")) || []).length, 3);
-      score += (inName ? 8 : 0) + (inDesc ? 4 : 0) + bc;
+      const h = hit(nl, dl, body, t);
+      if (h.named) matched++;
+      score += h.score;
     }
-    if (matched > 0) out.push({ name: n, description: desc, dir: d, score, matched });
+    // I1: no agent-query overlap of ANY kind -> not a candidate, whatever the context says.
+    // Measured relaxation (L2/S2, 96 real traces): requiring a name/description hit killed 4 rows
+    // (rc6 M1-T2-P2, M1-T4-P2, M1-T4-P4, rc5 M1-T4-P4) that had real BODY overlap with the agent's
+    // query (score 17 on one) but zero name/desc hits — i.e. precisely the vocabulary-substitution
+    // cases this mechanism exists to fix. Body overlap IS agent-query overlap. The invariant that
+    // matters is "the agent's own words reached this skill somehow", not "reached its title".
+    // Guarded on ctxTerms.length so the no-context path stays byte-identical to the shipped scorer.
+    if (matched === 0 && !(ctxTerms.length > 0 && score > 0)) continue;
+    let ctxMatched = 0, ctxScore = 0;
+    for (const t of ctxTerms) {
+      const h = hit(nl, dl, body, t);
+      if (h.named && ctxMatched < matchedCap) ctxMatched++; // I3: bounded distinctive credit
+      ctxScore += h.score;
+    }
+    out.push({ name: n, description: desc, dir: d, score: score + alpha * ctxScore, matched: matched + ctxMatched }); // I2
   }
   return out.sort((a, b) => b.score - a.score || b.matched - a.matched).slice(0, k);
 }
@@ -391,7 +529,19 @@ export function pickUpdateTarget<T extends { name: string; score: number; matche
   // current candidate, not spray sibling staged skills while waiting for review. (Live dogfood catch.)
   const topDir = String((top as any).dir || "");
   const topIsStaged = topDir === STAGED_DIR || /[\\/]staged$/.test(topDir);
-  if (top.score >= threshold && top.matched >= SEARCH_DISTINCT_MIN && (clearlyLeads || topIsStaged)) return { ...top, confidence: "high" };
+  // Distinctive-overlap evidence is EARNED TWO WAYS, because `matched` is not a property of the
+  // evidence — it is a property of how verbosely two strangers happened to write. The agent authors
+  // the query; the skill author authors the description; MM authors neither. Measured (96 real
+  // traces, rc6 P2 agent-authored queries): 5 of 12 rows were candidates that CLEARED the score
+  // threshold and were vetoed by `matched >= 3` alone — one at score 49, nearly 3x threshold.
+  // A high absolute score IS distinctive-overlap evidence: score accumulates 8/name + 4/desc + body
+  // hits, so score >= 2.5x threshold cannot be reached by a single incidental term.
+  // The runner-up margin (clearlyLeads) is retained UNCHANGED and still does the anti-false-positive
+  // work: a padding attack that inflates `matched` on an irrelevant skill still fails, because an
+  // irrelevant skill does not lead its rivals. Relative evidence is robust; absolute counts are not.
+  const distinctiveEnough = top.matched >= SEARCH_DISTINCT_MIN
+    || (top.matched >= 2 && top.score >= 2.5 * threshold);
+  if (top.score >= threshold && distinctiveEnough && (clearlyLeads || topIsStaged)) return { ...top, confidence: "high" };
   return null;
 }
 
@@ -452,6 +602,179 @@ export function applySemanticEvidence<T extends { name: string; score: number; m
 // The COMPLETE routing decision head, pure — reviewAndAuthor consumes it and the routing eval
 // measures it, so the benchmark can never drift from the shipped decision path.
 export type SkillRoute = "update" | "create" | "park-ambiguous" | "park-semantic";
+
+
+// ── V1 RERANK LANE ─────────────────────────────────────────────────────────────
+// Shipped prescribe is lexical-only: PRESCRIBE requires matched >= SEARCH_DISTINCT_MIN, and the
+// semantic corroboration boost can never RAISE `matched` — so an ordinary-language paraphrase of a
+// skill's own vocabulary can never be routed, however relevant the skill is. Measured: routing
+// declined 62% of qualified, gap-observed encounters across two independent studies.
+// Fix follows this repo's own reranker-v2 design: recall stays wide, precision lives in the judge.
+export type RerankJudgement = { same_job: boolean; confidence: number };
+export type JudgeFn = (evidence: string, skill: { name: string; description: string }) => Promise<RerankJudgement | null>;
+export const RERANK_CONF_FLOOR = 0.6;
+export const RERANK_SYSTEM_PROMPT = `You are a precision gate for a skill library. Decide whether a coding-session incident should be filed UNDER an existing skill (same underlying job-to-be-done, so the skill's procedure would actually resolve THIS incident) or logged as a NEW skill. Be strict: same_job=true ONLY if a good engineer would say 'that existing skill already covers this.' Reply STRICT JSON only: {"same_job": true|false, "confidence": 0.0-1.0}.`;
+
+
+/** PRESCRIBE-framed gate. The reranker-v2 judge answers an AUTHORING question ("file this incident
+ * under an existing skill?") — a strict dedup test. Prescription asks something different: "would
+ * following this procedure help the agent do THIS task right?" Measured on 20 blind plain-language
+ * cases the lexical lane missed: authoring prompt 7/20 recall, prescribe prompt 19/20, both at
+ * 100% precision against 20 wrong-skill mispairs. */
+export const PRESCRIBE_SYSTEM_PROMPT = `You are a prescription gate for a skill library. An agent is about to attempt a task. Decide whether following THIS skill's documented procedure would materially help the agent complete THAT task correctly — especially if the skill encodes a convention, rule, or step the agent would otherwise get wrong. Answer same_job=true if a competent engineer would hand the agent this skill for this task. Answer false if the skill is about a different kind of work, or if the task is described too vaguely to tell. Reply STRICT JSON only: {"same_job": true|false, "confidence": 0.0-1.0}.`;
+
+export function prescribeUserPrompt(task: string, name: string, description: string): string {
+  return `Task the agent is about to attempt: ${task}\nCandidate skill — name: ${name}; description: ${description}\nWould this skill help?`;
+}
+
+export function rerankUserPrompt(evidence: string, name: string, description: string): string {
+  return `Incident: ${evidence}\nExisting skill — name: ${name}; description: ${description}\nSame job?`;
+}
+
+export function parseJudgement(raw: string): RerankJudgement | null {
+  const text = String(raw || "").replace(/<\/?think>/gi, "");
+  const m = text.match(/\{[^{}]*"same_job"[^{}]*\}/);
+  if (!m) return null;
+  try {
+    const o = JSON.parse(m[0]);
+    if (typeof o.same_job !== "boolean") return null;
+    const conf = typeof o.confidence === "number" && Number.isFinite(o.confidence) ? Math.min(1, Math.max(0, o.confidence)) : 0;
+    return { same_job: o.same_job, confidence: conf };
+  } catch { return null; }
+}
+
+/** WIDE recall for the judge stage only. The shipped scorer's >=3-distinctive floor is a PRECISION
+ * device; here it would gate recall, so candidate generation drops it. Precision is restored by the
+ * judge, never by lexical overlap. Ranked by lexical score so the judge sees the best guess first. */
+export function wideCandidates(
+  dirs: string[], query: string, listNames: (dir: string) => string[], k = 3,
+): Array<{ name: string; dir: string }> {
+  const scored = searchSkills(dirs, query, 50);
+  const out: Array<{ name: string; dir: string }> = scored.map((s) => ({ name: s.name, dir: s.dir }));
+  const seen = new Set(out.map((o) => o.name));
+  for (const d of dirs) for (const n of listNames(d)) {
+    if (!seen.has(n)) { seen.add(n); out.push({ name: n, dir: d }); }
+  }
+  return out.slice(0, k);
+}
+
+
+// ── G1 · COMPOSITION-AWARE PRESCRIPTION (MM_COMPOSE) ──────────────────────────
+// SkillsBench designs tasks that need SKILL COMPOSITION ("2+ skills, SOTA <50%"); a router whose
+// only vocabulary is "one smallest matching skill" cannot express the right answer for a 7-day
+// itinerary that needs most of six search-* skills, no matter how good its ranking is.
+// DESIGN CHOICE (option a, ordered set — over b/sequential and c/coverage-model):
+//   (b) sequential re-prescription assumes the agent calls the router repeatedly; measured across
+//       21 benchmark conversations there were ZERO muscle_memory_* calls — a lane that needs N
+//       calls when the field shows 0 is behaviorally dead on arrival.
+//   (c) a sub-goal decomposition model is a SECOND SCORER — explicitly banned; the gate/margin
+//       logic already shipped must stay the only precision device.
+//   (a) reuses everything: candidates come from the SAME lexical scorer, each companion must clear
+//       the SAME gate the primary cleared (pickUpdateTarget, unchanged), and coherence is defined
+//       as COVERAGE COMPLEMENTARITY over the agent's own distinctive query terms — a companion is
+//       named only if it covers task vocabulary the already-selected skills do not. That is what
+//       stops this from becoming a shelf dump: near-duplicates of the primary add no new terms and
+//       are rejected; the set is capped at 3 total (large shelves DEGRADE agents — skill
+//       shadowing, -21% at 202 skills). Every companion ships WITH its reason (the exact uncovered
+//       terms it contributes), so the agent can audit the composition instead of trusting it.
+// OFF by default. composeEnabled() false ⇒ the prescribe message is byte-identical to today.
+// The ABSTAIN path is untouched by construction: companions are computed only AFTER a primary
+// prescription routed; no primary ⇒ same abstain as today.
+export function composeEnabled(): boolean {
+  return String(process.env.MM_COMPOSE || "").toLowerCase() === "on";
+}
+export function composeMaxSkills(): number {
+  const raw = Number(process.env.MM_COMPOSE_MAX);
+  return Number.isFinite(raw) && raw >= 1 ? Math.min(3, Math.floor(raw)) : 3; // hard ceiling 3 — a set, never a shelf
+}
+export function composeMinNewTerms(): number {
+  const raw = Number(process.env.MM_COMPOSE_MIN_NEW);
+  return Number.isFinite(raw) && raw >= 1 ? Math.floor(raw) : 2; // a companion must EARN its slot with >=2 uncovered task terms
+}
+
+export type ComposeCompanion = { name: string; newTerms: string[] };
+
+/** Greedy coverage-complement selection over the SAME candidate list the shipped scorer produced.
+ * `pool` is searchSkills(WithContext) output ranked by score; `primary` is the routed target.
+ * A candidate joins the set iff (1) it individually clears the SAME gate as the primary
+ * (pickUpdateTarget on the singleton — threshold + distinctive floor, reused verbatim), and
+ * (2) its name/description covers >= minNew distinctive query terms not covered by the set so far.
+ * Term coverage uses distinctiveTerms + name/desc containment — the shipped `matched` notion. */
+export function selectCompanions(
+  query: string,
+  primary: { name: string; description: string },
+  pool: Array<{ name: string; description: string; score: number; matched: number }>,
+  opts?: { threshold?: number; maxTotal?: number; minNew?: number },
+): ComposeCompanion[] {
+  const threshold = opts?.threshold ?? 18;
+  const maxTotal = opts?.maxTotal ?? composeMaxSkills();
+  const minNew = opts?.minNew ?? composeMinNewTerms();
+  const terms = distinctiveTerms(query);
+  if (!terms.length || maxTotal <= 1) return [];
+  const coveredBy = (nl: string, dl: string) => terms.filter((t) => nl.includes(t) || dl.includes(t));
+  const covered = new Set(coveredBy(primary.name.toLowerCase(), String(primary.description || "").toLowerCase()));
+  const out: ComposeCompanion[] = [];
+  for (const cand of pool) {
+    if (out.length >= maxTotal - 1) break;
+    if (cand.name === primary.name || out.some((c) => c.name === cand.name)) continue;
+    // SAME gate as the primary, reused — not a second scorer. Singleton ⇒ clearlyLeads is true,
+    // so this is exactly "score >= threshold AND distinctive-overlap floor".
+    if (!pickUpdateTarget([cand], threshold)) continue;
+    const newTerms = coveredBy(cand.name.toLowerCase(), String(cand.description || "").toLowerCase()).filter((t) => !covered.has(t));
+    if (newTerms.length < minNew) continue;
+    out.push({ name: cand.name, newTerms });
+    for (const t of newTerms) covered.add(t);
+  }
+  return out;
+}
+
+/** Full composition decision over the shipped scorer's pool. Two ways in, both gate-reusing:
+ *  1. pickUpdateTarget routes a dominant primary exactly as today → companions may join it.
+ *  2. NO dominant primary because the top candidates TIE — the itinerary case: six search-*
+ *     siblings, three tie, clearlyLeads fails, and the shipped router abstains "ambiguous".
+ *     The 1.5× margin exists to avoid picking the wrong ONE skill; when the runner-ups that deny
+ *     dominance are coverage-COMPLEMENTS that join the set anyway, that objection dissolves — the
+ *     answer IS the set. Near-duplicate ties (the case the margin actually protects) contribute
+ *     zero new terms, produce zero companions, and still fall through to ABSTAIN unchanged.
+ *  Returns null whenever composition has nothing defensible to say → caller keeps today's path. */
+/** Compose around a primary the JUDGE already chose.
+ *
+ * The judge lane fixes ABSTENTION (it routes when lexical vocabulary misses). Composition fixes the
+ * SHAPE (tasks needing 2+ skills). They are orthogonal, and before 2026-08-09 the judge returned
+ * immediately so MM_RERANK=on silently disabled MM_COMPOSE. Reuses selectCompanions verbatim — the
+ * same tokenizer, the same uncovered-term rule, the same cap — so there is no second scorer and no
+ * separate notion of "relevant". Returns [primary] unchanged when nothing else earns a slot, so the
+ * judge's own answer is never weakened.
+ */
+export function composeAroundPrimary(dirs: string[], query: string, primaryName: string): string[] {
+  if (String(process.env.MM_COMPOSE || "").toLowerCase() !== "on") return [primaryName];
+  try {
+    const pool = searchSkills(dirs, query, 8);
+    const primary = pool.find((p) => p.name === primaryName);
+    if (!primary) return [primaryName];
+    const companions = selectCompanions(query, { name: primary.name, description: primary.description || "" }, pool, {});
+    return [primaryName, ...companions.map((c) => c.name)];
+  } catch { return [primaryName]; }
+}
+
+export function composePrescription(
+  query: string,
+  pool: Array<{ name: string; description: string; score: number; matched: number }>,
+  threshold = 18,
+): { primary: { name: string; score: number; matched: number }; companions: ComposeCompanion[]; rescuedTie: boolean } | null {
+  const routed = pickUpdateTarget(pool, threshold);
+  if (routed) {
+    const companions = selectCompanions(query, { name: routed.name, description: (routed as any).description || "" }, pool, { threshold });
+    return companions.length ? { primary: routed, companions, rescuedTie: false } : null;
+  }
+  const top = pool[0];
+  if (!top) return null;
+  // Singleton gate = the SAME threshold + distinctive-overlap floor, minus only the dominance margin.
+  if (!pickUpdateTarget([top], threshold)) return null;
+  const companions = selectCompanions(query, { name: top.name, description: String(top.description || "") }, pool, { threshold });
+  if (!companions.length) return null; // tie without complements = the margin's real case → abstain survives
+  return { primary: top, companions, rescuedTie: true };
+}
 
 export function routeSkill<T extends { name: string; score: number; matched: number }>(
   lexical: T[], hits: SemanticSkillHit[], onShelf: (name: string) => boolean, threshold = 18,
