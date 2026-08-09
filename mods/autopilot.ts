@@ -704,13 +704,22 @@ export function selectCompanions(
   query: string,
   primary: { name: string; description: string },
   pool: Array<{ name: string; description: string; score: number; matched: number }>,
-  opts?: { threshold?: number; maxTotal?: number; minNew?: number },
+  opts?: { threshold?: number; maxTotal?: number; minNew?: number; minPrimaryOverlap?: number },
 ): ComposeCompanion[] {
   const threshold = opts?.threshold ?? 18;
   const maxTotal = opts?.maxTotal ?? composeMaxSkills();
   const minNew = opts?.minNew ?? composeMinNewTerms();
+  // MEASURED DEFECT (shelf-scaling probes, 2026-08-09): companions were gated on covering the
+  // QUERY's distinctive terms only — never on similarity to the chosen PRIMARY. Companion
+  // precision fell 1.00 → 0.67 → 0.33 as the shelf grew 4 → 24 → 56, and at 56 both companions
+  // were cross-domain (a power-grid-MILP skill injected into a Civ6 map task) while the primary
+  // stayed correct. The fix: a companion must also share >= minPrimaryOverlap distinctive terms
+  // with the PRIMARY's own name+description (same tokenizer, no second scorer). Default 1 — the
+  // weakest same-domain evidence; 0 restores the old query-only behavior explicitly.
+  const minPrimaryOverlap = opts?.minPrimaryOverlap ?? 1;
   const terms = distinctiveTerms(query);
   if (!terms.length || maxTotal <= 1) return [];
+  const primaryTerms = distinctiveTerms(`${primary.name} ${primary.description || ""}`);
   const coveredBy = (nl: string, dl: string) => terms.filter((t) => nl.includes(t) || dl.includes(t));
   const covered = new Set(coveredBy(primary.name.toLowerCase(), String(primary.description || "").toLowerCase()));
   const out: ComposeCompanion[] = [];
@@ -720,6 +729,9 @@ export function selectCompanions(
     // SAME gate as the primary, reused — not a second scorer. Singleton ⇒ clearlyLeads is true,
     // so this is exactly "score >= threshold AND distinctive-overlap floor".
     if (!pickUpdateTarget([cand], threshold)) continue;
+    const candText = `${cand.name.toLowerCase()} ${String(cand.description || "").toLowerCase()}`;
+    // Primary-similarity gate: similarity to the PRIMARY, not just the query.
+    if (minPrimaryOverlap > 0 && primaryTerms.filter((t) => candText.includes(t)).length < minPrimaryOverlap) continue;
     const newTerms = coveredBy(cand.name.toLowerCase(), String(cand.description || "").toLowerCase()).filter((t) => !covered.has(t));
     if (newTerms.length < minNew) continue;
     out.push({ name: cand.name, newTerms });

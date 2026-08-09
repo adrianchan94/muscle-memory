@@ -4474,9 +4474,11 @@ function selectCompanions(query, primary, pool, opts) {
   const threshold = opts?.threshold ?? 18;
   const maxTotal = opts?.maxTotal ?? composeMaxSkills();
   const minNew = opts?.minNew ?? composeMinNewTerms();
+  const minPrimaryOverlap = opts?.minPrimaryOverlap ?? 1;
   const terms = distinctiveTerms(query);
   if (!terms.length || maxTotal <= 1)
     return [];
+  const primaryTerms = distinctiveTerms(`${primary.name} ${primary.description || ""}`);
   const coveredBy = (nl, dl) => terms.filter((t) => nl.includes(t) || dl.includes(t));
   const covered = new Set(coveredBy(primary.name.toLowerCase(), String(primary.description || "").toLowerCase()));
   const out = [];
@@ -4486,6 +4488,9 @@ function selectCompanions(query, primary, pool, opts) {
     if (cand.name === primary.name || out.some((c) => c.name === cand.name))
       continue;
     if (!pickUpdateTarget([cand], threshold))
+      continue;
+    const candText = `${cand.name.toLowerCase()} ${String(cand.description || "").toLowerCase()}`;
+    if (minPrimaryOverlap > 0 && primaryTerms.filter((t) => candText.includes(t)).length < minPrimaryOverlap)
       continue;
     const newTerms = coveredBy(cand.name.toLowerCase(), String(cand.description || "").toLowerCase()).filter((t) => !covered.has(t));
     if (newTerms.length < minNew)
