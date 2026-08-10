@@ -21,13 +21,19 @@ test("n=0 · NO tape — an unrated skill must not be given an invented zero rec
   expect(applyNudge("pdf-tools", undefined)).not.toContain("FIELD TAPE");
 });
 
-test("evidence tier is INLINE · lastStepId present -> tool-observed, absent -> agent-judged", () => {
-  // autorate stamps lastStepId with the toolCallId; manual rateSkill leaves it null. 5/5 historical
-  // "helped" ratings were agent-judged, so an unlabelled tape would launder self-assessment.
-  expect(applyNudge("s", { plus: 2, minus: 1, lastStepId: "call_abc" }))
+test("evidence tier is INLINE · computed from PER-SIGN counters, not from the last write", () => {
+  // SUPERSEDED ASSERTION (P1b, same day). This test previously required lastStepId to set the tier:
+  //   {plus:2, minus:1, lastStepId:"call_abc"}  ->  "tool-observed"
+  // That was the LAST WRITE ONLY, so one manual rating relabelled a whole record, and an autorate
+  // write landing last would label mostly-self-assessed evidence "tool-observed". The tier now comes
+  // from plusObserved/plusJudged/minusObserved/minusJudged. Full contract and the migration boundary
+  // live in test/provenance-tier.test.ts; these two keep the INLINE placement pinned.
+  expect(applyNudge("s", { plus: 2, minus: 1, plusObserved: 2, minusObserved: 1 }))
     .toContain("n=3 · evidence=tool-observed");
-  expect(applyNudge("s", { plus: 2, minus: 1 })).toContain("n=3 · evidence=agent-judged");
-  expect(applyNudge("s", { plus: 2, minus: 1, lastStepId: null })).toContain("evidence=agent-judged");
+  expect(applyNudge("s", { plus: 2, minus: 1, plusJudged: 2, minusJudged: 1 }))
+    .toContain("n=3 · evidence=agent-judged");
+  // and a trailing stepId alone must no longer promote anything
+  expect(applyNudge("s", { plus: 2, minus: 1, lastStepId: "call_abc" })).toContain("evidence=legacy");
 });
 
 test("the tape counts MISSES honestly and does not round or editorialise", () => {

@@ -49,7 +49,7 @@ import { claimBearingVerdict, buildShareCardPayload, loadPossessionEvents, pendi
 import { bindExactFileVerificationTask, createExactFileVerificationTask, verifyExactFilePossession } from "./verification";
 import { collectWins, renderWins } from "./wins";
 import { mineAgentHistory } from "./history";
-import { loadPlusMinus, loadRatingEvents, recordObservedSkillFailure, modelIdentity, providerIdentity, rateSkill, renderPlusMinus } from "./referee";
+import { loadPlusMinus, loadRatingEvents, recordObservedSkillFailure, recordPlusMinus, modelIdentity, providerIdentity, rateSkill, renderPlusMinus } from "./referee";
 import { attachSquadShelf, ensureSquadArchive, publishSkillToShelf, pullShelfSkill, SQUAD_ARCHIVE_NAME } from "./shelf";
 
 
@@ -160,8 +160,17 @@ export default function activate(letta: any) {
     for (const event of events) if (event.type === "outcome") outcomes.set(event.possession_id, event);
     const provenNames = new Set<string>();
     let helped = 0;
+    // EARNED EVIDENCE OUTLIVES SHELF MEMBERSHIP (2026-08-10). This loop used to require
+    // active.has(decision.skill) — i.e. the skill must still be installed RIGHT NOW — so every
+    // closed `helped` possession vanished from the panel the moment its skill left the shelf.
+    // Measured on the live ledger: 5 helped outcomes across substantiating-high-trust-claims,
+    // running-recorded-agent-demos-safely, gated-diff-review and validating-skill-learning-loops
+    // (x2), none of them currently installed, rendering "3 skills · 0 helped". That is the exact
+    // inverse of MM's accumulation thesis, and it contradicts referee.ts's own rule that absence of
+    // a rating is NO EVIDENCE rather than a zero. `total`/`proven` stay installed-scoped because
+    // they describe the LIVE roster; a historical outcome is not a roster property.
     for (const [possessionId, decision] of decisions) {
-      if (decision.type !== "decision" || decision.action !== "prescribe" || !decision.skill || !active.has(decision.skill)) continue;
+      if (decision.type !== "decision" || decision.action !== "prescribe" || !decision.skill) continue;
       const outcome = outcomes.get(possessionId);
       if (!outcome || outcome.result !== "helped") continue;
       // Qualifying closed helped prescriptions only — not ratings, uses, abstentions, or proof claims.
@@ -545,9 +554,20 @@ async function judgePrescription(dirs: string[], query: string, ctx: any): Promi
     // suppressed forever once the agent goes to the shelf on its own (Skill / muscle_memory_*).
     const consultNudged = new Set<string>();   // conversations whose advisory already fired
     const shelfConsulted = new Set<string>();  // conversations that already consulted MM or a Skill
-    // Re-inject the apply contract once per (conversation, skill) after a Skill invocation or SKILL.md read.
-    const applyNudged = new Set<string>();
-    const pendingApply = new Map<string, string>(); // toolCallId -> skill name, set in tool_start
+    // APPLY NUDGE (2026-08-09). shelfConsulted below only fires on tool==="Skill", so an agent that
+    // opens a skill with a plain Read of SKILL.md is INVISIBLE to every MM channel. Measured on
+    // Skill-Use: that is exactly how Letta opens skills, and it trails Claude Code on content
+    // compliance by 0.33-0.46 on procedural tasks. Track those reads and re-inject the contract.
+    const applyNudged = new Set<string>();     // one apply-nudge per (conversation, skill)
+    const pendingApply = new Map<string, string>();  // toolCallId -> skill name, set in tool_start
+    // ACCUMULATION (2026-08-10). MM_AUTORATE=on writes the AGGREGATE ledger from an OBSERVED outcome.
+    // Measured 2026-08-09: skill-plusminus.json unchanged in 0/12 Skill-Use cells, because
+    // recordPlusMinus is reachable ONLY via rateSkill (manual slash command / agent tool) and nothing
+    // autonomous ever calls it. Without this channel "a library that improves with use" is false by
+    // construction. OPT-IN by design: referee.ts deliberately holds that the learner does not grade its
+    // own homework, so this must never become a silent default.
+    const autoRated = new Set<string>();
+    const autoRateEnabled = () => String(process.env.MM_AUTORATE || "").toLowerCase() === "on";
     disposers.push(letta.events.on("tool_start", (event: any) => {
       try {
         const tool = String(event?.toolName ?? "");
@@ -556,22 +576,29 @@ async function judgePrescription(dirs: string[], query: string, ctx: any): Promi
         if (tool === "Skill" || tool.startsWith("muscle_memory") || tool === "rate_skill" || tool.startsWith("record_agent") || tool.startsWith("verify_agent") || tool.startsWith("register_exact_file")) {
           shelfConsulted.add(String(event?.conversationId ?? "?"));
         }
+        // A Read/Bash-read of a SKILL.md is a shelf visit too — record it, and remember which
+        // skill so tool_end can re-inject the apply contract for THAT skill.
         if (applyNudgeEnabled()) {
           try {
-            const args: any = event?.args ?? {};
+            const a: any = event?.args ?? {};
+            // HOOK COVERAGE: an agent can reach a skill two ways — a Read of SKILL.md, or the native
+            // `Skill` tool (progressive disclosure injects the body as a user message, no Read at all).
+            // Shipping Read-only missed 2 of 12 measured cells (airflow, SF03). Cover both paths.
             if (tool === "Skill") {
-              const skill = String(args.skill ?? args.name ?? args.skill_name ?? "").trim();
-              const callId = String(event?.toolCallId ?? "");
-              if (skill && callId) pendingApply.set(callId, skill);
+              const sname = String(a.skill ?? a.name ?? a.skill_name ?? "").trim();
+              if (sname) {
+                const cid0 = String(event?.toolCallId ?? "");
+                if (cid0) pendingApply.set(cid0, sname);
+              }
             }
-            const probe = String(args.file_path ?? args.path ?? args.command ?? "");
-            const match = /(?:^|[\/])skills[\/]([^\/]+)[\/]SKILL\.md/i.exec(probe) || /(?:^|[\/])([^\/]+)[\/]SKILL\.md/i.exec(probe);
-            const callId = String(event?.toolCallId ?? "");
-            if (match && /SKILL\.md/i.test(probe) && callId) {
+            const probe = String(a.file_path ?? a.path ?? a.command ?? "");
+            const m = /(?:^|[\/])skills[\/]([^\/]+)[\/]SKILL\.md/i.exec(probe) || /(?:^|[\/])([^\/]+)[\/]SKILL\.md/i.exec(probe);
+            if (m && /SKILL\.md/i.test(probe)) {
               shelfConsulted.add(String(event?.conversationId ?? "?"));
-              pendingApply.set(callId, match[1]);
+              const cid = String(event?.toolCallId ?? "");
+              if (cid) pendingApply.set(cid, m[1]);
             }
-          } catch { /* apply nudge is advisory; never break tool_start */ }
+          } catch { /* never break tool_start */ }
         }
         const { fp, tmpl } = fingerprint(tool, event?.args ?? {});
         const callId = String(event?.toolCallId ?? "");
@@ -633,8 +660,14 @@ async function judgePrescription(dirs: string[], query: string, ctx: any): Promi
           // via the existing `negative-field` gate. Narrow by construction — see
           // recordObservedSkillFailure() for why unrelated tool errors are never attributed.
           try {
-            if (!ok && String(event?.toolName ?? "") === "Skill") {
-              const invoked = String((event?.args as any)?.skill ?? (event?.args as any)?.name ?? "").trim();
+            // HOOK COVERAGE (2026-08-09): an agent reaches a skill two ways — the native `Skill` tool,
+            // or a Read of SKILL.md. Skill-only attribution measured skill-plusminus UNCHANGED in 0/12
+            // Skill-Use cells. pendingApply already maps toolCallId -> skill for BOTH paths (tool_start).
+            if (!ok) {
+              const viaSkill = String(event?.toolName ?? "") === "Skill";
+              const invoked = (viaSkill
+                ? String((event?.args as any)?.skill ?? (event?.args as any)?.name ?? "")
+                : String(pendingApply.get(String(event?.toolCallId ?? "")) ?? "")).trim();
               if (invoked) {
                 const rows = loadPossessionEvents();
                 const settled = new Set(rows.filter((row) => row.type === "outcome").map((row) => row.possession_id));
@@ -652,6 +685,24 @@ async function judgePrescription(dirs: string[], query: string, ctx: any): Promi
               }
             }
           } catch { /* field evidence is best-effort; never break the tool stream */ }
+          // ACCUMULATION: write the AGGREGATE ledger from the observed outcome. Failure -> minus,
+          // success -> plus. Idempotent per toolCallId. Fires for BOTH the native Skill tool and a
+          // Read-reached skill (pendingApply), and does NOT require an open prescribe possession —
+          // MM_PRESCRIBE_NUDGE is default-off, so requiring one is what kept this channel at 0/12.
+          if (autoRateEnabled()) {
+            try {
+              const cid2 = String(event?.toolCallId ?? "");
+              const sk2 = (String(event?.toolName ?? "") === "Skill"
+                ? String((event?.args as any)?.skill ?? (event?.args as any)?.name ?? "")
+                : String(pendingApply.get(cid2) ?? "")).trim();
+              if (sk2 && cid2 && !autoRated.has(cid2)) {
+                autoRated.add(cid2);
+                // The ONLY "observed" writer. cid2 is the runtime's own toolCallId taken from the
+                // tool_end event, not from a caller argument — that is what makes it instrument evidence.
+                recordPlusMinus(sk2, !!ok, cid2, "observed");
+              }
+            } catch { /* accumulation is best-effort; never break the tool stream */ }
+          }
           appendJsonl(OUTCOME_PATH, { ts: Date.now(), id: event?.toolCallId ?? null, tool: event?.toolName ?? null, conv: event?.conversationId ?? null, ok, err, ...(errMsg ? { errMsg } : {}) });
           if (process.env.MM_REFLEX === "on" && !ok && defensesCache.length) {
             const step = stepByCallId.get(String(event?.toolCallId ?? ""));
@@ -665,28 +716,34 @@ async function judgePrescription(dirs: string[], query: string, ctx: any): Promi
             }
           }
         } catch { /* best-effort */ }
-        // Apply nudge: append the procedural contract to a successful skill body, once per skill/conversation.
-        let applyMsg: { status: string; output: string } | null = null;
-        try {
-          if (applyNudgeEnabled()) {
-            const callId = String(event?.toolCallId ?? "");
-            const skillName = callId ? pendingApply.get(callId) : undefined;
-            if (callId) pendingApply.delete(callId);
-            const status = String(event?.status ?? "");
-            const okRead = status ? status === "success" : (event?.ok ?? !(event?.isError || event?.error));
-            const conversation = String(event?.conversationId ?? "?");
-            const key = conversation + "\u0000" + String(skillName ?? "");
-            if (skillName && okRead && !applyNudged.has(key)) {
-              applyNudged.add(key);
-              const output = String(event?.output ?? event?.resultText ?? "");
-              applyMsg = { status: status || "success", output: output + "\n\n" + applyNudge(skillName, loadPlusMinus()[skillName]) };
-            }
-          }
-        } catch { /* apply nudge is advisory; never break tool_end */ }
-
         // G3 SHELF-CONSULT nudge — opt-in advisory on the FIRST successful ordinary tool result of
         // a conversation with a non-empty shelf and no shelf visit yet. Lowest priority: it must
         // never displace reflex coaching or a close ask, and a thrown error must change nothing.
+        // APPLY NUDGE — fires when the agent has just READ a SKILL.md. Higher priority than the
+        // shelf advisory (the agent already found the shelf) and lower than coaching/close.
+        let applyMsg: { status: string; output: string } | null = null;
+        try {
+          if (applyNudgeEnabled()) {
+            const cid = String(event?.toolCallId ?? "");
+            const skillName = cid ? pendingApply.get(cid) : undefined;
+            if (cid) pendingApply.delete(cid);
+            const st = String(event?.status ?? "");
+            const okRead = st ? st === "success" : (event?.ok ?? !(event?.isError || event?.error));
+            const conv = String(event?.conversationId ?? "?");
+            const key = conv + "\u0000" + String(skillName ?? "");
+            if (skillName && okRead && !applyNudged.has(key)) {
+              applyNudged.add(key);
+              // APPEND to the file body, never replace it. Shipping this as a replacement made the
+              // first Read return the contract INSTEAD of the skill: the agent burned a turn, re-read
+              // the file, and got the body with no contract attached — so the two were never adjacent
+              // and the body arrived LAST, the weakest position for the thing we want obeyed.
+              const outText = String(event?.output ?? event?.resultText ?? "");
+              applyMsg = { status: String(event?.status ?? "") || "success",
+                           output: outText + "\n\n" + applyNudge(skillName, loadPlusMinus()[skillName]) };
+            }
+          }
+        } catch { /* an advisory must never break a tool result */ }
+
         let shelfNudge: { status: string; output: string } | null = null;
         try {
           if (prescribeNudgeEnabled()) {
@@ -697,7 +754,16 @@ async function judgePrescription(dirs: string[], query: string, ctx: any): Promi
             const ordinary = tool && tool !== "Skill" && !tool.startsWith("muscle_memory") && tool !== "rate_skill" && !tool.startsWith("record_agent") && !tool.startsWith("verify_agent") && !tool.startsWith("register_exact_file");
             if (ok && ordinary && !consultNudged.has(conv) && !shelfConsulted.has(conv)) {
               const shelfNames = new Set<string>();
-              for (const d of scanDirs()) for (const n of listSkillNames(d)) shelfNames.add(n); // NOTE: no `ctx` here — it is not a tool_end handler param and a free reference would throw into the catch
+              // SCOPE (bug fix): this advisory says "on this agent's shelf", so count THIS agent's
+              // shelves — not the union of every scan root. scanDirs() always includes the shared
+              // machine-global shelf (~/.letta/skills), which no agent-shelf override can empty, so
+              // an agent with a deliberately EMPTY shelf still got nudged with the desktop's skill
+              // count. Keep global ONLY when it IS this agent's shelf (the no-override default, so
+              // ordinary installs are unchanged); project/environment roots are workspaces this
+              // agent actually works in and still count.
+              const agentDir = agentSkillsDir();   // no `ctx` here — not a tool_end handler param; a free reference would throw into the catch
+              const globalDir = globalSkillsDir();
+              for (const d of scanDirs()) { if (d === globalDir && d !== agentDir) continue; for (const n of listSkillNames(d)) shelfNames.add(n); }
               if (shelfNames.size > 0) {
                 consultNudged.add(conv); // marked before compose: a later throw must not retry-spam
                 if (consultNudged.size > 256) { const first = consultNudged.keys().next().value; if (first !== undefined) consultNudged.delete(first); }

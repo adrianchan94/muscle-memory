@@ -87,11 +87,28 @@ test("modelIdentity resolves dynamic mod ctx.model shapes without storing the wh
   expect(modelIdentity(undefined)).toBe("unknown");
 });
 
-test("aggregate row shape stays backward-compatible {plus,minus,lastTs,lastStepId}", async () => {
+test("aggregate row shape · the four original keys are unchanged, provenance keys are ADDITIVE", async () => {
+  // CONTRACT UPDATED INTENTIONALLY (P1b, 2026-08-10), not broken by accident. This test previously
+  // required the row to be EXACTLY {plus,minus,lastTs,lastStepId}. P1b adds five keys so a record can
+  // say WHERE its evidence came from; the tier was otherwise derived from lastStepId, i.e. the last
+  // write only, which let one manual rating relabel a whole record.
+  // Backward compatibility is PRESERVED in the sense that matters: the four original keys still
+  // exist with identical names, types and semantics, so any existing reader keeps working. The new
+  // keys are optional and additive. What changed is that the row is no longer CLOSED.
   await rateSkill({}, "sidecar-shape", "up", "step-9", { reason: "ok" });
   const line: any = loadPlusMinus()["sidecar-shape"];
-  expect(Object.keys(line).sort()).toEqual(["lastStepId", "lastTs", "minus", "plus"]);
+  // the original four, unchanged
+  for (const k of ["plus", "minus", "lastTs", "lastStepId"]) expect(line).toHaveProperty(k);
   expect(line.lastStepId).toBe("step-9");
+  expect(line.plus).toBe(1);
+  // the additive provenance keys
+  for (const k of ["plusObserved", "plusJudged", "minusObserved", "minusJudged", "coverageStart"])
+    expect(line).toHaveProperty(k);
+  // FORGERY GUARD: this call is rateSkill — the MANUAL lane — and it passed a caller step_id
+  // ("step-9"). It must be counted JUDGED. Under the first cut it was counted observed, which is
+  // exactly how an agent could have laundered its own rating into instrument evidence.
+  expect(line.plusJudged).toBe(1);
+  expect(line.plusObserved).toBe(0);
 });
 
 test("referee truth: unwritable sidecar records nothing and reports failure", async () => {

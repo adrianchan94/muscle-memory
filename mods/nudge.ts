@@ -123,7 +123,11 @@ export function applyNudgeEnabled(env: Record<string, string | undefined> = proc
   return String(env.MM_APPLY_NUDGE ?? "on").toLowerCase() !== "off";
 }
 
-export type FieldRecord = { plus: number; minus: number; lastStepId?: string | null } | null | undefined;
+export type FieldRecord = {
+  plus: number; minus: number; lastStepId?: string | null;
+  plusObserved?: number; plusJudged?: number; minusObserved?: number; minusJudged?: number;
+  coverageStart?: number;
+} | null | undefined;
 
 // GOVERNANCE ACTUATOR (2026-08-10). Until now every loadPlusMinus() call site was DISPLAY-ONLY and
 // skillUtility() had NO callers: MM accumulated a scoreboard nobody played off. Measured in the
@@ -142,7 +146,7 @@ export function applyNudge(skill: string, field?: FieldRecord): string {
   // The attempts floor stops one unlucky run from condemning a skill.
   const attempts = plus + minus;
   const failRate = attempts > 0 ? minus / attempts : 0;
-  // FIELD TAPE (2026-08-10) — UNGATED raw record at n>=1, requested by the consumer (Kev) after the
+  // FIELD TAPE (2026-08-10) — UNGATED raw record at n>=1, requested during consumer review after the
   // P1 sweep showed the caution gate is unreachable: swept minAttempts x {2,3,5,8} against
   // minFailRate x {0.3,0.5,0.667,0.8} over the live 16-skill ledger and ALL 16 SETTINGS FIRED ON
   // ZERO SKILLS, because minus=0 everywhere. Below the gate `caution` is [] — the agent saw NO field
@@ -152,7 +156,34 @@ export function applyNudge(skill: string, field?: FieldRecord): string {
   // rateSkill leaves it null. That is the only discriminator between an outcome observed from a
   // tool result and one an agent asserted about itself — and 5/5 historical "helped" ratings were
   // agent-judged, so an unlabelled tape would launder self-assessment as measurement.
-  const tier = field?.lastStepId ? "tool-observed" : "agent-judged";
+  // EVIDENCE TIER (P1b, 2026-08-10 — replaces a last-write-wins bug I shipped hours earlier).
+  // The first version read field.lastStepId, which is the tier of the MOST RECENT WRITE ONLY, so one
+  // manual rating relabelled a whole record and "tool-observed" could overclaim on evidence that was
+  // mostly self-assessed. That is laundering self-assessment as measurement — precisely what the tier
+  // exists to prevent. Tier is now computed from the per-sign counters, and CANNOT be computed at all
+  // for counts written before those counters existed.
+  // THREE STATES, and "legacy" is a first-class answer, not a fallback:
+  //   tool-observed — every counted rating is bound to a tool outcome
+  //   agent-judged  — every counted rating is a manual assertion
+  //   mixed         — both, reported with the observed share so the reader can weigh it
+  //   legacy        — counters absent or do not account for the total: provenance NOT RECOVERABLE.
+  // A legacy record is OUTSIDE_COVERAGE, never an implied zero and never promoted to observed.
+  const obs = (field?.plusObserved ?? 0) + (field?.minusObserved ?? 0);
+  const jud = (field?.plusJudged ?? 0) + (field?.minusJudged ?? 0);
+  const accounted = obs + jud;
+  // GUARD ON !==, NOT < (consumer review, 2026-08-10). `accounted < attempts` only catches counters that UNDER-
+  // count. Counters that OVER-count the total are just as broken — a desynchronised or double-written
+  // ledger — and would have been silently reported as a clean tier. Any mismatch in either direction
+  // means the counters do not describe this record, so the record cannot claim a tier.
+  // PARTIAL REPORTS BOTH MASSES: showing only the observed share of a partial record flatters it,
+  // because the reader cannot see how much of the remainder was self-assessed.
+  const tier = accounted !== attempts
+    ? (accounted === 0
+        ? "legacy"
+        : `legacy · ${obs} observed · ${jud} judged · ${attempts - accounted} unaccounted`)
+    : (jud === 0 ? "tool-observed"
+      : obs === 0 ? "agent-judged"
+      : `mixed ${obs}/${accounted} observed`);
   const tape = attempts >= 1
     ? [`- FIELD TAPE · ${plus} helped / ${minus} missed · n=${attempts} · evidence=${tier}`]
     : [];
