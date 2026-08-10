@@ -1,10 +1,123 @@
 # Changelog
 
-All notable changes to `@letta-ai/muscle-memory`. Format loosely follows [Keep a Changelog](https://keepachangelog.com/); this mod is pre-1.0, so the API may still change.
+All notable changes to `@adrianchan94/muscle-memory`. Format loosely follows [Keep a Changelog](https://keepachangelog.com/). Release candidates remain reviewable and reversible until the final `1.0.0` release.
 
 ## [Unreleased]
 
+- Final `1.0.0` tag, GitHub release, `main` merge, and npm publication remain separately gated.
+
+## [1.0.0-rc.3] — 2026-08-05
+
+### Release-candidate purpose
+- Establishes the author-owned V1 release candidate under `@adrianchan94/muscle-memory` and `github.com/adrianchan94/muscle-memory`.
+- Reframes the public surface around the shipped causal loop: one-skill-or-abstain prescription, resumable possessions, honest closeout, evidence-aware roster review, narrow instrument-owned verification, update-first learning, staged/reversible lifecycle, history mining, compaction reflection, sanitized squad transfer, and Desktop catalog sync.
+- Keeps research claims bounded and points readers to the canonical [Muscle Memory V1 Research](https://muscle-memory-v1-research.vercel.app/) ledger.
+- This RC is a new candidate. It does not overwrite the historical `e2b9c4a1…` / cold-review v6 baseline and cannot inherit that baseline's seal.
+
+### Fixed — clean-Linux CI
+- Resolves the shared global skill shelf on every call instead of freezing it at module load. The captured constant made the shelf depend on which file imported `mods/core` first, so a test that set `MM_GLOBAL_SKILLS_DIR` at module scope silently redirected the runtime for every file loaded afterwards — order-dependent, and therefore green on macOS and red on clean Linux.
+- Stops `test/graduation-truth.test.ts` leaking its sandbox env into every test file that loads after it.
+- Binds the packed-artifact test to the shipped `package.json` version instead of a hard-coded literal that rots on each candidate bump.
+- Corrects a stale roster assertion that demanded the zero-signal disclosure footer even when nothing was hidden; the shipped behaviour deliberately suppresses `hidden: 0` as noise.
+
+### Fixed — privacy
+- The publish sanitizer hardcoded the author's local username and personal name into the shipped package in order to redact them. Those literals are removed. Operator identity is derived at runtime from `userInfo()` and git config, which already ran on the next line — so redaction now covers **every** user instead of one, and no personal handle ships to consumers.
+- A cold review found operator names in **consumer-visible runtime output**: the empty squad feed told every user that two named individuals appear there as they distill. Replaced with generic product language, and four developer comments naming individuals were removed. `package.json` author/contributors and `LICENSE` keep their names — that is what those fields are for.
+- Adds `test/consumer-surface-privacy.test.ts`, which runs against the **packed artifact**: no operator name may ship outside sanctioned authorship metadata, the squad empty state is driven through the real command path and asserted name-free, and no relative link in the packed README may point outside the tarball. Verified to fail on all five pre-fix offenders.
+- A second cold review found `meshAgentLabel()` inferring an operator's identity from the filesystem: it matched a private Letta agent-id fragment in `MEMORY_DIR` and returned that person's name. Both the fragment and the name shipped in the source and the bundle. The inference is deleted — the label is now `MM_AGENT` when explicitly set, otherwise a generic `agent`.
+- The publish privacy detector hardcoded a real cloud agent id in order to block it, which shipped that id to every consumer and only ever caught one agent. It now matches the *shape* of an agent id, so it blocks every one of them, including the two that were previously hardcoded.
+- Hardened the privacy regression: names are matched case-insensitively (a lowercase `mack` slipped past the first version), private identifiers — agent ids, UUIDs, home paths, workspace paths, usernames — are forbidden in **every** shipped file with no exemption, and a runtime probe asserts the agent label stays generic under both a random `MEMORY_DIR` and the exact one that used to leak. Sanctioned authorship credit in `README`/`package.json`/`LICENSE` is unaffected.
+- Genericised the redaction examples in the README so the documentation no longer carries real-shaped private tokens.
+
+### Fixed — npm README links
+- Six relative links in the README pointed at files the package deliberately excludes (`docs/`, `SECURITY.md`, `CONTRIBUTING.md`, `demo.gif`), so they were dead for anyone reading the packaged README. Rewritten to tag-stable absolute GitHub URLs, which resolve regardless of how a registry renders relative paths. `./MOD.md` stays relative because it ships. The git-install route was never affected.
+
+### Added — research instrument kit
+- `docs/research/STUDY-CONTRACT.md` — the eight fields every measurement carries, and the three-level reproducibility table (package reproducible · minimal fixture reproducible · full program auditable but not publicly reproducible).
+- `docs/research/protocol.schema.json` — machine-checkable preregistration requiring exact model identifier, provider and date, sampling parameters, system-prompt hash, tool schema hash, and verifier version.
+- `docs/research/fixtures/four-events/run.mjs` — deterministic, no-provider fixture separating presence, prescription, execution, and verified outcome. Permanently labelled: it demonstrates the instrument, it does not reproduce the sealed findings.
+- `CITATION.cff` — cites the research record under the title *Knowing Is Not Doing*.
+
+### Research surface alias remap
+- Canonical live research URL is now `https://muscle-memory-v1-research.vercel.app/` (report title: *Knowing Is Not Doing…*; product name unchanged). `muscle-memory-story.vercel.app` remains a temporary alias to the same production deploy. July (H) history stays on the superseded deployment URL.
+
+### Owner-route release prep
+- Migrates package identity from `@letta-ai/muscle-memory` to author-owned `@adrianchan94/muscle-memory` (npm publish still separately gated / not authorized by this branch).
+- Points repository / homepage / bugs metadata at `adrianchan94/muscle-memory`.
+- Fixes the canonical `muscle_memory_prescribe` onboarding example to the dedicated two-field contract (`task` + `gap_observed` only).
+- Points public research surfaces at the live V1 research site (`muscle-memory-v1-research.vercel.app`; temporary legacy alias `muscle-memory-story.vercel.app`) while preserving the July historical deploy as precursor evidence.
+- Adds SECURITY / CONTRIBUTING / CODE_OF_CONDUCT trust docs for the author-owned landing experience.
+- Keeps frozen candidate `e2b9c4a1…` / cold archive v6 as historical custody; this branch does not overwrite those baselines.
+
+### Final preseason hardening
+- Adds a dedicated two-field `muscle_memory_prescribe` tool for first-contact task routing. It wraps the same caller-attested one-skill-or-`ABSTAIN` path as legacy `action:prescribe`, but removes the overloaded action-router and research-metadata tax for fresh agents; it still requires an explicit observed/known gap, opens one possession, and never creates, publishes, or dumps the shelf. Exact-file verification binding remains on the advanced legacy action where its pre-work metadata is explicit.
+- Adds `muscle_memory_close`, a three-field default agent closeout (`possession_id`, observed `result`, concrete `reason`). It fixes the evidence tier to `agent_judged`, reports judged-versus-verified state immediately, and leaves human judgment, evidence references, corrections, and instrument proof on their advanced dedicated surfaces. Failed unaided abstentions now say the task failed instead of incorrectly awarding “smart restraint.”
+- Removes the self-referential product phrase `Muscle Memory` from task-time prescription search only, preventing live dogfood prompts about the product itself from boosting unrelated memory-management skills and drowning an otherwise exact procedure match. Durable update/create evidence remains untouched.
+- Makes the default agent tool surface context-budgeted: fresh installs expose only prescribe, close, and a lean read tool (`report`, pending work, Skill Review, one known skill). `MM_ADVANCED=on` explicitly restores verification adapters, human/correction closeout, direct lifecycle/write/referee tools, reflection planning, Coverage, share cards, registry, and diagnostics. Human slash commands and the full product remain available in both modes.
+- Reconciles Skill Review with actual prescribed work: installed-shelf skills now appear after they are prescribed, possession outcomes (`helped / harmed / neutral`) and evidence (`judged / verified`) remain distinct from field plus-minus ratings, and one judged win reads as early positive evidence that needs replication rather than disappearing from the managed-only roster. The lean agent view collapses zero-signal shelf rows into one honest hidden count; human commands and advanced mode retain the full rotation.
+- Rewrites the packaged agent guide around a concrete first possession: Decision Report → observed gap → one prescription or abstention → real `Skill` invocation → same-possession closeout → interruption-safe resume. Research machinery and noisy Coverage diagnostics move behind the primary journey.
+- Renames the passive armed panel state from ambiguous `watching` to `ready`. Active lifecycle states retain explicit bounded verbs (`learning`, `checking`, `testing`, `saving`), so idle no longer looks like a stuck background job.
+- Adds a permanent, isolated claim-to-experience gate covering 16 agent journeys and 100 assertions: clean discovery, update-first folding, staged creation, graduation, catalog publishing, retire/restore, legacy history mining, compaction reflection, squad transfer, Reflex/guard behavior, unsafe-content rejection, portable publishing, model-aware prescribe/abstain, evidence-floor roster guidance, and next-possession ratings.
+- Refuses ratings for typo or uninstalled skill names on both the agent tool and manual command paths, so the referee ledger cannot award minutes to a nonexistent skill.
+- Isolates the cross-agent feed whenever `MM_STATE_DIR` is sandboxed (with `MM_MESH_FEED` as an explicit shared override), preventing tests and disposable agents from reading or writing the operator's real squad feed.
+- Makes ratings and lifecycle state visible from the default dashboard, adds a read-only ratings scoreboard, and returns explicit Staged, Graduated, Published, Retired, Restored, and update-first outcomes.
+- Adds task-time `prescribe`: it requires a caller-attested observed/known gap and returns exactly one safely dominant installed skill or `ABSTAIN`, never the full shelf. Runtime-model field evidence can force abstention; untested model/skill pairings are labeled unproven rather than guessed.
+- Adds a read-only `roster` surface that converts usage + associative field ratings into explicit evidence states without auto-promoting or auto-retiring anything; rotation/bench advice requires at least three rated possessions, so a single vote remains insufficient evidence.
+- Tightens graduation admission: procedural skills must carry a fenced example with a real command, file, code fragment, or diff (generic arrow prose is refused), deterministic repair drafts render one even with `MM_CAPTURE=off`, and the diagnostic-TELL referee now scopes only the actual Pitfalls section instead of miscounting later Verification bullets.
+- Extends publish sanitization to configured private agent labels through `MM_PRIVATE_IDENTIFIERS`, in addition to machine paths, user identifiers, and agent IDs.
+- Strengthens the separate product-byte gate: package smoke directly requires a non-empty tarball with a 64-hex SHA-256, installed/staged bundle hash equality, runtime surface activation, and zero private-path hits; catalog sync now has a direct before/after byte-identity assertion for its no-op success path.
+- Serializes the stateful Bun test suite with `--max-concurrency=1` so files sharing one sandbox ledger/verification-task root cannot race, and makes the Box Score integration expectation honor the runtime `MM_AGENT` precedence used by the final-gate environment.
+- Adds the first instrument-owned verification adapter for one narrow, machine-checkable class: exact regular-file SHA-256 under a configured trusted root. `register_exact_file_verification` freezes a create-once read-only pre-work manifest; `prescribe` binds its hash into the possession decision; `verify_agent_possession` accepts only `possession_id`, derives the result and receipt, and fails closed on late registration, manifest drift, traversal, symlinks, task mismatch, forged receipts, or cross-possession replay. Generic callers still cannot self-award `verified`; unbound legacy rows remain judged.
+
+## [1.0.0-rc.2] — 2026-07-20
+
+### Candidate re-freeze
+- Re-freezes the reviewed V1 runtime with corrected README, MOD, and changelog boundaries after RC1 documentation drift was detected. Runtime source and bundled executable behavior are unchanged from RC1; RC2 exists so the exact packed bytes can be independently validated and canaried without rewriting RC1 history.
+
+## [1.0.0-rc.1] — 2026-07-20
+
+### Release-candidate contract
+- **Skills that earn their minutes** — the v1 package connects observed work → verifier-gated distillation/update → selective routing → reasoned field ratings → reversible roster decisions. Context is treated as a model- and task-conditioned intervention, not an automatically beneficial payload.
+- **Truthful field referee** — `rate_skill` and `/muscle-memory rate` accept `up`, `down`, and `no_rate`; write an append-only reason event with runtime model/provider attribution; preserve the legacy plus-minus ledger; refuse to claim a rating when the sidecar cannot persist; and surface aggregate failures as explicit partial outcomes.
+- **Graduation truth guard** — active-shelf presence and matching `SKILL.md` frontmatter are required before UI/feed surfaces may claim a graduation.
+- **Release proof** — the candidate adds packed-tarball installation smoke, isolated runtime activation, private-path scan, source/bundle parity, deterministic final-gate receipts, and a role-separated review lane inside the project. No npm publication, GitHub push, or live replacement is implied by the RC label.
+- **Research and prior-art boundary** — the release packet now foregrounds five bounded contributions, a six-line related-work matrix, and a 25-source primary bibliography. It explicitly refuses component-level “first/only/unique” claims and separates prior-bundle research/product evidence from exact-RC1 certification.
+- **Noise and bloat controls** — read-only inspection templates cannot mature into skills, registry mirrors deduplicate by shelf precedence, synthetic `ref-skill-*` fixtures stay off user-facing boards, and hidden review forks are reused per purpose.
+
 ### Added
+- **E6 · Retroactive mining (`/muscle-memory mine [agent-id]`)** — trace-to-skill from history the
+  mod never saw live (`mods/history.ts`). The agent's message history (tool_call_message /
+  tool_return_message pairs) is replayed through the SAME deterministic pipeline as live capture
+  (`fingerprint()` step identity, `classifyError()` payload-free error classes) into the same
+  experience/outcome streams — repair-chain detection and reflection consume mined tape with zero
+  new pipeline code. Read-only on the server; per-agent watermark prevents re-mining; records carry
+  `mined: true` for auditability. Day-one value: install on an old agent, its first reflection has
+  months of tape. Live receipt (Letta Cloud, GLM 5.2 BYOK throwaway agent): 20 messages scanned →
+  3 step rows + 3 outcomes correlated through `loadExperience()`; chain thresholds correctly refused
+  an n=1 pattern from history (the same born-hard gate as live).
+- **E7 · Referee hook (`/muscle-memory rate <skill> up|down [step-id]`)** — skill plus-minus over
+  Letta's NATIVE rating primitive (`mods/referee.ts`): every rating lands in a local plus-minus
+  ledger (per-skill +/- counts, timestamps) the lifecycle can consume for utility-weighted pruning,
+  and — when a step id is given — is ALSO posted to `steps.feedback.create` so the signal lives in
+  Letta's own surface. Honest v1: ratings come from the agent/user; automatic outcome attribution
+  over step windows is v0.8 work and is not faked with guessing heuristics. Absence of ratings is
+  never treated as a minus (`skillUtility` returns null on no evidence).
+- **E8 · Squad shelf (`/muscle-memory shelf publish|attach|pull`)** — cross-agent skill inheritance
+  over a shared Letta archive (`mods/shelf.ts`, archive `mm-squad-shelf`): archives are
+  multi-agent-attachable, so one agent's sanitized, provenance-tagged skill becomes pullable by the
+  whole squad. Non-negotiables built in: shelf publish only accepts the SANITIZED staged copy
+  (publish-stage first), pulls land STAGED-FIRST (publish-staged dir, provenance header, "REVIEW
+  BEFORE PROMOTION") and never touch an active shelf, and secret-shaped content is hard-blocked in
+  both directions. Wire-truth note: tags on archive-created passages do not survive the wire
+  (verified live 2026-07-03 — search returns them tagless and tag filters match nothing), so shelf
+  identity + provenance ride IN THE TEXT via a canonical marker; multiple published versions resolve
+  to the newest marker timestamp. Live receipt: full publish → attach → pull → staged loop green on
+  Letta Cloud, provenance + content integrity + staged-first boundary all verified.
+- **E9 · Distill at the moment of forgetting** — `compact_start` now triggers the opt-in reflective
+  review (MM_REFLECT=staged|auto), not just a receipt: compaction is when evicted evidence dies, so
+  the reflect fires while the experience log still holds the full tape. Fire-and-forget with an
+  in-flight guard; can never delay or break compaction. (Local-backend event; guarded by the compact
+  capability as before.)
 - **E5 · The Reflex (opt-in `MM_REFLEX=on`)** — learned scar tissue now fires **in context**, not in a
   log. When a tool FAILS and both the step signature and the error class match a learned repair chain
   (`coachOnFailure`, kind `fix`, observed ≥2×), the known fix is appended to the failing tool's own

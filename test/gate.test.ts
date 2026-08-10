@@ -55,6 +55,13 @@ test("sotaQualityGaps: flags a thin draft (no code, no TELLs) and passes a SOTA 
   expect(sotaQualityGaps(sota).length).toBe(0);
 });
 
+test("sotaQualityGaps: counts only the Pitfalls section, not later verification bullets", () => {
+  const { sotaQualityGaps } = __mm;
+  const onePitfall = { name: "repairing-script-failures", description: "Use when a script fails and needs a verified source repair",
+    body: "## Procedure\n```text\nfail → repair → pass\n```\n## Pitfalls\n### One real pitfall\nTELL: the original verifier stays red. Fix the source.\n## Verification\n- rerun once\n- rerun twice" };
+  expect(sotaQualityGaps(onePitfall).some((g) => /TELL/.test(g))).toBe(false);
+});
+
 test("sotaQualityGaps: requires safe-first before destructive commands", () => {
   const { sotaQualityGaps } = __mm;
   const danger = "git reset --" + "hard origin/main"; // split so the repo guard does not flag the test fixture

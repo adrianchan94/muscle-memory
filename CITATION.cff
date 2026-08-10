@@ -1,0 +1,35 @@
+cff-version: 1.2.0
+message: "If you reference this work, please cite the research record below."
+title: "Knowing Is Not Doing"
+subtitle: "Measuring Execution-Time Governance of Learned Skills in LLM Agents"
+abstract: >-
+  Muscle Memory V1 is verifier-gated procedural memory for Letta agents, and the
+  instrument used to measure it. The research record examines the gap between an
+  agent authoring or citing a correct procedure and that procedure actually
+  governing its next action, and whether act-time governance changes measured
+  behaviour without retraining. Effects are bounded to tested tool-use tasks; the
+  work does not establish universal model behaviour or external replication.
+type: software
+authors:
+  - family-names: Chan
+    given-names: Adrian
+    alias: adrianchan94
+repository-code: "https://github.com/adrianchan94/muscle-memory"
+url: "https://muscle-memory-v1-research.vercel.app/"
+version: 1.0.0-rc.3
+license: MIT
+keywords:
+  - agent memory
+  - procedural knowledge
+  - skill libraries
+  - execution-time governance
+  - knowing-doing gap
+  - LLM agents
+  - verification
+references:
+  - type: generic
+    title: "Muscle Memory V1 research record"
+    url: "https://muscle-memory-v1-research.vercel.app/"
+    notes: >-
+      Canonical research record. Muscle Memory V1 is the product; Knowing Is Not
+      Doing is the research record behind its design. The two names are distinct.

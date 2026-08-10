@@ -8,6 +8,7 @@ import { lifecycleTransition, retiredSkillBlocker } from "../mods/lifecycle";
 import { sanitizeForPublish } from "../mods/publish";
 import { scanSkillContent } from "../mods/core";
 import { crossShelfDuplicates } from "../mods/gate";
+import { buildRegistry } from "../mods/lifecycle";
 
 function lib() {
   const dir = mkdtempSync(join(tmpdir(), "mm-maint-test-"));
@@ -67,3 +68,17 @@ description: retired fixture
   }
 });
 
+test("registry dedupes same-name active mirrors and keeps first-shelf precedence", () => {
+  const root = mkdtempSync(join(tmpdir(), "mm-registry-dedupe-"));
+  const agent = join(root, "agent");
+  const global = join(root, "global");
+  for (const [dir, description] of [[agent, "Use when the agent copy should win."], [global, "Use when the mirrored global copy should not duplicate the row."]] as const) {
+    mkdirSync(join(dir, "mirrored-skill"), { recursive: true });
+    writeFileSync(join(dir, "mirrored-skill", "SKILL.md"), `---\nname: mirrored-skill\ndescription: ${description}\n---\n## Procedure\n1. Test.\n<!-- muscle-memory provenance: fixture -->\n`);
+  }
+  const registry = buildRegistry([agent, global]);
+  expect(registry.count).toBe(1);
+  expect(registry.skills.map((s) => s.name)).toEqual(["mirrored-skill"]);
+  expect(registry.skills[0].dir).toBe(agent);
+  expect(registry.skills[0].description).toContain("agent copy should win");
+});

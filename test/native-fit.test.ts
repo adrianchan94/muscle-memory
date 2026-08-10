@@ -3,7 +3,7 @@
 // never auto-retired/auto-rewritten). Plus MemFS-first write resolution. Deterministic, no model.
 import { test, expect } from "bun:test";
 import { mkdtempSync, existsSync, readFileSync } from "node:fs"; import { tmpdir } from "node:os"; import { join } from "node:path";
-import { skillShelves, autonomousShelves, agentSkillsDir, GLOBAL_SKILLS, writeSkill } from "../mods/core";
+import { skillShelves, autonomousShelves, agentSkillsDir, globalSkillsDir, writeSkill } from "../mods/core";
 import { reachFn } from "../mods/engram";
 
 function withMemoryDir<T>(dir: string, fn: () => T): T {
@@ -30,7 +30,7 @@ test("native-fit BOUNDARY: autonomousShelves contains ONLY the agent shelf, neve
   withMemoryDir(agent, () => {
     const auton = autonomousShelves({});
     expect(auton).toContain(join(agent, "skills"));   // agent-local is mutable by the autonomous loop
-    expect(auton).not.toContain(GLOBAL_SKILLS);        // the shared global shelf is OFF LIMITS to autonomy
+    expect(auton).not.toContain(globalSkillsDir());        // the shared global shelf is OFF LIMITS to autonomy
     expect(auton.length).toBe(1);
   });
 });

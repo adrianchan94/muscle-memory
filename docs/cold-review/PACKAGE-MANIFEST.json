@@ -1,0 +1,147 @@
+{
+  "packageName": "@adrianchan94/muscle-memory",
+  "version": "1.0.0-rc.3",
+  "declaredFilesField": [
+    "MOD.md",
+    "CHANGELOG.md",
+    "README.md",
+    "LICENSE",
+    "mods"
+  ],
+  "tarball": {
+    "name": "adrianchan94-muscle-memory-1.0.0-rc.3.tgz",
+    "sha256": "837109fb52f541f04878783eb0f96fb234f11643bde68b7072e892a1f69fb6fc",
+    "bytes": 274400,
+    "npmReportedSize": 274400,
+    "npmReportedUnpackedSize": 948964,
+    "fileCount": 23
+  },
+  "bundle": {
+    "path": "mods/index.bundled.mjs",
+    "committedSha256": "6bab6296cc0031863c277aa5702d32ba243197e42dd5083da5ae470f0b4c6704",
+    "rebuiltFromSourceSha256": "6bab6296cc0031863c277aa5702d32ba243197e42dd5083da5ae470f0b4c6704",
+    "parity": true
+  },
+  "shippedFiles": [
+    {
+      "path": "CHANGELOG.md",
+      "bytes": 28082,
+      "sha256": "35cfd2f75d2df0fdf1f7dd68d5f4ed314bdcce7c552f1dd61e1194f4a68f0df0"
+    },
+    {
+      "path": "LICENSE",
+      "bytes": 691,
+      "sha256": "8bd952d3be4da20edcb307a437c5865bb4b4d56bcce425ea25e3a411cede479c"
+    },
+    {
+      "path": "MOD.md",
+      "bytes": 10585,
+      "sha256": "b4aac1d854e0d38fffc982daece5fdbcb27695145954f73c1d168e21bbc7fb54"
+    },
+    {
+      "path": "README.md",
+      "bytes": 43757,
+      "sha256": "fc365cfcd99ef2da51ead2bf52f1a4f8e943242e4fdd22c87e84ec8a689f098f"
+    },
+    {
+      "path": "mods/autopilot.ts",
+      "bytes": 75991,
+      "sha256": "253162274669bc31438e571cc3de150716157ce213a0551f6971ef4127554171"
+    },
+    {
+      "path": "mods/core.ts",
+      "bytes": 44069,
+      "sha256": "fa518cadb717036312b6bb5b6c0a5687579142e74054a306d892f4fc2debc969"
+    },
+    {
+      "path": "mods/detect.ts",
+      "bytes": 40312,
+      "sha256": "2660c157aadcc71674830327c58f579c910184ffc089d7e245e8e45d8c3d452b"
+    },
+    {
+      "path": "mods/engram.ts",
+      "bytes": 31230,
+      "sha256": "fece7f99018eb772a9f50727e8364c33a73f84b5c24499006d87ed1ec9b609b1"
+    },
+    {
+      "path": "mods/gate.ts",
+      "bytes": 21851,
+      "sha256": "ddc9b92483efdc78bb5b226567af0cb93bfafba702a9217e406c29c6b3d06ed2"
+    },
+    {
+      "path": "mods/history.ts",
+      "bytes": 8890,
+      "sha256": "bb3dbf6dceb522f4b5986f699b571a005183f4c8419dfb3600b7e5a8c02ce860"
+    },
+    {
+      "path": "mods/index.bundled.mjs",
+      "bytes": 358731,
+      "sha256": "6bab6296cc0031863c277aa5702d32ba243197e42dd5083da5ae470f0b4c6704"
+    },
+    {
+      "path": "mods/index.ts",
+      "bytes": 111943,
+      "sha256": "cb818e4dbb54aa56f5205811c821d6ead317641de4bdb3c210cdacf855a799c4"
+    },
+    {
+      "path": "mods/instrument.ts",
+      "bytes": 10139,
+      "sha256": "c12ff352472ecd1474d4b1139cabce825952cee600e238f8bef62d1b33579a63"
+    },
+    {
+      "path": "mods/invocation.ts",
+      "bytes": 7680,
+      "sha256": "1f836c8efa618d526d3c5b84aaf214d8f178e56472d2b6f978a6d067e6ae2131"
+    },
+    {
+      "path": "mods/lifecycle.ts",
+      "bytes": 14929,
+      "sha256": "e3c16af2651c07581f68cdb67782cd7fbbd5b256c76ab36d626a653ef67ad538"
+    },
+    {
+      "path": "mods/possessions.ts",
+      "bytes": 59435,
+      "sha256": "432e2c54701d2de33a52ed6e6d2fc68b744281a6634ab0c99e60cbc42ab06592"
+    },
+    {
+      "path": "mods/publish.ts",
+      "bytes": 19296,
+      "sha256": "99e46d102b37440b544cc0e218fff20d33dad7145e2f74cefa99dc647e1144ba"
+    },
+    {
+      "path": "mods/referee.ts",
+      "bytes": 10836,
+      "sha256": "278bdd6a0cff5e08e5da406334f0511cb67bcc09d43442f3f6ead1e01d04f6db"
+    },
+    {
+      "path": "mods/shelf.ts",
+      "bytes": 9086,
+      "sha256": "46ed4cb035a00c748570153449a9520988de5a73b18c376151d29fac3041328b"
+    },
+    {
+      "path": "mods/ui.ts",
+      "bytes": 10556,
+      "sha256": "bcf92d77771e1d192d4bf1eb3f165ad964fa0a9acbc223667c2ba69558435227"
+    },
+    {
+      "path": "mods/verification.ts",
+      "bytes": 20283,
+      "sha256": "8ba3961283a0a968134b31571cf9f4b8f1e2f408ee26763dca767d209fa9ec38"
+    },
+    {
+      "path": "mods/wins.ts",
+      "bytes": 8081,
+      "sha256": "7c7b739b4ad5ca8696d442fa04c13b9a6e551986352b6da09a6611a22c0c1ddb"
+    },
+    {
+      "path": "package.json",
+      "bytes": 2511,
+      "sha256": "9d3565003b3aa2c51d714155cf5069590b0a8b53e083575d1808a1adadebb06f"
+    }
+  ],
+  "assertions": {
+    "noReviewDocsInTarball": true,
+    "bundleMatchesSource": true,
+    "everyShippedFileHashed": true
+  }
+}

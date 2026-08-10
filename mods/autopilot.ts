@@ -1,7 +1,7 @@
 // muscle-memory · autopilot module (split from index.ts — behavior-preserving).
 import { mkdirSync, readFileSync, existsSync, writeFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
-import { AUTOPILOT_STATE, Candidate, MM, MM_TAG, RECEIPTS_DIR, REFLECT_HANDLED, Row, STAGED_DIR, STAGED_RETIRED_DIR, STATE_DIR, agentSkillsDir, appendMeshFeed, appendUiEvent, ensureDir, hash, isManaged, listSkillNames, loadExperience, readSkill, scanDirs, scanSkillContent, skillDesc, slug, writeSkill, writeUiState } from "./core";
+import { AUTOPILOT_STATE, Candidate, MM, MM_TAG, RECEIPTS_DIR, REFLECT_HANDLED, Row, STAGED_DIR, STAGED_RETIRED_DIR, STATE_DIR, agentSkillsDir, appendMeshFeed, appendUiEvent, ensureDir, hash, isManaged, listSkillNames, loadExperience, readSkill, scanDirs, scanSkillContent, skillDesc, slug, syncSkillToDesktopCatalog, writeSkill, writeUiState } from "./core";
 import { DESTRUCTIVE, RepairChain, buildCrossConversationEvidence, detect, detectAntiPatterns, detectRepairChains, impactScore, isValidSkillName, multiInstanceSupport } from "./detect";
 import { dedupCheck, draftWithRepair, effectivenessVerdict, findCandidate, lintSkillDraft, repairForCandidate, sotaQualityGaps } from "./gate";
 import { publishPlan, publishSkillToCatalog, publishTier } from "./publish";
@@ -41,6 +41,7 @@ export function autopilotPlan(input: { rows: Row[]; managed: ManagedView[]; dirs
   if (cfg.mode === "off") return { decisions, skipped: [{ what: "all", why: "autopilot off" }], budget: { used, limit: cfg.dailyBudget }, mode: cfg.mode };
 
   const existing = new Set(input.managed.map((m) => m.name));
+  const existingByIdentity = new Map(input.managed.map((m) => [canonicalSkillIdentity(m.name), m.name]));
   const refineTargets = new Set<string>();
 
   // 1) REFINE: a managed skill whose documented failure recurs in current anti-patterns.
@@ -57,21 +58,32 @@ export function autopilotPlan(input: { rows: Row[]; managed: ManagedView[]; dirs
   // 2) DISTILL: mature, high-impact, novel candidates (gated + budgeted).
   for (const c of detect(input.rows).candidates) {
     if (used >= cfg.dailyBudget) { skipped.push({ what: c.key, why: "daily budget reached" }); continue; }
+    // A repeated one-liner is command recall, not procedural memory. Keep it observable for manual review,
+    // but autonomous distillation requires a multi-step workflow. Verified recoveries enter separately
+    // through repairCandidates, so a template's fail→success counter never earns an auto-created skill.
+    if (c.kind === "template") { skipped.push({ what: c.key, why: "single-command repetition — observe, don't auto-distill" }); continue; }
     if (DESTRUCTIVE.test(c.key)) { skipped.push({ what: c.key, why: "destructive workflow — never auto-distilled" }); continue; } // explicit safety gate, before impact
     const imp = impactScore(c).score;
     if (imp < cfg.minImpact) { skipped.push({ what: c.key, why: `impact ${imp} < ${cfg.minImpact}` }); continue; }
     const draft = draftWithRepair(c, repairForRows(c, input.rows));
     const nm = slug(draft.name);
+    if (!isValidSkillName(nm)) { skipped.push({ what: nm || c.key, why: "invalid or command-transition-shaped skill name" }); continue; }
+    const identity = canonicalSkillIdentity(nm);
+    const identityMatch = identity && existingByIdentity.get(identity);
+    if (identityMatch) { skipped.push({ what: nm, why: `canonical duplicate of ${identityMatch} — refine, don't re-distill` }); continue; }
     if (existing.has(nm)) { skipped.push({ what: nm, why: "already managed — refine, don't re-distill" }); continue; }
     const dc = dedupCheck(nm, draft.description, input.dirsForDedup);
     if (dc.dup) { skipped.push({ what: nm, why: `dedup: ${dc.reason}` }); continue; }
     const lint = lintSkillDraft({ name: nm, description: draft.description, body: draft.body }, { needsPitfalls: !!c.fixes });
     if (!lint.ok) { skipped.push({ what: nm, why: `lint: ${lint.issues[0]}` }); continue; }
+    const quality = sotaQualityGaps({ name: nm, description: draft.description, body: draft.body });
+    if (quality.length) { skipped.push({ what: nm, why: `quality: ${quality[0]}` }); continue; }
     // Auto-graduate only in full-auto mode AND with a verified success in the pattern; else stage for 1-tap.
     const verified = c.fixes > 0 || c.count >= MM.STRONG_SINGLE;
     const gate: "graduate" | "stage" = cfg.mode === "auto" && verified ? "graduate" : "stage";
     decisions.push({ op: "distill", candidate: c, name: nm, reason: `impact ${imp}, ${c.count} reps${verified ? ", verified" : ""}`, gate });
     existing.add(nm); // dedup: same repair surfaced as both a template + a sequence won't double-distill this pass
+    if (identity) existingByIdentity.set(identity, nm);
     used++;
   }
 
@@ -105,9 +117,20 @@ export function appendRecurrenceNote(dir: string, name: string, note: string): b
 
 
 /** Execute a plan with explicit deps (testable). author defaults to the deterministic drafter. */
-export function executeAutopilotPlan(plan: AutopilotPlan, opts: { skillsDir: string; rows: Row[]; author?: (c: Candidate, r?: RepairChain) => { name: string; description: string; body: string }; ctx?: any }): { graduated: string[]; staged: string[]; refined: string[]; retired: string[]; receipts: any[] } {
+/**
+ * Retirement is a RECOMMENDATION unless explicitly enabled.
+ *
+ * The docs promise "lifecycle changes are never automatic" and "nothing is auto-retired".
+ * This used to call retireManagedSkill unconditionally, so the promise was false. The
+ * conservative claim is the one worth keeping: silently removing a skill someone relies on is
+ * far worse than leaving a stale one on the shelf with a recommendation attached.
+ */
+export type RetirePolicy = "recommend" | "enabled";
+
+export function executeAutopilotPlan(plan: AutopilotPlan, opts: { skillsDir: string; rows: Row[]; author?: (c: Candidate, r?: RepairChain) => { name: string; description: string; body: string }; ctx?: any; retirePolicy?: RetirePolicy }): { graduated: string[]; staged: string[]; refined: string[]; retired: string[]; recommendedRetire: string[]; receipts: any[] } {
   const author = opts.author || ((c, r) => draftWithRepair(c, r));
-  const graduated: string[] = [], staged: string[] = [], refined: string[] = [], retired: string[] = [];
+  const graduated: string[] = [], staged: string[] = [], refined: string[] = [], retired: string[] = [], recommendedRetire: string[] = [];
+  const retirePolicy: RetirePolicy = opts.retirePolicy ?? "recommend";
   const receipts: any[] = [];
   for (const d of plan.decisions) {
     try {
@@ -116,18 +139,24 @@ export function executeAutopilotPlan(plan: AutopilotPlan, opts: { skillsDir: str
         const content = `---\nname: ${d.name}\ndescription: ${draft.description}\n---\n\n${draft.body}${provenanceBlock(d.candidate)}\n`;
         const sec = scanSkillContent(content); // M2: security gate on autopilot graduate/stage
         if (!sec.ok) { receipts.push({ op: "distill", name: d.name, blocked: `security: ${sec.issues.join("; ")}`, ts: Date.now() }); continue; }
-        if (d.gate === "graduate") { writeSkill(opts.skillsDir, d.name, content); graduated.push(d.name); }
+        if (d.gate === "graduate") { writeSkill(opts.skillsDir, d.name, content); syncSkillToDesktopCatalog(d.name, opts.ctx); graduated.push(d.name); }
         else { writeSkill(STAGED_DIR, d.name, content); staged.push(d.name); }
         receipts.push({ op: "distill", name: d.name, gate: d.gate, reason: d.reason, ts: Date.now() });
       } else if (d.op === "refine") {
         if (appendRecurrenceNote(opts.skillsDir, d.skill, d.reason)) { refined.push(d.skill); receipts.push({ op: "refine", name: d.skill, reason: d.reason, ts: Date.now() }); }
       } else if (d.op === "retire") {
-        const target = retireManagedSkill(d.skill, d.reason, opts.ctx, d.absorbedInto);
-        retired.push(d.skill); receipts.push({ op: "retire", name: d.skill, reason: d.reason, target, ts: Date.now() });
+        if (retirePolicy !== "enabled") {
+          // Surface it as advice and leave the shelf alone.
+          recommendedRetire.push(d.skill);
+          receipts.push({ op: "retire", name: d.skill, reason: d.reason, executed: false, reasonWithheld: "retire_requires_explicit_policy", ts: Date.now() });
+        } else {
+          const target = retireManagedSkill(d.skill, d.reason, opts.ctx, d.absorbedInto);
+          retired.push(d.skill); receipts.push({ op: "retire", name: d.skill, reason: d.reason, target, executed: true, ts: Date.now() });
+        }
       }
     } catch (e: any) { receipts.push({ op: d.op, error: String(e?.message ?? e) }); }
   }
-  return { graduated, staged, refined, retired, receipts };
+  return { graduated, staged, refined, retired, recommendedRetire, receipts };
 }
 
 
@@ -141,8 +170,10 @@ export function saveAutopilotState(s: { date: string; used: number }) { try { en
 export function managedView(dirs: string[]): ManagedView[] {
   const usage = loadUsage();
   const out: ManagedView[] = [];
+  const seen = new Set<string>();
   for (const d of dirs) for (const n of listSkillNames(d)) {
-    if (!isManaged(d, n)) continue;
+    if (!isManaged(d, n) || seen.has(n)) continue;
+    seen.add(n); // one canonical managed view per skill name; first shelf has precedence
     const u = usage[n] || {};
     const created = u.created || Date.now();
     out.push({ name: n, description: skillDesc(d, n), body: readSkill(d, n), uses: u.uses || 0, ageDays: Math.floor((Date.now() - created) / 86400000), pinned: !!u.pinned });
@@ -182,6 +213,25 @@ export async function consumeStreamBounded(stream: AsyncIterable<unknown>): Prom
   return Promise.race([reader, timer]);
 }
 
+// Hidden model-fork calls are expensive: each fork creates a new conversation with the agent's full
+// system prompt. Reuse one hidden bench conversation per live ctx + purpose so dogfood/review loops
+// do not mint fresh threads every call. If the cached fork fails, drop it and let the next call retry.
+const HIDDEN_FORKS = new WeakMap<object, Map<string, Promise<any>>>();
+
+async function hiddenForkFor(ctx: any, purpose: string): Promise<any | null> {
+  if (typeof ctx?.conversation?.fork !== "function") return null;
+  const key = (typeof ctx === "object" && ctx) ? ctx : ctx.conversation;
+  let byPurpose = HIDDEN_FORKS.get(key);
+  if (!byPurpose) { byPurpose = new Map(); HIDDEN_FORKS.set(key, byPurpose); }
+  let forked = byPurpose.get(purpose);
+  if (!forked) {
+    forked = Promise.resolve(ctx.conversation.fork({ hidden: true }));
+    byPurpose.set(purpose, forked);
+  }
+  try { return await forked; }
+  catch (e) { byPurpose.delete(purpose); throw e; }
+}
+
 
 /** Optional model-fork author: the model writes a richer SKILL.md body in a hidden conversation.
  * Fully guarded — ANY failure returns null and the executor falls back to the deterministic drafter,
@@ -191,7 +241,8 @@ export async function forkAuthor(ctx: any, c: Candidate, repair?: RepairChain): 
     if (typeof ctx?.conversation?.fork !== "function") return null;
     const det = draftWithRepair(c, repair);
     const prompt = `You are muscle-memory's skill author. Write ONLY the markdown BODY (no YAML frontmatter) of a SKILL.md capturing this recurring real workflow. Keep it under 120 lines. Required sections in order: "## Trigger", "## Observed pattern" (include the exact pattern in a code block), "## Procedure" (numbered, concrete, adaptable), ${repair ? `"## Pitfalls" (the observed error "${repair.errClass}" and its fix "${repair.fixStep}"), ` : ""}"## Verification". Pattern: ${c.key}. Reps: ${c.count} across ${c.convs} conversation(s). Output ONLY the markdown body, nothing else.`;
-    const forked = await ctx.conversation.fork({ hidden: true });
+    const forked = await hiddenForkFor(ctx, "fork-author");
+    if (!forked) return null;
     const stream = await forked.sendMessageStream([{ role: "user", content: prompt }]);
     let body = await consumeStreamBounded(stream as AsyncIterable<unknown>);
     body = body.trim().replace(/^```(?:markdown|md)?\n?|\n?```$/g, "");
@@ -222,15 +273,25 @@ export async function runAutopilot(ctx: any, config?: AutopilotConfig): Promise<
   // Mirror autopilot activity to the LIVE PANEL — the always-on path (fires even with MM_REFLECT=off).
   // This is the showcase moment: the agent watches itself distill a skill, with no user command.
   if (result.graduated.length || result.staged.length) {
-    const g = result.graduated[0], s = result.staged[0];
+    const activeDir = agentSkillsDir(ctx);
+    const verifiedGraduated = result.graduated.filter((n) => {
+      const proof = graduationProof(activeDir, n);
+      if (!proof.ok) appendUiEvent({ phase: "graduation_unverified", summary: `not claiming graduation for '${n}': ${proof.reason.slice(0, 100)}`, skill: n, action: "graduate", route: "autopilot truth-guard" });
+      return proof.ok;
+    });
+    const g = verifiedGraduated[0], s = result.staged[0];
     const summary = g
-      ? `graduated '${g}'${result.graduated.length > 1 ? ` +${result.graduated.length - 1}` : ""}`
+      ? `graduated '${g}'${verifiedGraduated.length > 1 ? ` +${verifiedGraduated.length - 1}` : ""}`
       : `staged '${s}'${result.staged.length > 1 ? ` +${result.staged.length - 1}` : ""} for review`;
-    appendUiEvent({ phase: g ? "skill_graduated" : "skill_staged", summary, skill: g || s, action: g ? "graduate" : "stage", route: "autopilot" });
-    writeUiState({ phase: "done", last: summary, route: `AUTOPILOT · ${g ? "graduate" : "stage"}` });
-    for (const n of result.graduated) appendMeshFeed({ type: "skill_graduated", skill: n, route: "AUTOPILOT", signals: 0 });
+    if (g || s) {
+      appendUiEvent({ phase: g ? "skill_graduated" : "skill_staged", summary, skill: g || s, action: g ? "graduate" : "stage", route: "autopilot" });
+      writeUiState(g
+        ? { phase: "rotation", skill: g, last: summary, route: "AUTOPILOT · graduate" }
+        : { phase: "idle", last: "", route: "AUTOPILOT · stage" });
+    }
+    for (const n of verifiedGraduated) appendMeshFeed({ type: "skill_graduated", skill: n, route: "AUTOPILOT", signals: 0 });
     // v1.1 parity: auto publishability preflight (read-only) on AUTOPILOT graduation too, not just manual.
-    for (const n of result.graduated) { try { const _d = agentSkillsDir(ctx); const _b = readSkill(_d, n); if (_b) { const _p = publishPlan({ name: n, description: skillDesc(_d, n), body: _b, shelf: "agent" }); appendUiEvent({ phase: "skill_publish_preflight", summary: `${n}: ${_p.publishability}/100 · tier=${publishTier(_p)} · ${_p.recommended}`, skill: n, route: "auto-after-graduate" }); } } catch { /* preflight must never break autopilot */ } }
+    for (const n of verifiedGraduated) { try { const _d = agentSkillsDir(ctx); const _b = readSkill(_d, n); if (_b) { const _p = publishPlan({ name: n, description: skillDesc(_d, n), body: _b, shelf: "agent" }); appendUiEvent({ phase: "skill_publish_preflight", summary: `${n}: ${_p.publishability}/100 · tier=${publishTier(_p)} · ${_p.recommended}`, skill: n, route: "auto-after-graduate" }); } } catch { /* preflight must never break autopilot */ } }
   }
   // OPT-IN promotion (MM_PUBLISH=auto): copy freshly-graduated skills to the shared shelf
   // (~/.letta/skills) so they appear under the app's Custom Skills, reusable for ALL agents.
@@ -241,7 +302,7 @@ export async function runAutopilot(ctx: any, config?: AutopilotConfig): Promise<
     for (const n of result.graduated) { try { publishSkillToCatalog(n, ctx); published.push(n); } catch { /* privacy/lint gate or no-op — skip */ } }
     if (published.length) {
       appendUiEvent({ phase: "skill_published", summary: `published ${published.length} to catalog (Custom Skills)`, skill: published[0], action: "publish", route: "autopilot" });
-      writeUiState({ phase: "done", last: `published '${published[0]}' to catalog`, route: "AUTOPILOT · publish" });
+      writeUiState({ phase: "rotation", skill: published[0], last: `published '${published[0]}' to catalog`, route: "AUTOPILOT · publish" });
       for (const n of published) appendMeshFeed({ type: "skill_published", skill: n, route: "CATALOG", signals: 0 });
     }
   }
@@ -281,22 +342,177 @@ export const SEARCH_STOP = new Set("the and for with via use using used run runn
 
 export const SEARCH_DISTINCT_MIN = 3; // ≥3 distinctive (non-stopword) hits in name/desc — prevents cross-domain false-positives (e.g. browser-QA→cloud-forensics)
 
+/** Product-name mentions describe the router being tested, not the missing procedure.
+ * Strip only this self-reference for task-time prescription search; durable update/create routing keeps the raw evidence. */
+export function normalizePrescriptionQuery(query: string): string {
+  return String(query).replace(/\bmuscle[\s-]+memory\b/gi, " ").replace(/\s+/g, " ").trim();
+}
+
+const IDENTITY_STOP = new Set(["recovering", "repairing", "recovery", "repair", "repairs", "from", "failing", "failed", "failure", "failures", "runs", "run", "at"]);
+
+/** Collapse naming aliases to a conservative class identity for anti-bloat checks.
+ * `recovering-from-failing-script-runs` and `repairing-failing-script-runs` are one class. */
+export function canonicalSkillIdentity(name: string): string {
+  return [...new Set(slug(name).split("-").filter((token) => token && !IDENTITY_STOP.has(token)))].join("-");
+}
+
+/** ── CONTEXT-AS-QUERY (L2) ────────────────────────────────────────────────────────────────────
+ * Measured: agent-authored `task` strings cost -13.50 nDCG vs the user's own wording (n=280 paired,
+ * p=2.8e-07). The loss is at RETRIEVAL, not ranking — a reranker over the same candidate set
+ * recovered +0.00. So the fix cannot live downstream of candidate generation: the retrieval query
+ * itself must carry the turn's real context, not just the agent's paraphrase of it.
+ *
+ * SAFETY INVARIANTS (these are what stop context from manufacturing false prescriptions):
+ *   I1  A skill with ZERO agent-query term overlap can never enter the candidate set. Context
+ *       re-ranks and boosts; it can never conjure a candidate out of nothing.
+ *   I2  Context terms contribute alpha * their normal score (alpha default 0.5, MM_CTX_ALPHA).
+ *   I3  Context may add at most CTX_MATCHED_CAP (default 2, MM_CTX_MATCHED_CAP) to the distinctive
+ *       `matched` count that feeds the >=SEARCH_DISTINCT_MIN precision floor. With the floor at 3
+ *       and the cap at 2, at least one distinctive term must always come from the agent's own query.
+ *   I4  Context text is capped at CTX_CAP chars (default 2000, MM_CTX_CAP) — unbounded context is
+ *       a threshold-inflation attack surface, not extra signal.
+ * With context === "" every one of these is inert and searchSkills is byte-identical to before.
+ */
+export function contextWeightAlpha(): number {
+  const raw = Number(process.env.MM_CTX_ALPHA);
+  // 0.25 is not a taste call. Measured on 96 real traces (L2/S2): at alpha=1.0 (naive concat) the
+  // ABSTAIN-correct control collapses 24 -> 12 true negatives (p=4.9e-4) — naive concatenation
+  // HALVES correct abstention. alpha=0.25 held 42/42 on the positive arm AND 24/24 on the control.
+  return Number.isFinite(raw) && raw >= 0 && raw <= 1 ? raw : 0.25;
+}
+export function contextCharCap(): number {
+  const raw = Number(process.env.MM_CTX_CAP);
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 2000;
+}
+export function contextMatchedCap(): number {
+  const raw = Number(process.env.MM_CTX_MATCHED_CAP);
+  return Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : 2;
+}
+/** Flatten heterogeneous message/history shapes into plain retrieval text.
+ * Handles: string, {content:string}, {content:[{type:"text",text}|{type:"thinking",thinking}|
+ * {type:"toolCall",name,arguments}]}, and toolResult rows (role "toolResult", NOT "tool" — the
+ * shape trap that has burned two lanes). Unknown shapes contribute nothing rather than JSON noise. */
+export function flattenContextText(input: any, cap = 8000): string {
+  const parts: string[] = [];
+  const push = (s: any) => { if (typeof s === "string" && s.trim()) parts.push(s.trim()); };
+  const walkBlock = (b: any) => {
+    if (typeof b === "string") return push(b);
+    if (!b || typeof b !== "object") return;
+    if (typeof b.text === "string") return push(b.text);
+    if (typeof b.thinking === "string") return push(b.thinking);
+    // toolCall .name/.arguments are DELIBERATELY excluded. Measured (L2/S2): including them cost 2
+    // true negatives on the abstain control at identical recall — tool names and argument blobs are
+    // machine vocabulary that matches skill titles without meaning the task needs that skill.
+  };
+  const walkMessage = (m: any) => {
+    if (typeof m === "string") return push(m);
+    if (!m || typeof m !== "object") return;
+    if (m.message && typeof m.message === "object") return walkMessage(m.message);
+    if (typeof m.content === "string") return push(m.content);
+    if (Array.isArray(m.content)) return m.content.forEach(walkBlock);
+    walkBlock(m);
+  };
+  (Array.isArray(input) ? input : [input]).forEach(walkMessage);
+  // <system-reminder> blocks are harness scaffolding, not the user's task. On RC6 they literally
+  // contained the fixture family name (task_class="anchor-repair-scope-reversal"), which donates
+  // gold vocabulary for free — S3 retracted a 6/12 false-prescription number caused by exactly this.
+  // Newest-last is how a turn reads; keep the TAIL when we have to cut, because the most recent
+  // text is the task at hand. Cutting the head is how you lose the actual request.
+  const joined = parts.join("\n").replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, " ");
+  return joined.length > cap ? joined.slice(joined.length - cap) : joined;
+}
+
+/** Distinctive terms, same tokenizer/stoplist the shipped scorer already uses. */
+export function distinctiveTerms(text: string): string[] {
+  return [...new Set(String(text).toLowerCase().split(/[^a-z0-9.]+/).filter((t) => t.length > 2 && !SEARCH_STOP.has(t)))];
+}
+
+/** Strip the router's OWN output out of context before it is used as a retrieval query.
+ * RED TEAM (L2/S3, RC6 P3 where abstaining is correct): with real prior tool results spliced in,
+ * 11 of 12 correct abstentions flipped to false prescriptions. The poison was not volume — sweeping
+ * context length found ZERO false prescriptions from ordinary text at any cap. The poison was
+ * IDENTITY ECHO: `muscle_memory_skill_read` itself prints `Closest: 1. <skill-name>` on an ABSTAIN
+ * and names the skill twice on a PRESCRIBE, so the mod's own transcript hands the scorer the answer
+ * it is supposed to derive. A retrieval system that reads its own past output is measuring itself. */
+export const MOD_ECHO_LINE = /^\s*(?:\d+\.\s|[·•-]\s)?.*$/;
+export function stripModEcho(context: string): string {
+  const lines = String(context || "").split(/\r?\n/);
+  const out: string[] = [];
+  let inClosest = false;
+  for (const line of lines) {
+    const t = line.trim();
+    if (/^Closest:/i.test(t)) { inClosest = true; continue; }
+    if (inClosest) {
+      // the Closest block is an enumerated candidate list; it ends at the first non-list line
+      if (!t || /^\d+\.\s/.test(t) || /^[·•-]\s/.test(t)) { if (!t) inClosest = false; continue; }
+      inClosest = false;
+    }
+    if (/^(ABSTAIN|PRESCRIBE)\b/.test(t)) continue;             // decision lines name the skill
+    if (/^possession:\s*p-/.test(t)) continue;                   // tracking line
+    if (/^NEXT · invoke/.test(t) || /^control: do not inject/.test(t)) continue;
+    if (/^(gap diagnosis|runtime model|Next:)\b/.test(t)) continue;
+    if (/skill="/.test(t)) continue;
+    out.push(line);
+  }
+  return out.join("\n");
+}
+
 export function searchSkills(dirs: string[], query: string, k = 5): Array<{ name: string; description: string; dir: string; score: number; matched: number }> {
-  const terms = [...new Set(String(query).toLowerCase().split(/[^a-z0-9.]+/).filter((t) => t.length > 2 && !SEARCH_STOP.has(t)))];
+  return searchSkillsWithContext(dirs, query, "", k);
+}
+
+/** searchSkills, plus the turn's surrounding context as a DOWN-WEIGHTED second term group.
+ * `context` "" reproduces the shipped scorer exactly (asserted in test/context-as-query.test.ts). */
+export function searchSkillsWithContext(
+  dirs: string[], query: string, context: string, k = 5,
+  opts?: { alpha?: number; cap?: number; matchedCap?: number; stripEcho?: boolean },
+): Array<{ name: string; description: string; dir: string; score: number; matched: number }> {
+  const terms = distinctiveTerms(query);
+  const alpha = opts?.alpha ?? contextWeightAlpha();
+  const cap = opts?.cap ?? contextCharCap();
+  const matchedCap = opts?.matchedCap ?? contextMatchedCap();
+  const queryTerms = new Set(terms);
+  // I4: cap the context, then I1/I3 do the rest. Drop terms the query already carries.
+  const rawCtx = String(context || "");
+  const cleanCtx = (opts?.stripEcho ?? true) ? stripModEcho(rawCtx) : rawCtx;
+  const ctxTerms = alpha > 0 && matchedCap >= 0
+    ? distinctiveTerms(cleanCtx.length > cap ? cleanCtx.slice(cleanCtx.length - cap) : cleanCtx).filter((t) => !queryTerms.has(t))
+    : [];
   const out: Array<{ name: string; description: string; dir: string; score: number; matched: number }> = [];
+  const seen = new Set<string>();
+  const hit = (nl: string, dl: string, body: string, t: string) => {
+    const esc = t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const inName = nl.includes(t), inDesc = dl.includes(t);
+    const bc = Math.min((body.match(new RegExp("\\b" + esc, "g")) || []).length, 3);
+    return { named: inName || inDesc, score: (inName ? 8 : 0) + (inDesc ? 4 : 0) + bc };
+  };
   for (const d of dirs) for (const n of listSkillNames(d)) {
+    if (seen.has(n)) continue;
+    seen.add(n); // precedence-ordered shelves: one skill gets one routing vote, even when mirrored globally
     const body = readSkill(d, n).toLowerCase();
     const desc = skillDesc(d, n);
     const nl = n.toLowerCase(), dl = desc.toLowerCase();
     let score = 0, matched = 0; // matched = # of distinctive query terms present in name/description
     for (const t of terms) {
-      const esc = t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const inName = nl.includes(t), inDesc = dl.includes(t);
-      if (inName || inDesc) matched++;
-      const bc = Math.min((body.match(new RegExp("\\b" + esc, "g")) || []).length, 3);
-      score += (inName ? 8 : 0) + (inDesc ? 4 : 0) + bc;
+      const h = hit(nl, dl, body, t);
+      if (h.named) matched++;
+      score += h.score;
     }
-    if (matched > 0) out.push({ name: n, description: desc, dir: d, score, matched });
+    // I1: no agent-query overlap of ANY kind -> not a candidate, whatever the context says.
+    // Measured relaxation (L2/S2, 96 real traces): requiring a name/description hit killed 4 rows
+    // (rc6 M1-T2-P2, M1-T4-P2, M1-T4-P4, rc5 M1-T4-P4) that had real BODY overlap with the agent's
+    // query (score 17 on one) but zero name/desc hits — i.e. precisely the vocabulary-substitution
+    // cases this mechanism exists to fix. Body overlap IS agent-query overlap. The invariant that
+    // matters is "the agent's own words reached this skill somehow", not "reached its title".
+    // Guarded on ctxTerms.length so the no-context path stays byte-identical to the shipped scorer.
+    if (matched === 0 && !(ctxTerms.length > 0 && score > 0)) continue;
+    let ctxMatched = 0, ctxScore = 0;
+    for (const t of ctxTerms) {
+      const h = hit(nl, dl, body, t);
+      if (h.named && ctxMatched < matchedCap) ctxMatched++; // I3: bounded distinctive credit
+      ctxScore += h.score;
+    }
+    out.push({ name: n, description: desc, dir: d, score: score + alpha * ctxScore, matched: matched + ctxMatched }); // I2
   }
   return out.sort((a, b) => b.score - a.score || b.matched - a.matched).slice(0, k);
 }
@@ -313,12 +529,24 @@ export function pickUpdateTarget<T extends { name: string; score: number; matche
   // current candidate, not spray sibling staged skills while waiting for review. (Live dogfood catch.)
   const topDir = String((top as any).dir || "");
   const topIsStaged = topDir === STAGED_DIR || /[\\/]staged$/.test(topDir);
-  if (top.score >= threshold && top.matched >= SEARCH_DISTINCT_MIN && (clearlyLeads || topIsStaged)) return { ...top, confidence: "high" };
+  // Distinctive-overlap evidence is EARNED TWO WAYS, because `matched` is not a property of the
+  // evidence — it is a property of how verbosely two strangers happened to write. The agent authors
+  // the query; the skill author authors the description; MM authors neither. Measured (96 real
+  // traces, rc6 P2 agent-authored queries): 5 of 12 rows were candidates that CLEARED the score
+  // threshold and were vetoed by `matched >= 3` alone — one at score 49, nearly 3x threshold.
+  // A high absolute score IS distinctive-overlap evidence: score accumulates 8/name + 4/desc + body
+  // hits, so score >= 2.5x threshold cannot be reached by a single incidental term.
+  // The runner-up margin (clearlyLeads) is retained UNCHANGED and still does the anti-false-positive
+  // work: a padding attack that inflates `matched` on an irrelevant skill still fails, because an
+  // irrelevant skill does not lead its rivals. Relative evidence is robust; absolute counts are not.
+  const distinctiveEnough = top.matched >= SEARCH_DISTINCT_MIN
+    || (top.matched >= 2 && top.score >= 2.5 * threshold);
+  if (top.score >= threshold && distinctiveEnough && (clearlyLeads || topIsStaged)) return { ...top, confidence: "high" };
   return null;
 }
 
 
-// ── COMPOUNDS-TRULY safety layer (from Kev's preserve-update lane): an update must never destroy a
+// ── COMPOUNDS-TRULY safety layer (preserve-update lane): an update must never destroy a
 // proven skill's core, and ambiguous overlap must refuse autonomous create (anti-bloat). ──
 export function isAmbiguousExistingRoute<T extends { name: string; score: number; matched: number }>(matches: T[], threshold = 18): boolean {
   const top = matches[0], second = matches[1];
@@ -374,6 +602,191 @@ export function applySemanticEvidence<T extends { name: string; score: number; m
 // The COMPLETE routing decision head, pure — reviewAndAuthor consumes it and the routing eval
 // measures it, so the benchmark can never drift from the shipped decision path.
 export type SkillRoute = "update" | "create" | "park-ambiguous" | "park-semantic";
+
+
+// ── V1 RERANK LANE ─────────────────────────────────────────────────────────────
+// Shipped prescribe is lexical-only: PRESCRIBE requires matched >= SEARCH_DISTINCT_MIN, and the
+// semantic corroboration boost can never RAISE `matched` — so an ordinary-language paraphrase of a
+// skill's own vocabulary can never be routed, however relevant the skill is. Measured: routing
+// declined 62% of qualified, gap-observed encounters across two independent studies.
+// Fix follows this repo's own reranker-v2 design: recall stays wide, precision lives in the judge.
+export type RerankJudgement = { same_job: boolean; confidence: number };
+export type JudgeFn = (evidence: string, skill: { name: string; description: string }) => Promise<RerankJudgement | null>;
+export const RERANK_CONF_FLOOR = 0.6;
+export const RERANK_SYSTEM_PROMPT = `You are a precision gate for a skill library. Decide whether a coding-session incident should be filed UNDER an existing skill (same underlying job-to-be-done, so the skill's procedure would actually resolve THIS incident) or logged as a NEW skill. Be strict: same_job=true ONLY if a good engineer would say 'that existing skill already covers this.' Reply STRICT JSON only: {"same_job": true|false, "confidence": 0.0-1.0}.`;
+
+
+/** PRESCRIBE-framed gate. The reranker-v2 judge answers an AUTHORING question ("file this incident
+ * under an existing skill?") — a strict dedup test. Prescription asks something different: "would
+ * following this procedure help the agent do THIS task right?" Measured on 20 blind plain-language
+ * cases the lexical lane missed: authoring prompt 7/20 recall, prescribe prompt 19/20, both at
+ * 100% precision against 20 wrong-skill mispairs. */
+export const PRESCRIBE_SYSTEM_PROMPT = `You are a prescription gate for a skill library. An agent is about to attempt a task. Decide whether following THIS skill's documented procedure would materially help the agent complete THAT task correctly — especially if the skill encodes a convention, rule, or step the agent would otherwise get wrong. Answer same_job=true if a competent engineer would hand the agent this skill for this task. Answer false if the skill is about a different kind of work, or if the task is described too vaguely to tell. Reply STRICT JSON only: {"same_job": true|false, "confidence": 0.0-1.0}.`;
+
+export function prescribeUserPrompt(task: string, name: string, description: string): string {
+  return `Task the agent is about to attempt: ${task}\nCandidate skill — name: ${name}; description: ${description}\nWould this skill help?`;
+}
+
+export function rerankUserPrompt(evidence: string, name: string, description: string): string {
+  return `Incident: ${evidence}\nExisting skill — name: ${name}; description: ${description}\nSame job?`;
+}
+
+export function parseJudgement(raw: string): RerankJudgement | null {
+  const text = String(raw || "").replace(/<\/?think>/gi, "");
+  const m = text.match(/\{[^{}]*"same_job"[^{}]*\}/);
+  if (!m) return null;
+  try {
+    const o = JSON.parse(m[0]);
+    if (typeof o.same_job !== "boolean") return null;
+    const conf = typeof o.confidence === "number" && Number.isFinite(o.confidence) ? Math.min(1, Math.max(0, o.confidence)) : 0;
+    return { same_job: o.same_job, confidence: conf };
+  } catch { return null; }
+}
+
+/** WIDE recall for the judge stage only. The shipped scorer's >=3-distinctive floor is a PRECISION
+ * device; here it would gate recall, so candidate generation drops it. Precision is restored by the
+ * judge, never by lexical overlap. Ranked by lexical score so the judge sees the best guess first. */
+export function wideCandidates(
+  dirs: string[], query: string, listNames: (dir: string) => string[], k = 3,
+): Array<{ name: string; dir: string }> {
+  const scored = searchSkills(dirs, query, 50);
+  const out: Array<{ name: string; dir: string }> = scored.map((s) => ({ name: s.name, dir: s.dir }));
+  const seen = new Set(out.map((o) => o.name));
+  for (const d of dirs) for (const n of listNames(d)) {
+    if (!seen.has(n)) { seen.add(n); out.push({ name: n, dir: d }); }
+  }
+  return out.slice(0, k);
+}
+
+
+// ── G1 · COMPOSITION-AWARE PRESCRIPTION (MM_COMPOSE) ──────────────────────────
+// SkillsBench designs tasks that need SKILL COMPOSITION ("2+ skills, SOTA <50%"); a router whose
+// only vocabulary is "one smallest matching skill" cannot express the right answer for a 7-day
+// itinerary that needs most of six search-* skills, no matter how good its ranking is.
+// DESIGN CHOICE (option a, ordered set — over b/sequential and c/coverage-model):
+//   (b) sequential re-prescription assumes the agent calls the router repeatedly; measured across
+//       21 benchmark conversations there were ZERO muscle_memory_* calls — a lane that needs N
+//       calls when the field shows 0 is behaviorally dead on arrival.
+//   (c) a sub-goal decomposition model is a SECOND SCORER — explicitly banned; the gate/margin
+//       logic already shipped must stay the only precision device.
+//   (a) reuses everything: candidates come from the SAME lexical scorer, each companion must clear
+//       the SAME gate the primary cleared (pickUpdateTarget, unchanged), and coherence is defined
+//       as COVERAGE COMPLEMENTARITY over the agent's own distinctive query terms — a companion is
+//       named only if it covers task vocabulary the already-selected skills do not. That is what
+//       stops this from becoming a shelf dump: near-duplicates of the primary add no new terms and
+//       are rejected; the set is capped at 3 total (large shelves DEGRADE agents — skill
+//       shadowing, -21% at 202 skills). Every companion ships WITH its reason (the exact uncovered
+//       terms it contributes), so the agent can audit the composition instead of trusting it.
+// OFF by default. composeEnabled() false ⇒ the prescribe message is byte-identical to today.
+// The ABSTAIN path is untouched by construction: companions are computed only AFTER a primary
+// prescription routed; no primary ⇒ same abstain as today.
+export function composeEnabled(): boolean {
+  return String(process.env.MM_COMPOSE || "").toLowerCase() === "on";
+}
+export function composeMaxSkills(): number {
+  const raw = Number(process.env.MM_COMPOSE_MAX);
+  return Number.isFinite(raw) && raw >= 1 ? Math.min(3, Math.floor(raw)) : 3; // hard ceiling 3 — a set, never a shelf
+}
+export function composeMinNewTerms(): number {
+  const raw = Number(process.env.MM_COMPOSE_MIN_NEW);
+  return Number.isFinite(raw) && raw >= 1 ? Math.floor(raw) : 2; // a companion must EARN its slot with >=2 uncovered task terms
+}
+
+export type ComposeCompanion = { name: string; newTerms: string[] };
+
+/** Greedy coverage-complement selection over the SAME candidate list the shipped scorer produced.
+ * `pool` is searchSkills(WithContext) output ranked by score; `primary` is the routed target.
+ * A candidate joins the set iff (1) it individually clears the SAME gate as the primary
+ * (pickUpdateTarget on the singleton — threshold + distinctive floor, reused verbatim), and
+ * (2) its name/description covers >= minNew distinctive query terms not covered by the set so far.
+ * Term coverage uses distinctiveTerms + name/desc containment — the shipped `matched` notion. */
+export function selectCompanions(
+  query: string,
+  primary: { name: string; description: string },
+  pool: Array<{ name: string; description: string; score: number; matched: number }>,
+  opts?: { threshold?: number; maxTotal?: number; minNew?: number; minPrimaryOverlap?: number },
+): ComposeCompanion[] {
+  const threshold = opts?.threshold ?? 18;
+  const maxTotal = opts?.maxTotal ?? composeMaxSkills();
+  const minNew = opts?.minNew ?? composeMinNewTerms();
+  // MEASURED DEFECT (shelf-scaling probes, 2026-08-09): companions were gated on covering the
+  // QUERY's distinctive terms only — never on similarity to the chosen PRIMARY. Companion
+  // precision fell 1.00 → 0.67 → 0.33 as the shelf grew 4 → 24 → 56, and at 56 both companions
+  // were cross-domain (a power-grid-MILP skill injected into a Civ6 map task) while the primary
+  // stayed correct. The fix: a companion must also share >= minPrimaryOverlap distinctive terms
+  // with the PRIMARY's own name+description (same tokenizer, no second scorer). Default 1 — the
+  // weakest same-domain evidence; 0 restores the old query-only behavior explicitly.
+  const minPrimaryOverlap = opts?.minPrimaryOverlap ?? 1;
+  const terms = distinctiveTerms(query);
+  if (!terms.length || maxTotal <= 1) return [];
+  const primaryTerms = distinctiveTerms(`${primary.name} ${primary.description || ""}`);
+  const coveredBy = (nl: string, dl: string) => terms.filter((t) => nl.includes(t) || dl.includes(t));
+  const covered = new Set(coveredBy(primary.name.toLowerCase(), String(primary.description || "").toLowerCase()));
+  const out: ComposeCompanion[] = [];
+  for (const cand of pool) {
+    if (out.length >= maxTotal - 1) break;
+    if (cand.name === primary.name || out.some((c) => c.name === cand.name)) continue;
+    // SAME gate as the primary, reused — not a second scorer. Singleton ⇒ clearlyLeads is true,
+    // so this is exactly "score >= threshold AND distinctive-overlap floor".
+    if (!pickUpdateTarget([cand], threshold)) continue;
+    const candText = `${cand.name.toLowerCase()} ${String(cand.description || "").toLowerCase()}`;
+    // Primary-similarity gate: similarity to the PRIMARY, not just the query.
+    if (minPrimaryOverlap > 0 && primaryTerms.filter((t) => candText.includes(t)).length < minPrimaryOverlap) continue;
+    const newTerms = coveredBy(cand.name.toLowerCase(), String(cand.description || "").toLowerCase()).filter((t) => !covered.has(t));
+    if (newTerms.length < minNew) continue;
+    out.push({ name: cand.name, newTerms });
+    for (const t of newTerms) covered.add(t);
+  }
+  return out;
+}
+
+/** Full composition decision over the shipped scorer's pool. Two ways in, both gate-reusing:
+ *  1. pickUpdateTarget routes a dominant primary exactly as today → companions may join it.
+ *  2. NO dominant primary because the top candidates TIE — the itinerary case: six search-*
+ *     siblings, three tie, clearlyLeads fails, and the shipped router abstains "ambiguous".
+ *     The 1.5× margin exists to avoid picking the wrong ONE skill; when the runner-ups that deny
+ *     dominance are coverage-COMPLEMENTS that join the set anyway, that objection dissolves — the
+ *     answer IS the set. Near-duplicate ties (the case the margin actually protects) contribute
+ *     zero new terms, produce zero companions, and still fall through to ABSTAIN unchanged.
+ *  Returns null whenever composition has nothing defensible to say → caller keeps today's path. */
+/** Compose around a primary the JUDGE already chose.
+ *
+ * The judge lane fixes ABSTENTION (it routes when lexical vocabulary misses). Composition fixes the
+ * SHAPE (tasks needing 2+ skills). They are orthogonal, and before 2026-08-09 the judge returned
+ * immediately so MM_RERANK=on silently disabled MM_COMPOSE. Reuses selectCompanions verbatim — the
+ * same tokenizer, the same uncovered-term rule, the same cap — so there is no second scorer and no
+ * separate notion of "relevant". Returns [primary] unchanged when nothing else earns a slot, so the
+ * judge's own answer is never weakened.
+ */
+export function composeAroundPrimary(dirs: string[], query: string, primaryName: string): string[] {
+  if (String(process.env.MM_COMPOSE || "").toLowerCase() !== "on") return [primaryName];
+  try {
+    const pool = searchSkills(dirs, query, 8);
+    const primary = pool.find((p) => p.name === primaryName);
+    if (!primary) return [primaryName];
+    const companions = selectCompanions(query, { name: primary.name, description: primary.description || "" }, pool, {});
+    return [primaryName, ...companions.map((c) => c.name)];
+  } catch { return [primaryName]; }
+}
+
+export function composePrescription(
+  query: string,
+  pool: Array<{ name: string; description: string; score: number; matched: number }>,
+  threshold = 18,
+): { primary: { name: string; score: number; matched: number }; companions: ComposeCompanion[]; rescuedTie: boolean } | null {
+  const routed = pickUpdateTarget(pool, threshold);
+  if (routed) {
+    const companions = selectCompanions(query, { name: routed.name, description: (routed as any).description || "" }, pool, { threshold });
+    return companions.length ? { primary: routed, companions, rescuedTie: false } : null;
+  }
+  const top = pool[0];
+  if (!top) return null;
+  // Singleton gate = the SAME threshold + distinctive-overlap floor, minus only the dominance margin.
+  if (!pickUpdateTarget([top], threshold)) return null;
+  const companions = selectCompanions(query, { name: top.name, description: String(top.description || "") }, pool, { threshold });
+  if (!companions.length) return null; // tie without complements = the margin's real case → abstain survives
+  return { primary: top, companions, rescuedTie: true };
+}
 
 export function routeSkill<T extends { name: string; score: number; matched: number }>(
   lexical: T[], hits: SemanticSkillHit[], onShelf: (name: string) => boolean, threshold = 18,
@@ -631,6 +1044,21 @@ export function isHighConfidenceCreate(res: ReviewResult, ev: { items: number; c
   return ev.convs >= 3 && ev.items >= 1 && cleanRoute && richDraft;
 }
 
+export function graduationProof(skillsDir: string, name: string): { ok: boolean; path: string; reason: string } {
+  const nm = slug(name);
+  const path = join(skillsDir, nm, "SKILL.md");
+  if (!nm) return { ok: false, path, reason: "name required" };
+  if (!existsSync(path)) return { ok: false, path, reason: "SKILL.md missing after write" };
+  try {
+    const content = readFileSync(path, "utf8");
+    const fmName = slug((content.match(/^name:\s*(.+)$/im)?.[1] || "").trim());
+    if (fmName !== nm) return { ok: false, path, reason: `frontmatter name mismatch: expected ${nm}, got ${fmName || "(none)"}` };
+    return { ok: true, path, reason: "write visible on active shelf" };
+  } catch (e: any) {
+    return { ok: false, path, reason: String(e?.message ?? e) };
+  }
+}
+
 
 export function graduateStagedSkill(name: string, ctx?: any): string {
   const nm = slug(name);
@@ -645,14 +1073,19 @@ export function graduateStagedSkill(name: string, ctx?: any): string {
   const body = content.replace(/^---[\s\S]*?\n---\s*\n?/, "");
   const lint = lintSkillDraft({ name: nm, description: desc, body });
   if (!lint.ok) throw new Error(`linter blocked: ${lint.issues.join("; ")}`);
+  const quality = sotaQualityGaps({ name: nm, description: desc, body });
+  if (quality.length) throw new Error(`quality blocked: ${quality.join("; ")}`);
   const sec = scanSkillContent(body); if (!sec.ok) throw new Error(`security blocked: ${sec.issues.join("; ")}`);
   const dstRoot = agentSkillsDir(ctx);
   const dst = writeSkill(dstRoot, nm, content.includes(MM_TAG) ? content : content + `\n<!-- ${MM_TAG}: graduated ${new Date().toISOString().slice(0, 10)} -->\n`);
+  const proof = graduationProof(dstRoot, nm);
+  if (!proof.ok) throw new Error(`graduation proof failed: ${proof.reason}`);
+  syncSkillToDesktopCatalog(nm, ctx);
   mkdirSync(STAGED_RETIRED_DIR, { recursive: true });
   try { renameSync(srcDir, join(STAGED_RETIRED_DIR, `${nm}-graduated-${Date.now()}`)); } catch { /* best-effort quarantine */ }
   appendUiEvent({ phase: "skill_graduated", summary: `graduated '${nm}'`, skill: nm, action: "graduate", route: "manual" });
   appendMeshFeed({ type: "skill_graduated", skill: nm, route: "GRADUATE", signals: 0 });
-  writeUiState({ phase: "done", last: `graduated '${nm}'`, route: "GRADUATE · live" });
+  writeUiState({ phase: "rotation", skill: nm, last: `graduated '${nm}'`, route: "GRADUATE · live" });
   // MM_PUBLISH v1.1: auto-run the publishability preflight right after graduation (READ-ONLY — never
   // auto-publishes). Surfaces quality+publishability score, tier, and the recommended shelf so a good
   // skill can be promoted to shared Custom Skills without manual babysitting. Best-effort, never breaks graduation.
@@ -667,8 +1100,9 @@ export function reviewForkAuthor(ctx: any): (sys: string, user: string) => Promi
   return async (sys: string, user: string) => {
     try {
       if (typeof ctx?.conversation?.fork !== "function") return "";
-      const forked = await ctx.conversation.fork({ hidden: true });
-      const stream = await forked.sendMessageStream([{ role: "user", content: `${sys}\n\n${user}` }]);
+      const forked = await hiddenForkFor(ctx, "review-author");
+      if (!forked) return "";
+      const stream = await forked.sendMessageStream([{ role: "user", content: `${sys}\n\nTreat this request independently from prior messages in this hidden bench thread.\n\n${user}` }]);
       const out = await consumeStreamBounded(stream as AsyncIterable<unknown>);
       return out.trim();
     } catch { return ""; }
@@ -708,9 +1142,9 @@ export async function runReflectiveReview(ctx: any, config: { mode?: "staged" | 
     writeUiState({ phase: "idle", last: summary, route: "SKIP · handled" });
     return { action: "none", reason: summary };
   }
-  writeUiState({ phase: "routing", route: preTgt ? `UPDATE → ${preTgt.name}` : "CREATE (new skill)" });
+  writeUiState({ phase: "checking", subject: preTgt?.name || "", route: preTgt ? `UPDATE → ${preTgt.name}` : "CREATE (new skill)" });
   appendUiEvent({ phase: "review_planned", summary: preTgt ? `route UPDATE → ${preTgt.name}` : "route CREATE — no existing skill safely covers this" });
-  writeUiState({ phase: "writing", skill: preTgt?.name, route: preTgt ? `UPDATE → ${preTgt.name}` : "CREATE" });
+  writeUiState({ phase: "shaping", skill: preTgt?.name || "", route: preTgt ? `UPDATE → ${preTgt.name}` : "CREATE" });
   const author = config.authorFn || reviewForkAuthor(ctx);
   let res: ReviewResult;
   try {
@@ -723,7 +1157,11 @@ export async function runReflectiveReview(ctx: any, config: { mode?: "staged" | 
   }
   if ((res.action === "create" || res.action === "update") && res.name && res.content) {
     const live = config.mode === "auto";
-    const graduate = live || res.action === "update" || isHighConfidenceCreate(res, ev);
+    // `staged` must mean staged. This read `live || update || high-confidence create`, so the
+    // two routes an operator most wants to inspect — a rewrite of an existing skill, and a
+    // create the model felt sure about — were the two that bypassed the shelf. Confidence is
+    // not consent. Only the live mode opens the live shelf on the autonomous path.
+    const graduate = live;
     const dir = graduate ? agentSkillsDir(ctx) : stagedShelf;
     const tagged = res.content.includes(MM_TAG) ? res.content : res.content + `\n<!-- ${MM_TAG}: reflective ${new Date().toISOString().slice(0, 10)}; action=${res.action}; convs=${ev.convs}; ${graduate ? "graduated=true" : "staged=true"} -->\n`;
     try {
@@ -749,7 +1187,16 @@ export async function runReflectiveReview(ctx: any, config: { mode?: "staged" | 
         }
       }
       const oldContent = res.action === "update" && res.updateTarget ? (() => { const d = reviewDirs.find((x) => existsSync(join(x, res.updateTarget!, "SKILL.md"))); return d ? readSkill(d, res.updateTarget!) : undefined; })() : undefined;
+      writeUiState({ phase: "saving", skill: res.name, route: res.action.toUpperCase() });
       writeSkill(dir, res.name, tagged);
+      writeUiState({ phase: "testing", skill: res.name, route: res.action.toUpperCase() });
+      const proof = graduate ? graduationProof(dir, res.name) : { ok: true, path: join(dir, res.name, "SKILL.md"), reason: "staged write" };
+      if (!proof.ok) {
+        appendUiEvent({ phase: "graduation_unverified", summary: `not claiming graduation for '${res.name}': ${proof.reason.slice(0, 100)}`, skill: res.name, action: res.action, route: "truth-guard" });
+        writeUiState({ phase: "idle", last: `graduation unverified for '${res.name}'`, route: "SKIP · truth-guard" });
+        return { ...res, wrote: join(dir, res.name), reason: `graduation proof failed: ${proof.reason}` };
+      }
+      if (graduate) syncSkillToDesktopCatalog(res.name, ctx);
       // EVIDENCE-PACK MANIFEST: provenance next to the skill (not model vibes — a git object).
       const manifest = buildEvidenceManifest({ action: res.action, skill: res.name, updateTarget: res.updateTarget, convs: ev.convs, signals: ev.items, memfsHits: res.matches || [], preferences: prefs, rejected: ev.rejected, newContent: tagged, oldContent });
       const evDir = join(dir, res.name, "references", "evidence"); mkdirSync(evDir, { recursive: true });
@@ -762,12 +1209,14 @@ export async function runReflectiveReview(ctx: any, config: { mode?: "staged" | 
       const verb = graduate ? "graduated" : (res.action === "update" ? "staged update to" : "staged");
       const summary = `${verb} '${res.name}' (${res.action === "update" ? "update-first" : "new"}, ${ev.convs} sessions/${ev.items} signals)`;
       appendUiEvent({ phase, summary, skill: res.name, action: res.action, route: res.updateTarget ? `update ${res.updateTarget}` : "create" });
-      appendMeshFeed({ type: phase, skill: res.name, route: graduate ? "GRADUATE" : res.action.toUpperCase(), signals: ev.items }); // cross-agent feed (see Mack + Kev distilling)
+      appendMeshFeed({ type: phase, skill: res.name, route: graduate ? "GRADUATE" : res.action.toUpperCase(), signals: ev.items }); // cross-agent feed (see peer agents distilling)
       markHandledReflect(sig, routeKey);
       appendUiEvent({ phase: "evidence_manifest_written", summary: "wrote evidence manifest" });
       if (ev.rejected.length) appendUiEvent({ phase: "noise_rejected", summary: `rejected ${ev.rejected.length} env-noise items` });
       if (prefs.length) appendUiEvent({ phase: "memory_pref_injected", summary: `injected ${prefs.length} user preferences` });
-      writeUiState({ phase: "done", last: summary, route: `${graduate ? "GRADUATE" : res.action.toUpperCase()}${res.updateTarget ? " " + res.updateTarget : ""} · ${graduate ? "live" : "staged"}` });
+      writeUiState(graduate
+        ? { phase: res.action === "update" ? "updated" : "learned", skill: res.name, last: summary, route: `${graduate ? "GRADUATE" : res.action.toUpperCase()}${res.updateTarget ? " " + res.updateTarget : ""} · live` }
+        : { phase: "idle", last: "", route: `${res.action.toUpperCase()} · staged` });
       return { ...res, wrote: join(dir, res.name) };
     } catch (e: any) { appendUiEvent({ phase: "reflect_error", summary: `write failed: ${String(e?.message ?? e).slice(0, 80)}` }); return { ...res, reason: String(e?.message ?? e) }; }
   }

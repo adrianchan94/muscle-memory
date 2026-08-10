@@ -1,0 +1,70 @@
+MUSCLE MEMORY — COLD REVIEW FREEZE RECORD
+=========================================
+GENERATED at seal time. Every number below is derived from the artifact being sealed.
+Do not hand-edit: the generator is scripts/emit-freeze-docs.mjs.
+
+CANDIDATE
+  package            @adrianchan94/muscle-memory
+  version            1.0.0-rc.3
+  status             RELEASE CANDIDATE — not published, not tagged, not merged
+
+EXACT BYTES
+  packed tarball     837109fb52f541f04878783eb0f96fb234f11643bde68b7072e892a1f69fb6fc          <- CURRENT
+  tarball bytes      274400
+  packed file count  23
+  bundled entry      6bab6296cc0031863c277aa5702d32ba243197e42dd5083da5ae470f0b4c6704
+  tar-stream sha256  936c8bd27b99b19f11efe0df3edb6e1df7298ec094b6c392b223528ac6cdc78b
+
+  REPRODUCTION CONTRACT: the decompressed tar stream, not the gzip envelope.
+  `npm pack` output is gzip-wrapped, and the envelope varies with packer and
+  compression level while the tar stream inside stays identical. If your outer
+  .tgz sha differs but the tar-stream sha matches, the artifact is correct.
+  Gzip-envelope drift is NOT a defect and NOT a P0.
+
+    shasum -a 256 <your>.tgz              # outer envelope — may differ
+    gunzip -c <your>.tgz | shasum -a 256  # must equal tar-stream sha256 above
+
+FROZEN COMMIT
+  branch             release/muscle-memory-v1
+
+  The frozen commit SHA is NOT restated here. A committed file cannot contain its own
+  commit hash: writing it changes the head, so the value would always name the previous
+  commit. It is recorded authoritatively in the sealed archive's MANIFEST (frozenCommit),
+  which is written outside the snapshot. Keeping it out also makes this file deterministic,
+  so sealing twice leaves the tree clean.
+
+  To confirm you are on the frozen commit:
+    git rev-parse HEAD          # compare against the archive MANIFEST frozenCommit
+    git status --porcelain      # must be empty
+    git diff --check            # must be empty
+
+GATES ON THE FROZEN TREE
+  npm test                      365 pass, 0 fail across 46 files
+                                (counted from a real run at seal time, not prose)
+  npm run verify                all stages green         exit 0
+  node scripts/final-gate.mjs   PASS_RELEASE_CANDIDATE   exit 0
+  package smoke                 PASS, privatePathHits []
+
+  CI (ubuntu-latest) for this exact frozen commit:
+    Not restated here — see the sealed archive's MANIFEST.json, field: ci.
+    To look them up yourself:
+      gh run list --branch <branch> --json headSha,conclusion,url \
+        --jq '.[] | select(.headSha=="<FROZEN_SHA>")'
+
+GENERATED EVIDENCE (regenerate and diff)
+  node scripts/dump-package-manifest.mjs   -> PACKAGE-MANIFEST.json
+  node scripts/dump-tool-schemas.mjs       -> TOOL-SCHEMAS.json
+  Both exit non-zero if their assertions fail.
+
+INVALIDATION RULE
+  Any change to the packaged files (MOD.md, CHANGELOG.md, README.md, LICENSE, mods) changes the packed bytes and
+  VOIDS this freeze. Changes under docs/ and scripts/ do NOT: both are excluded from the
+  package `files` field, and PACKAGE-MANIFEST.json asserts that no review doc ships.
+
+  The full list of superseded pins is in the sealed cold-review brief, under
+  "Void pins — do not review these". If your archive, brief, or checkout shows any of
+  them, you have the wrong bytes.
+
+BLOCKED AT FREEZE TIME
+  no git tag · no GitHub release (not even a draft) · no npm publish ·
+  no merge to main · no external research send

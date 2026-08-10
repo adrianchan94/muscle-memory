@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/adrianchan94/muscle-memory/docs/research/protocol.schema.json",
+  "title": "Muscle Memory measurement protocol",
+  "description": "Required preregistration record for any measurement presented as a result. A cell missing any required field is not a result; it is an anecdote.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocolId",
+    "subject",
+    "baseline",
+    "assignment",
+    "outcome",
+    "evidenceTier",
+    "exclusion",
+    "amendment",
+    "custody",
+    "model",
+    "sampling",
+    "systemPromptSha256",
+    "toolSchema",
+    "verifierVersion"
+  ],
+  "properties": {
+    "protocolId": { "type": "string", "minLength": 1 },
+    "preregisteredAt": { "type": "string", "format": "date-time" },
+
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["family", "seat"],
+      "properties": {
+        "family": { "type": "string", "minLength": 1 },
+        "seat": { "type": "string", "minLength": 1 }
+      }
+    },
+    "baseline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["arm", "matched"],
+      "properties": {
+        "arm": { "type": "string", "minLength": 1 },
+        "matched": { "type": "boolean" },
+        "notes": { "type": "string" }
+      }
+    },
+    "assignment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "declaredBeforeRun"],
+      "properties": {
+        "method": { "type": "string", "enum": ["preassigned", "randomized", "exhaustive"] },
+        "declaredBeforeRun": { "const": true },
+        "seed": { "type": ["integer", "null"] }
+      }
+    },
+    "outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["definition", "declaredBeforeRun"],
+      "properties": {
+        "definition": { "type": "string", "minLength": 1 },
+        "declaredBeforeRun": { "const": true },
+        "scale": { "type": "string" }
+      }
+    },
+    "evidenceTier": { "type": "string", "enum": ["judged", "verified"] },
+    "exclusion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rules", "retainReceipts"],
+      "properties": {
+        "rules": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "retainReceipts": { "const": true }
+      }
+    },
+    "amendment": {
+      "type": "array",
+      "description": "Empty is valid. Undeclared amendment is falsification.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["at", "reason", "change"],
+        "properties": {
+          "at": { "type": "string", "format": "date-time" },
+          "reason": { "type": "string", "minLength": 1 },
+          "change": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "custody": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["holder", "sha256"],
+      "properties": {
+        "holder": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "independentlyRecomputed": { "type": "boolean" }
+      }
+    },
+
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["identifier", "provider", "date"],
+      "properties": {
+        "identifier": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Exact model identifier as requested, e.g. a full versioned string. Never a family nickname alone."
+        },
+        "provider": { "type": "string", "minLength": 1 },
+        "date": { "type": "string", "format": "date", "description": "API window date the calls were made in." }
+      }
+    },
+    "sampling": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["temperature", "topP", "maxTokens"],
+      "properties": {
+        "temperature": { "type": ["number", "string"] },
+        "topP": { "type": ["number", "string"] },
+        "maxTokens": { "type": ["integer", "string"] },
+        "note": { "type": "string", "description": "Use \"provider default\" only if the default is genuinely fixed, and say so." }
+      }
+    },
+    "systemPromptSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "toolSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sha256"],
+      "properties": {
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "toolNames": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "verifierVersion": { "type": "string", "minLength": 1 },
+
+    "retryPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxRetries": { "type": "integer", "minimum": 0 },
+        "onFailure": { "type": "string" }
+      }
+    },
+    "rawTraceUri": {
+      "type": "string",
+      "description": "Controlled by default. Public surfaces must never invent a path; mark unavailable instead."
+    }
+  }
+}

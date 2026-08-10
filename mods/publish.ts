@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { userInfo } from "node:os";
-import { GLOBAL_SKILLS_DIR, MM_TAG, PUBLISH_STAGED_DIR, appendMeshFeed, appendUiEvent, scanDirs, scanSkillContent, slug, writeUiState } from "./core";
+import { resolveSkillDir, resolveSkillFile, globalSkillsDir, MM_TAG, PUBLISH_STAGED_DIR, appendMeshFeed, appendUiEvent, scanDirs, scanSkillContent, slug, writeUiState } from "./core";
 import { lintSkillDraft, sotaQualityGaps } from "./gate";
 import { SEARCH_STOP } from "./autopilot";
 
@@ -54,6 +54,15 @@ function runtimeUserIdentifiers(): string[] {
   return [...vals].sort((a, b) => b.length - a.length);
 }
 
+function runtimePrivateAgentIdentifiers(): string[] {
+  const vals = new Set<string>();
+  for (const raw of [process.env.MM_AGENT || "", ...(process.env.MM_PRIVATE_IDENTIFIERS || "").split(/[,;\n]/)]) {
+    const value = raw.trim();
+    if (value.length >= 3 && !/^(agent|assistant|worker|reviewer|user)$/i.test(value)) vals.add(value);
+  }
+  return [...vals].sort((a, b) => b.length - a.length);
+}
+
 // Sanitize identifiers → placeholders. Preserves all mechanism/code/worked-examples; only swaps PRIVATE terms.
 export function sanitizeForPublish(body: string): { sanitized: string; replacements: Array<{ kind: string; from: string; to: string }> } {
   const replacements: Array<{ kind: string; from: string; to: string }> = []; let s = body;
@@ -61,10 +70,26 @@ export function sanitizeForPublish(body: string): { sanitized: string; replaceme
   sub("local-path", /\/Users\/[A-Za-z0-9._-]+/g, "<local path>");
   sub("agent-memfs", /(?:~\/)?\.letta\/(?:lc-local-backend\/memfs\/)?agents?\/[A-Za-z0-9._/-]+/g, "<agent memfs>");
   sub("agent-id", /\bagent-[a-f0-9]{6,}(?:-[a-f0-9]+)+\b/g, "<agent id>");
-  sub("user", /\b(?:localuser|private-user|chan2saucy|adrianchan|adrian chan)\b/gi, "<user>");
+  // Generic placeholders only. Real operator identity is derived at runtime on the next
+  // line, which covers every user rather than a hardcoded few — and keeps the author's
+  // personal handles out of the published package.
+  sub("user", /\b(?:localuser|private-user)\b/gi, "<user>");
   for (const id of runtimeUserIdentifiers()) sub("user", new RegExp(`\\b${escapeRegExp(id)}\\b`, "gi"), "<user>");
+  for (const id of runtimePrivateAgentIdentifiers()) sub("agent", new RegExp(`\\b${escapeRegExp(id)}\\b`, "gi"), "<agent>");
   sub("project", /\b(?:ProjectX|ExampleCorp)\b/g, "<project>");
   sub("provider-env", /\b(?:ZAI|Z_AI|OPENAI|ANTHROPIC|GLM|MORPH|KIMI|MINIMAX|GEMINI|XAI)_API_KEY\b/g, "PROVIDER_API_KEY");
+  // Defence in depth for the labelled-secret shape. The scanner already refuses to publish these,
+  // so nothing reaches the catalog either way — but a value that survives sanitisation can still
+  // be shown in a staged preview or a diff, and "the other gate catches it" is how single points
+  // of failure get built. Redact the VALUE, keep the key visible so the author can see what was
+  // hit.
+  s = s.replace(
+    /((?:^|[^A-Za-z0-9])[A-Za-z0-9_.-]*(?:secret|passwd|password|token|api[_-]?key)[A-Za-z0-9_.-]*\s*[:=]\s*)(["']?)([^\s"'<>]{6,})\2/gi,
+    (m, head, quote, value) => {
+      if (!replacements.some((r) => r.from === value)) replacements.push({ kind: "labelled-secret", from: value, to: "<redacted>" });
+      return `${head}${quote}<redacted>${quote}`;
+    },
+  );
   return { sanitized: s, replacements };
 }
 
@@ -191,7 +216,10 @@ export function catalogPrivacyScan(content: string): { ok: boolean; issues: stri
   const sec = scanSkillContent(content); if (!sec.ok) issues.push(...sec.issues.map((i) => `security: ${i}`));
   if (/\/Users\/[A-Za-z0-9._-]+\//.test(content) || /\/home\/[A-Za-z0-9._-]+\//.test(content)) issues.push("private absolute user path");
   if (/lc-local-backend/.test(content) || /~\/\.letta\/agents\//.test(content) || /~\/\.agents\/agents\//.test(content)) issues.push("local harness path");
-  if (/\b(?:private-store\.myshopify\.com|examplecorp|example-host|agent-71b0883e|localuser|private-user)\b/i.test(content)) issues.push("private org/user/agent identifier");
+  // Match the SHAPE of a private agent id rather than hardcoding a real one: shipping a real
+  // identifier in order to detect it leaks it to every consumer, and only ever caught one agent.
+  if (/\b(?:private-store\.myshopify\.com|examplecorp|example-host|localuser|private-user)\b/i.test(content)
+    || /\bagent-(?:local-)?[0-9a-f]{8}\b/i.test(content)) issues.push("private org/user/agent identifier");
   if (/references\/evidence|receipt json|final-gate-result\.json/i.test(body) && /\/Users\//.test(content)) issues.push("private evidence reference");
   return { ok: issues.length === 0, issues: [...new Set(issues)] };
 }
@@ -200,9 +228,12 @@ export function catalogPrivacyScan(content: string): { ok: boolean; issues: stri
 export function publishSkillToCatalog(name: string, ctx?: any): string {
   const nm = slug(name);
   if (!nm) throw new Error("name required");
-  const d = scanDirs(ctx).find((x) => existsSync(join(x, nm, "SKILL.md")));
+  // Own-joins here were the hole: this resolved the shelf and the file by hand, so a symlinked
+  // skill dir or a symlinked SKILL.md put external content straight into the shared catalog.
+  // Every skill path in this module now goes through the containment resolvers.
+  const d = scanDirs(ctx).find((x) => { try { return existsSync(resolveSkillFile(x, nm)); } catch { return false; } });
   if (!d) throw new Error(`no active skill '${nm}'`);
-  const src = join(d, nm, "SKILL.md");
+  const src = resolveSkillFile(d, nm);
   if (!existsSync(src)) throw new Error(`no SKILL.md for '${nm}'`);
   const content = readFileSync(src, "utf8");
   const desc = (content.match(/^description:\s*(.+)$/im)?.[1] || "").trim();
@@ -211,12 +242,20 @@ export function publishSkillToCatalog(name: string, ctx?: any): string {
   if (!lint.ok) throw new Error(`linter blocked: ${lint.issues.join("; ")}`);
   const priv = catalogPrivacyScan(content);
   if (!priv.ok) throw new Error(`privacy blocked: ${priv.issues.join("; ")}`);
-  const dstDir = join(GLOBAL_SKILLS_DIR, nm);
+  // The scan is a REFUSAL gate, not a redactor: it blocks what it recognises as unmistakably
+  // private and passes everything else through. A colleague's bare name and work address are
+  // not absolute paths, so they cleared the scan and were written to the shared catalog
+  // verbatim. sanitizeForPublish already existed for exactly this and was never on the write
+  // path — so publish now emits the sanitized bytes, and says what it changed.
+  const san = sanitizeForPublish(content);
+  const dstDir = resolveSkillDir(globalSkillsDir(), nm);
   mkdirSync(dstDir, { recursive: true });
-  const published = content.includes(MM_TAG) ? content : content + `\n<!-- ${MM_TAG}: published ${new Date().toISOString().slice(0, 10)}; catalog=global -->\n`;
-  writeFileSync(join(dstDir, "SKILL.md"), published);
-  appendUiEvent({ phase: "skill_published", summary: `published '${nm}' to custom skill catalog`, skill: nm, action: "publish", route: "global-catalog" });
+  const dstFile = resolveSkillFile(globalSkillsDir(), nm); // refuse a symlinked catalog entry
+  const published = san.sanitized.includes(MM_TAG) ? san.sanitized : san.sanitized + `\n<!-- ${MM_TAG}: published ${new Date().toISOString().slice(0, 10)}; catalog=global -->\n`;
+  writeFileSync(dstFile, published);
+  const redacted = san.replacements.length ? ` (redacted: ${san.replacements.map((r) => r.kind).join(", ")})` : "";
+  appendUiEvent({ phase: "skill_published", summary: `published '${nm}' to custom skill catalog${redacted}`, skill: nm, action: "publish", route: "global-catalog" });
   appendMeshFeed({ type: "skill_published", skill: nm, route: "PUBLISH", signals: 0 });
-  writeUiState({ phase: "done", last: `published '${nm}' to catalog`, route: "PUBLISH · catalog" });
-  return join(dstDir, "SKILL.md");
+  writeUiState({ phase: "rotation", skill: nm, last: `published '${nm}' to catalog`, route: "PUBLISH · catalog" });
+  return dstFile;
 }

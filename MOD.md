@@ -1,53 +1,190 @@
 ---
-name: "@letta-ai/muscle-memory"
-description: "A self-evolving skill foundry: a reflective reviewer distills class-level skills from cross-conversation recall, routes update-first via MemFS search, filters env-noise, runs a staged autopilot + curator, and surfaces visible self-improvement summaries — reversible, gated, receipted."
+name: "@adrianchan94/muscle-memory"
+description: "Verifier-gated procedural memory for Letta agents: prescribe exactly one installed skill or abstain after a real gap, close the same possession with observed evidence, and improve the skill shelf through staged, reversible, update-first learning."
 ---
 
-# muscle-memory — agent guide
+# Muscle Memory — agent guide
 
-You have a self-evolving skill foundry. It observes your tool-use, distills **class-level** skills from your **cross-conversation** history, and curates them — reversibly, with receipts. Use it to stop re-deriving workflows you've already solved.
+**Skills earn their minutes.** Use a learned procedure only when it is the smallest thing that closes an observed gap.
 
-## Tools
+> **Rating ceiling:** `rate_skill` keeps an associative tape and produces conservative review recommendations — **never an automatic retirement** — and verified efficacy stays a separate instrument.
 
-### `muscle_memory_skill_read` (no approval — read-only)
-- `reflect_plan` — **preview** the reflective distillation: cross-session evidence + the MemFS update-first routing decision (which existing skill it would patch, with confidence + distinctive-term count, or whether it would create). No model call, no write. *Start here.*
-- `coverage` — the **skill coverage map**: which task-classes are `covered` (have a defender), `uncovered` (create candidate), `over-covered` (consolidate candidate), or `noise` (env-failures the negative filter dropped).
-- `autopilot_plan` — preview the deterministic autopilot (distill/refine/retire decisions).
-- `candidates` · `repairs` · `antipatterns` · `defenses` · `defense_hits` — what it has observed.
-- `registry` — the managed-skill catalog (state/pinned/uses).
-- `list` · `load` · `draft` · `curate` — inspect/load managed skills.
+Muscle Memory helps you use learned procedures only when they earn context. **A possession is one decision and its outcome:** it opens when you prescribe or abstain, and closes when you report what happened. The Decision Report summarises those possessions; `rate_skill` keeps a separate associative tape. Neither is causal proof.
 
-### `muscle_memory_skill_write` (approval-gated)
-- `reflect` — **the v3 distiller**: cross-conversation evidence + your retrieved preferences → forked reviewer authors a class-level skill → MemFS update-first routing (patches the existing skill if one *safely* covers the territory — anti-bloat) → naming/security/lint gates → writes (staged by default, live with `mode:auto`). Reversible + receipted, and emits an **evidence manifest** (`references/evidence/<ts>.json`) recording every source, MemFS hit, preference, and rejected-noise item.
-- `create_from_candidate` · `create` · `edit_full` · `patch` — author/edit skills (all gated).
-- `write_file` · `remove_file` — manage support files (`references/`/`templates/`/`scripts/`, scoped, no traversal).
-- `retire` (with `absorbed_into`) · `restore` · `pin` · `unpin` — lifecycle (reversible; pin guards delete, not edits).
-- `autopilot_run` (`mode:staged|auto`) — the deterministic staged autopilot.
+It is not a shelf browser and it does not preload every skill. After a real procedural miss—or when you know you lack the procedure—ask for one intervention. Muscle Memory returns exactly one installed skill or `ABSTAIN`, opens a private possession, and waits for an honest outcome.
 
-## Visibility (v3.3)
-A capability-guarded panel (`muscle-memory-live`, order 20) + the `/muscle-memory` dashboard surface **finished** self-improvement summaries (reviewing → route → staged/updated → manifest), backed by `ui-events.jsonl` (redacted lifecycle receipts only — no chain-of-thought, no raw args). Headless/Desktop (no panel capability) → the `/muscle-memory` command shows the same content. Set `MM_REFLECT=staged` to activate the autonomous reviewer — it fires on its own after each turn (Hermes-style background nudge, gated to mature+not-yet-distilled patterns) and at session end.
+## Your first possession
 
-## MM_CAPTURE — worked-example capture (opt-in, default OFF)
-By default muscle-memory captures **structural fingerprints only** (max privacy). Set `MM_CAPTURE` to add more concrete worked examples + breadth when enabled:
-- `MM_CAPTURE=context` — Tier 1: + redacted real error message + touched symbol (restores breadth + most concreteness).
-- `MM_CAPTURE=worked` — Tier 2: + redacted fix diff (before→after) for max concreteness.
+### 1. Orient
 
-Privacy is **double-gated**: every fragment is credential/path-scrubbed at capture (`redactFragment`, shared secret cascade) and the final skill body is re-scanned by `scanSkillContent` before any write. Diverse symptom→fix pairs are preserved as multiple worked-examples on one repair chain (no fingerprint-collapse), then generalized into one class-level skill *illustrated by* the real cases. The deterministic (model-free) fallback embeds the worked-examples too.
+Start with the private Decision Report:
 
-## When to use
-- After a non-trivial session, run `reflect_plan` → if it would capture a durable lesson, `reflect` to distill/update a skill.
-- Don't hand-write a skill if `reflect_plan` shows one already covers it — let update-first fold the new pitfalls in.
+```text
+muscle_memory_skill_read(action: "report")
+```
 
-## Safety (built in)
-- **Negative filter:** filters common environment-noise (command-not-found, missing binaries, creds) or tool-negatives — they harden into self-sabotage.
-- **Class-level naming gate:** rejects `x-to-y`, `fix-`, `debug-`, dated, or error-string names.
-- **Security scan + linter** on every write path; **no partial writes**.
-- **Reversible:** retire/remove = quarantine; `restore` recovers; writes are git-trackable in MemFS.
-- **Default-safe:** reflective review + autopilot are **staged** unless you opt into `auto`; the autonomous session-end trigger is **off** unless `MM_REFLECT`/`MM_AUTOPILOT` is set.
+The report separates interventions from abstentions, shows the latest activity, exposes pending closeouts, and labels the evidence boundary. Early judged outcomes are not verified or claim-bearing.
 
-Pre-action failure defenses are **advisory** (they log/warn before a known-bad repeat) — not hard blocks.
+### 2. Wait for a real gap
 
-## Library audit + the skill supply chain (v1.1)
-Beyond distilling, muscle-memory governs skill QUALITY and DISTRIBUTION:
-- `/muscle-memory audit` — scores every skill in the library (SOTA gate: concreteness, diagnostic TELLs, safe-first, generality) and flags sub-SOTA ones. The same gate self-corrects every newly distilled skill via targeted regeneration.
-- **Supply chain** (`learn → graduate → auto-preflight → stage → approve → Custom Skill`): on graduation a read-only **publishability preflight** fires (score · tier · recommended shelf). `/muscle-memory publish stage <skill>` writes a **sanitized** review copy (identifiers→placeholders, mechanism preserved) + provenance metadata; `/muscle-memory publish approve <skill>` promotes it to shared Custom Skills (`~/.letta/skills/`), re-preflighting + hard-blocking injected secrets, with a visibility receipt. **Never auto-publishes; no remote push.** Tiers: `agent-local` · `team-shareable` · `marketplace-candidate` · `blocked`.
+Do not call Muscle Memory just because a skill sounds relevant. Use it after:
+
+- a tool or procedure fails and you do not know the safe recovery;
+- the task requires a procedure you know you are missing; or
+- an explicit pre-work verification protocol requires a bound possession.
+
+If you already know the recovery, continue unaided.
+
+### 3. Ask for one intervention
+
+Use the dedicated task-time tool:
+
+```text
+muscle_memory_prescribe(
+  task: "An exact-match edit failed because the target text is stale.",
+  gap_observed: true
+)
+```
+
+The dedicated tool accepts only `task` + `gap_observed` (`additionalProperties: false`). Privacy-safe `task_class` / `difficulty` strata are assigned by the router (one-way hash label + `unknown` unless an advanced surface supplies them). Do not invent strata at call time.
+
+Muscle Memory never infers your hidden model capability. `gap_observed` is your explicit diagnosis. The result is one of:
+
+- `PRESCRIBE "<skill>"` — invoke that exact skill with the normal `Skill` tool;
+- `ABSTAIN` — no single installed skill safely cleared the match gate.
+
+Never load sibling skills or the full shelf “just in case.”
+
+### 4. Execute the procedure
+
+When prescribed:
+
+```text
+Skill(skill: "recovering-failed-exact-match-edits")
+```
+
+Then perform the task. Retrieval alone is not use: the normal `Skill` invocation is the observable handoff.
+
+### 5. Close the same possession
+
+Use the `possession_id` returned by `muscle_memory_prescribe`.
+
+For a prescription:
+
+```text
+muscle_memory_close(
+  possession_id: "<id>",
+  result: "helped",
+  reason: "The re-anchor procedure resolved the failed edit and the original check passed."
+)
+```
+
+Allowed prescription outcomes: `helped`, `harmed`, `neutral`.
+
+For an abstention, complete the task unaided and close with `succeeded_unaided` or `failed_unaided`.
+
+`muscle_memory_close` records `agent_judged` automatically and tells you whether verified evidence remains zero. Use the advanced `record_agent_possession` tool only when a human owns the judgment, an evidence reference is needed, or an append-only correction must supersede a prior outcome. Never self-award `verified`.
+
+### 6. Resume instead of duplicating
+
+If work is interrupted:
+
+```text
+muscle_memory_skill_read(action: "pending_possessions")
+```
+
+The pending view returns the original task, prescribed skill when present, exact next move, and same-possession closeout command. Resume that possession; do not open a duplicate.
+
+## What the live panel means
+
+- `ready` — idle and armed; no learning job is stuck;
+- `learning`, `checking`, `testing`, `saving` — a bounded lifecycle operation is active;
+- `skill helped`, `no skill needed`, `skill learned`, `skill improved` — a short completed outcome beat;
+- `blocked` — a safety or integrity alarm that remains visible until cleared.
+
+`0 proven` can be correct even with useful early tape. “Proven” is intentionally stricter than installed, used, or judged helpful.
+
+## Default agent surface
+
+A normal install exposes three tools only: `muscle_memory_prescribe`, `muscle_memory_close`, and a lean `muscle_memory_skill_read`. The research console, mutation controls, verification adapters, and referee tools do not consume fresh-agent context.
+
+### `muscle_memory_skill_read` — bounded state
+
+Use:
+
+- `report` — canonical private Decision Report;
+- `pending_possessions` — resume open work;
+- `roster` — conservative Skill Review using `helped / missed / rated` outcomes;
+- `load` — inspect one known skill by name.
+
+Human `/muscle-memory ...` commands remain available. Set `MM_ADVANCED=on` only when an agent needs direct access to reflection planning, exact-file binding, lifecycle writes, plus-minus ratings, or diagnostics such as Coverage, candidates, repairs, defenses, registry, and share cards. Coverage is investigation tape, never the primary first-contact view.
+
+### `muscle_memory_prescribe` — current task
+
+Use only after a caller-attested miss or known missing procedure. It returns one installed skill or abstains and opens one private possession. It never writes, publishes, or creates a skill.
+
+With `MM_ADVANCED=on`, legacy `muscle_memory_skill_read(action: "prescribe", ...)` remains available for pre-bound verification metadata. The dedicated tool is the preferred first-contact route.
+
+### `muscle_memory_close` — lightweight default closeout
+
+Provide only the possession ID, observed result, and one concrete reason. It records `agent_judged` evidence, reports the skill's judged/verified boundary, and cannot accept verified evidence.
+
+### `record_agent_possession` — advanced judged closeout
+
+Use for human-owned judgment, evidence references, or append-only corrections. It rejects caller-supplied `verified` evidence; corrections must supersede the exact active outcome event.
+
+### Exact-file verification — narrow instrument-owned proof
+
+For a task with an independently knowable final byte target, enable `MM_ADVANCED=on`, then:
+
+1. Set `MM_EXACT_FILE_ROOT` to an absolute trusted workspace root.
+2. Before work, call `register_exact_file_verification` with a unique task ID, task class, root-relative target, and expected lowercase SHA-256.
+3. Use the advanced `muscle_memory_skill_read(action: "prescribe", ..., verification_task_id: "<id>")` path. The lightweight task tool intentionally omits verification metadata.
+4. After work, call `verify_agent_possession(possession_id)`.
+
+The adapter owns the root, manifest, target, digest comparison, result, evidence tier, and receipt. It rejects late registration, mutation, traversal, symlinks, replay, and task mismatch.
+
+It proves exact final bytes only. It does not prove semantic correctness, causal skill impact, or unaided abstention quality.
+
+## Learning from completed work
+
+Task-time prescription and skill mutation are separate paths. Automatic reflection remains controlled by `MM_REFLECT`; direct agent mutation tools require `MM_ADVANCED=on`.
+
+1. Preview with `muscle_memory_skill_read(action: "reflect_plan")`.
+2. Prefer updating an existing skill over creating a sibling.
+3. Use `muscle_memory_skill_write(action: "reflect")` for approval-gated authoring, or `muscle_memory_lifecycle_run(action: "reflect", mode: "staged")` for the safe staged lifecycle.
+4. Graduate only after security, structure, and execution-shaped example gates pass.
+5. Retire reversibly; pinned skills stay protected.
+6. Publishing is explicit, sanitized, and separately approved. Muscle Memory never commits, pushes, or remotely publishes on its own.
+
+A new skill requires repeated, class-level evidence. One command failure is not automatically a reusable procedure.
+
+## Worked examples are part of learning
+
+Research showed that faithful prose can still be unusable. When privacy permits, `MM_CAPTURE` can preserve redacted execution-shaped examples:
+
+- unset — structural fingerprints only;
+- `context` — redacted error context and touched symbol;
+- `worked` — redacted before/after repair fragments.
+
+Every fragment is scrubbed at capture and the final skill is rescanned before write. Concrete examples improve formulation; they do not waive verification.
+
+## Plus-minus and roster review
+
+With `MM_ADVANCED=on`, `rate_skill` records associative plus-minus tape from your observed experience: `up`, `down`, or `no_rate`. The agent-facing Skill Review renders the evidence as `helped / missed / rated` so models do not mistake a sports score for verified efficacy. Reasons are required for `down` and `no_rate`. Ratings can trigger review advice but never automatic promotion or retirement.
+
+The Skill Review includes managed skills plus any installed skill that actually entered a prescription. It shows possession outcomes and judged/verified evidence separately from field plus-minus ratings. The default lean read collapses zero-signal rows into one hidden count; `/muscle-memory roster` and advanced mode retain the full rotation. One judged helpful possession reads `EARLY POSITIVE · NEEDS REPLICATION`; promotion or retirement advice still requires at least three field-rated tasks.
+
+## Safety and evidence contract
+
+- One skill or abstain; never dump the shelf.
+- Caller owns the gap diagnosis; the router does not inspect hidden parametric knowledge.
+- Same-model negative field evidence forces abstention.
+- Skill use requires a real `Skill` invocation.
+- Possession outcomes are append-only and type-compatible.
+- Callers cannot self-award verified evidence.
+- Writes are security-scanned, quality-gated, atomic, staged by default, and reversible.
+- Agent-local shelves may evolve autonomously when enabled; shared shelves require explicit approval.
+- Mechanism and product-path success do not establish causal efficacy or universal model improvement.
+
+The goal is not to store more context. It is to deliver the smallest useful procedure to the matching gap, observe what happened, and let the skill earn another possession.
