@@ -544,6 +544,16 @@ export function isDurableLesson(text: unknown): boolean {
 
 /** CLASS-LEVEL NAMING GATE (Hermes): reject x-to-y transitions, fix-/debug-/audit- artifacts,
  * dates/PR-numbers/versions, error-string names. Only durable class-level names pass. */
+/** SHAPE-ONLY name check for names that ALREADY EXIST on a shelf. isValidSkillName is an AUTHORING
+ * gate: it rejects auto-generated artifact shapes (fix-/debug-/error/versioned) so the distiller
+ * cannot mint them. Applying it to an installed skill is a category error — measured in dogfood:
+ * MM prescribed, invoked and closed `fastapi-error-handling` successfully, then refused to RATE it
+ * ("invalid skill name") purely because the name contains "error". Read paths validate shape only. */
+export function isSafeExistingSkillName(name: unknown): boolean {
+  const n = String(name ?? "").trim();
+  return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(n) && n.length <= 64;
+}
+
 export function isValidSkillName(name: unknown): boolean {
   const n = String(name ?? "").trim();
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(n) || n.length > 64) return false;

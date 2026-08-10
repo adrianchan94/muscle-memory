@@ -4,7 +4,31 @@ import { join } from "node:path";
 import { Row, USAGE_PATH, appendMeshFeed, appendUiEvent, autonomousShelves, ensureDir, isManaged, listSkillNames, loadRows, readSkill, scanDirs, skillDesc, slug, writeUiState } from "./core";
 import { buildCrossConversationEvidence, detectRepairChains, isMatureRepairChain, stepSig } from "./detect";
 import { pickUpdateTarget, searchSkills } from "./autopilot";
+import { loadPossessionEvents } from "./possessions";
 
+
+/** How the possession tape scores a managed skill. Decision rows carry the skill; outcome rows
+ * carry the result and join on possession_id. Read-only over the ledger, tolerant of malformed
+ * rows (a corrupt line must never retire a skill). */
+export const HARM_RETIRE_MIN = 3;
+export function skillHarmRecord(name: string): { helped: number; harmed: number; net: number } {
+  const want = slug(name);
+  try {
+    const events = loadPossessionEvents();
+    const owner = new Map<string, string>();
+    for (const e of events) {
+      if (e && e.type === "decision" && e.action === "prescribe" && e.skill) owner.set(e.possession_id, slug(e.skill));
+    }
+    let helped = 0, harmed = 0;
+    for (const e of events) {
+      if (!e || e.type !== "outcome") continue;
+      if (owner.get(e.possession_id) !== want) continue;
+      if (e.result === "helped") helped++;
+      else if (e.result === "harmed") harmed++;
+    }
+    return { helped, harmed, net: helped - harmed };
+  } catch { return { helped: 0, harmed: 0, net: 0 }; }
+}
 
 export function managedSkillUsage(name: string, rows: Row[] = loadRows()): number {
   const n = slug(name);
@@ -14,7 +38,7 @@ export function managedSkillUsage(name: string, rows: Row[] = loadRows()): numbe
 export function curateManagedSkills(ctx?: any, dirsOverride?: string[]) {
   const rows = loadRows();
   const dirs = dirsOverride ?? scanDirs(ctx);
-  const out: Array<{ name: string; dir: string; uses: number; verdict: "keep" | "review" | "retire_candidate"; reason: string }> = [];
+  const out: Array<{ name: string; dir: string; uses: number; verdict: "keep" | "review" | "retire_candidate"; reason: string; harmed?: number; helped?: number }> = [];
   const seen = new Set<string>();
   for (const d of dirs) {
     for (const n of listSkillNames(d)) {
@@ -24,7 +48,20 @@ export function curateManagedSkills(ctx?: any, dirsOverride?: string[]) {
       let verdict: "keep" | "review" | "retire_candidate" = "keep";
       let reason = "managed skill has observed use or is newly created";
       if (uses === 0) { verdict = "review"; reason = "no observed Skill-tool usage yet; keep if newly created, retire if stale"; }
-      out.push({ name: n, dir: d, uses, verdict, reason });
+      // Outcome feedback: the box score must be able to END the minutes, not only start them.
+      // Previously harm was recorded in the possession tape and never read back here, so a skill
+      // could accumulate `harmed` closes and keep its shelf spot indefinitely. Conservative by
+      // design: retirement needs repeated harm AND a net-negative record, so one bad rep — which
+      // is variance, not evidence — can never retire a skill. Review fires earlier than retire.
+      const h = skillHarmRecord(n);
+      if (h.harmed >= HARM_RETIRE_MIN && h.net < 0) {
+        verdict = "retire_candidate";
+        reason = `${h.harmed} harmed vs ${h.helped} helped close${h.helped === 1 ? "" : "s"} (net ${h.net}) — the tape says it is costing more than it earns`;
+      } else if (h.harmed > 0 && verdict === "keep") {
+        verdict = "review";
+        reason = `${h.harmed} harmed close${h.harmed === 1 ? "" : "s"} on record (net ${h.net}) — inspect before it keeps playing`;
+      }
+      out.push({ name: n, dir: d, uses, verdict, reason, harmed: h.harmed, helped: h.helped });
     }
   }
   return out.sort((a, b) => a.uses - b.uses || a.name.localeCompare(b.name));

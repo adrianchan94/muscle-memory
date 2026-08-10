@@ -5577,6 +5577,31 @@ function prescribeNudge(skillCount) {
   ].join(`
 `);
 }
+function applyNudgeEnabled(env = process.env) {
+  return String(env.MM_APPLY_NUDGE ?? "on").toLowerCase() !== "off";
+}
+function applyNudge(skill, field) {
+  const name = String(skill ?? "").trim() || "this skill";
+  const plus = Number(field?.plus ?? 0), minus = Number(field?.minus ?? 0);
+  const attempts = plus + minus;
+  const failRate = attempts > 0 ? minus / attempts : 0;
+  const obs = (field?.plusObserved ?? 0) + (field?.minusObserved ?? 0);
+  const jud = (field?.plusJudged ?? 0) + (field?.minusJudged ?? 0);
+  const accounted = obs + jud;
+  const tier = accounted !== attempts ? accounted === 0 ? "legacy" : `legacy · ${obs} observed · ${jud} judged · ${attempts - accounted} unaccounted` : jud === 0 ? "tool-observed" : obs === 0 ? "agent-judged" : `mixed ${obs}/${accounted} observed`;
+  const tape = attempts >= 1 ? [`- FIELD TAPE · ${plus} helped / ${minus} missed · n=${attempts} · evidence=${tier}`] : [];
+  const caution = attempts >= 5 && failRate >= 0.5 ? [`- FIELD RECORD: this skill has failed ${minus} of ${attempts} attempts on this runtime (${Math.round(failRate * 100)}%). Follow it, but verify each step's effect before moving on, and say so if it misleads you.`] : [];
+  return [
+    `[muscle-memory] You just opened **${name}**. Treat it as a procedure to APPLY, not a document to review.`,
+    `- Follow its steps IN ORDER. If you deviate, say so explicitly and say why.`,
+    `- Never hardcode a value the procedure says to DERIVE. Pipe the derived value through.`,
+    `- If it prescribes framings or checks to cover, cover EACH ONE before you finish.`,
+    ...tape,
+    ...caution,
+    `Disagreeing with the skill is allowed. Silently substituting your own approach is not.`
+  ].join(`
+`);
+}
 
 // mods/wins.ts
 import { existsSync as existsSync10, readFileSync as readFileSync10, readdirSync as readdirSync3 } from "node:fs";
@@ -5948,10 +5973,22 @@ function loadRatingEvents() {
     return [];
   }
 }
-function recordPlusMinus(skillName, up, stepId) {
+function recordPlusMinus(skillName, up, stepId, provenance = "judged") {
   const ledger = loadPlusMinus();
   const cur = ledger[skillName] ?? { plus: 0, minus: 0, lastTs: 0, lastStepId: null };
-  const next = { plus: cur.plus + (up ? 1 : 0), minus: cur.minus + (up ? 0 : 1), lastTs: Date.now(), lastStepId: stepId ?? null };
+  const observed = provenance === "observed";
+  const now = Date.now();
+  const next = {
+    plus: cur.plus + (up ? 1 : 0),
+    minus: cur.minus + (up ? 0 : 1),
+    lastTs: now,
+    lastStepId: stepId ?? null,
+    plusObserved: (cur.plusObserved ?? 0) + (up && observed ? 1 : 0),
+    plusJudged: (cur.plusJudged ?? 0) + (up && !observed ? 1 : 0),
+    minusObserved: (cur.minusObserved ?? 0) + (!up && observed ? 1 : 0),
+    minusJudged: (cur.minusJudged ?? 0) + (!up && !observed ? 1 : 0),
+    coverageStart: cur.coverageStart ?? now
+  };
   ledger[skillName] = next;
   try {
     ensureDir();
@@ -6030,7 +6067,7 @@ async function rateSkill(client, skillName, rating, stepId, opts = {}) {
   let line = loadPlusMinus()[skillName] ?? ZERO;
   let aggregatePersisted = null;
   if (kind !== "no_rate") {
-    const recorded = recordPlusMinus(skillName, kind === "up", stepId);
+    const recorded = recordPlusMinus(skillName, kind === "up", stepId, "judged");
     line = recorded.line;
     aggregatePersisted = recorded.persisted;
   }
@@ -6383,7 +6420,7 @@ function activate(letta) {
     const provenNames = new Set;
     let helped = 0;
     for (const [possessionId, decision] of decisions) {
-      if (decision.type !== "decision" || decision.action !== "prescribe" || !decision.skill || !active.has(decision.skill))
+      if (decision.type !== "decision" || decision.action !== "prescribe" || !decision.skill)
         continue;
       const outcome = outcomes.get(possessionId);
       if (!outcome || outcome.result !== "helped")
@@ -6724,6 +6761,10 @@ STATUS · ${res.reason}`;
     const coachedOnce = new Set;
     const consultNudged = new Set;
     const shelfConsulted = new Set;
+    const applyNudged = new Set;
+    const pendingApply = new Map;
+    const autoRated = new Set;
+    const autoRateEnabled = () => String(process.env.MM_AUTORATE || "").toLowerCase() === "on";
     disposers.push(letta.events.on("tool_start", (event) => {
       try {
         const tool = String(event?.toolName ?? "");
@@ -6731,6 +6772,27 @@ STATUS · ${res.reason}`;
           return;
         if (tool === "Skill" || tool.startsWith("muscle_memory") || tool === "rate_skill" || tool.startsWith("record_agent") || tool.startsWith("verify_agent") || tool.startsWith("register_exact_file")) {
           shelfConsulted.add(String(event?.conversationId ?? "?"));
+        }
+        if (applyNudgeEnabled()) {
+          try {
+            const a = event?.args ?? {};
+            if (tool === "Skill") {
+              const sname = String(a.skill ?? a.name ?? a.skill_name ?? "").trim();
+              if (sname) {
+                const cid0 = String(event?.toolCallId ?? "");
+                if (cid0)
+                  pendingApply.set(cid0, sname);
+              }
+            }
+            const probe = String(a.file_path ?? a.path ?? a.command ?? "");
+            const m = /(?:^|[\/])skills[\/]([^\/]+)[\/]SKILL\.md/i.exec(probe) || /(?:^|[\/])([^\/]+)[\/]SKILL\.md/i.exec(probe);
+            if (m && /SKILL\.md/i.test(probe)) {
+              shelfConsulted.add(String(event?.conversationId ?? "?"));
+              const cid = String(event?.toolCallId ?? "");
+              if (cid)
+                pendingApply.set(cid, m[1]);
+            }
+          } catch {}
         }
         const { fp, tmpl } = fingerprint2(tool, event?.args ?? {});
         const callId = String(event?.toolCallId ?? "");
@@ -6776,8 +6838,9 @@ STATUS · ${res.reason}`;
             }
           } catch {}
           try {
-            if (!ok && String(event?.toolName ?? "") === "Skill") {
-              const invoked = String(event?.args?.skill ?? event?.args?.name ?? "").trim();
+            if (!ok) {
+              const viaSkill = String(event?.toolName ?? "") === "Skill";
+              const invoked = (viaSkill ? String(event?.args?.skill ?? event?.args?.name ?? "") : String(pendingApply.get(String(event?.toolCallId ?? "")) ?? "")).trim();
               if (invoked) {
                 const rows = loadPossessionEvents();
                 const settled = new Set(rows.filter((row) => row.type === "outcome").map((row) => row.possession_id));
@@ -6795,6 +6858,16 @@ STATUS · ${res.reason}`;
               }
             }
           } catch {}
+          if (autoRateEnabled()) {
+            try {
+              const cid2 = String(event?.toolCallId ?? "");
+              const sk2 = (String(event?.toolName ?? "") === "Skill" ? String(event?.args?.skill ?? event?.args?.name ?? "") : String(pendingApply.get(cid2) ?? "")).trim();
+              if (sk2 && cid2 && !autoRated.has(cid2)) {
+                autoRated.add(cid2);
+                recordPlusMinus(sk2, !!ok, cid2, "observed");
+              }
+            } catch {}
+          }
           appendJsonl(OUTCOME_PATH, { ts: Date.now(), id: event?.toolCallId ?? null, tool: event?.toolName ?? null, conv: event?.conversationId ?? null, ok, err, ...errMsg ? { errMsg } : {} });
           if (process.env.MM_REFLEX === "on" && !ok && defensesCache.length) {
             const step = stepByCallId.get(String(event?.toolCallId ?? ""));
@@ -6808,6 +6881,29 @@ STATUS · ${res.reason}`;
             }
           }
         } catch {}
+        let applyMsg = null;
+        try {
+          if (applyNudgeEnabled()) {
+            const cid = String(event?.toolCallId ?? "");
+            const skillName = cid ? pendingApply.get(cid) : undefined;
+            if (cid)
+              pendingApply.delete(cid);
+            const st = String(event?.status ?? "");
+            const okRead = st ? st === "success" : event?.ok ?? !(event?.isError || event?.error);
+            const conv = String(event?.conversationId ?? "?");
+            const key = conv + "\x00" + String(skillName ?? "");
+            if (skillName && okRead && !applyNudged.has(key)) {
+              applyNudged.add(key);
+              const outText = String(event?.output ?? event?.resultText ?? "");
+              applyMsg = {
+                status: String(event?.status ?? "") || "success",
+                output: outText + `
+
+` + applyNudge(skillName, loadPlusMinus()[skillName])
+              };
+            }
+          }
+        } catch {}
         let shelfNudge = null;
         try {
           if (prescribeNudgeEnabled()) {
@@ -6818,9 +6914,14 @@ STATUS · ${res.reason}`;
             const ordinary = tool && tool !== "Skill" && !tool.startsWith("muscle_memory") && tool !== "rate_skill" && !tool.startsWith("record_agent") && !tool.startsWith("verify_agent") && !tool.startsWith("register_exact_file");
             if (ok && ordinary && !consultNudged.has(conv) && !shelfConsulted.has(conv)) {
               const shelfNames = new Set;
-              for (const d of scanDirs())
+              const agentDir = agentSkillsDir();
+              const globalDir = globalSkillsDir();
+              for (const d of scanDirs()) {
+                if (d === globalDir && d !== agentDir)
+                  continue;
                 for (const n of listSkillNames(d))
                   shelfNames.add(n);
+              }
               if (shelfNames.size > 0) {
                 consultNudged.add(conv);
                 if (consultNudged.size > 256) {
@@ -6834,7 +6935,7 @@ STATUS · ${res.reason}`;
             }
           }
         } catch {}
-        return coached ? { result: coached } : closePrompt ? { result: closePrompt } : shelfNudge ? { result: shelfNudge } : undefined;
+        return coached ? { result: coached } : closePrompt ? { result: closePrompt } : applyMsg ? { result: applyMsg } : shelfNudge ? { result: shelfNudge } : undefined;
       }));
     } catch {}
   }

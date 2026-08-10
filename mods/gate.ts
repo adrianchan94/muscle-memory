@@ -81,7 +81,9 @@ export function repairForCandidate(c: Candidate): RepairChain | undefined {
 
 
 // — my-add #1. AUTHORING LINTER (the highest-ROI anti-bloat lever) —
-export function lintSkillDraft(d: { name: string; description: string; body: string }, opts: { needsPitfalls?: boolean } = {}): { ok: boolean; issues: string[] } {
+import { SEARCH_STOP } from "./autopilot";
+
+export function lintSkillDraft(d: { name: string; description: string; body: string }, opts: { needsPitfalls?: boolean; needsWorkedExample?: boolean; needsRetrievableDescription?: boolean } = {}): { ok: boolean; issues: string[] } {
   const issues: string[] = [];
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(d.name)) issues.push("name must be lowercase-hyphen slug");
   if (d.name.length > 64) issues.push("name > 64 chars");
@@ -93,6 +95,24 @@ export function lintSkillDraft(d: { name: string; description: string; body: str
   if (!/##\s+procedure/i.test(d.body)) issues.push("body missing ## Procedure");
   if (!/##\s+verification/i.test(d.body)) issues.push("body missing ## Verification");
   if (opts.needsPitfalls && !/##\s+(pitfalls|failure recovery)/i.test(d.body)) issues.push("fix-pattern skill must include ## Pitfalls / Failure recovery");
+  // RENDER FORM IS TREATMENT. The program's largest measured effect: the identical verified procedure
+  // scored 0.6 as prose and 5.4 with one worked example (Prism). Previously only high-diversity skills
+  // were gated on this, so a standard skill could graduate in the render form that was measured NOT to
+  // convert. A worked example is a correctness requirement, not documentation polish.
+  if (opts.needsWorkedExample && !/##\s+(worked example|worked examples|example)/i.test(d.body)) {
+    issues.push("body missing ## Worked example — the same procedure scored 0.6 as prose vs 5.4 with one worked example; a skill without one is shipped in the form measured not to convert");
+  }
+  // DESCRIPTION IS RETRIEVAL SURFACE. A skill nobody can find is a skill that never plays. Measured:
+  // rewriting one description in ordinary working language moved that family from 8/15 to 15/15 found,
+  // with the router untouched. Jargon-only descriptions are invisible to a caller phrasing a real task.
+  if (opts.needsRetrievableDescription) {
+  const descWords = String(d.description).toLowerCase().match(/[a-z][a-z0-9-]{2,}/g) || [];
+  const bodyWords = new Set((String(d.body).toLowerCase().match(/[a-z][a-z0-9-]{2,}/g) || []));
+  const plain = descWords.filter((w) => !SEARCH_STOP.has(w));
+  if (plain.length < 6) issues.push("description carries too few distinctive terms to be retrievable — say what artifact and what outcome, in the words a caller would use");
+  const jargonOnly = plain.length > 0 && plain.every((w) => bodyWords.has(w) && w.length > 7);
+  if (jargonOnly) issues.push("description reads as internal jargon only — add the ordinary words someone would use to describe this task");
+  }
   return { ok: issues.length === 0, issues };
 }
 

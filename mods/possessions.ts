@@ -1,4 +1,4 @@
-import { loadInvocations } from "./invocation";
+import { anyQualifyingInvocation, loadInvocations } from "./invocation";
 import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -48,7 +48,11 @@ export type EvidenceDowngradeReason =
 /** Why an authenticated row still earned no procedural credit. Artifact truth and causation are
  *  separate questions: a target that was already correct proves nothing about the skill. */
 export type ProceduralDenialReason =
-  | "no_gap_to_close" | "no_observed_invocation" | "invocation_precedes_baseline" | "artifact_mismatch";
+  | "no_gap_to_close" | "no_observed_invocation" | "invocation_precedes_baseline" | "artifact_mismatch"
+  // The abstain lane's own denial: the agent claimed an unaided success and a skill was observed
+  // running inside the possession anyway. Its own reason because "a skill ran" is a DENIAL here
+  // and the REQUIREMENT on the prescribe side — collapsing them would hide which lane failed.
+  | "invocation_during_abstention";
 
 export type StoredEvidenceVerdict = {
   authenticated: boolean;
@@ -70,6 +74,14 @@ export function authenticateStoredEvidence(input: {
   evidence?: { payload?: Record<string, unknown>; signature?: unknown };
   key: { keyId: string; secret: Buffer } | null;
   invocationObservedAt?: number;
+  /** Which question this row has to answer. Supplied by the LEDGER decision row, never by the
+   *  payload: the payload is attacker-chosen input to this function, and a row that could
+   *  nominate its own lane would pick the lane whose evidence it happens to have. Defaults to
+   *  `prescribe`, so every existing caller and every legacy row keeps the strict positive test. */
+  decisionAction?: DecisionAction;
+  /** Did the instrument observe ANY skill running inside this possession? Only consulted on the
+   *  abstain lane, where it is disqualifying rather than required. */
+  invocationObservedInPossession?: boolean;
 }): StoredEvidenceVerdict {
   const deny = (reason: EvidenceDowngradeReason): StoredEvidenceVerdict =>
     ({ authenticated: false, reason, artifactVerified: false, proceduralCredit: false, resultClass: "neutral" });
@@ -87,8 +99,17 @@ export function authenticateStoredEvidence(input: {
   const invocationAfterBaseline = input.invocationObservedAt === undefined
     || input.invocationObservedAt >= Number(payload.baseline_captured_at);
 
+  const abstained = input.decisionAction === "abstain";
+
   let proceduralReason: ProceduralDenialReason | undefined;
   if (!hadGap) proceduralReason = "no_gap_to_close";
+  else if (abstained) {
+    // THE MIRROR. Same two questions as the prescribe lane — was the artifact made right, and
+    // did the instrument observe the causal fact — but the causal fact has the opposite sign.
+    // A named receipt or an observed run both mean the same thing: this was not unaided.
+    if (invoked || input.invocationObservedInPossession) proceduralReason = "invocation_during_abstention";
+    else if (!artifactVerified) proceduralReason = "artifact_mismatch";
+  }
   else if (!invoked) proceduralReason = "no_observed_invocation";
   else if (!invocationAfterBaseline) proceduralReason = "invocation_precedes_baseline";
   else if (!artifactVerified) proceduralReason = "artifact_mismatch";
@@ -96,9 +117,17 @@ export function authenticateStoredEvidence(input: {
   const proceduralCredit = proceduralReason === undefined;
   // A mismatch only counts as harm when an invocation was actually observed; otherwise the
   // instrument saw a wrong file, not a skill that broke something.
-  const resultClass = artifactVerified
-    ? (proceduralCredit ? String(payload.result_class) : "neutral")
-    : (invoked ? "harmed" : "neutral");
+  //
+  // ABSTAIN NEVER MAPS TO `harmed`, and never to `neutral`. `harmed` asserts a skill did damage;
+  // no skill ran, so the assertion is simply false, and `compatible()` would reject the row
+  // anyway. `neutral` is not in the abstain vocabulary either. Every abstention that fails to
+  // earn credit — wrong artifact, no gap, or a skill caught running — is `failed_unaided`: the
+  // agent went alone and did not get there. That is the honest label and the only legal one.
+  const resultClass = abstained
+    ? (proceduralCredit ? String(payload.result_class) : "failed_unaided")
+    : artifactVerified
+      ? (proceduralCredit ? String(payload.result_class) : "neutral")
+      : (invoked ? "harmed" : "neutral");
 
   return { authenticated: true, artifactVerified, proceduralCredit, proceduralReason, resultClass };
 }
@@ -119,7 +148,7 @@ export const EFFICIENCY_CONTRACT = Object.freeze({
 
 export type EvidenceTier = "verified" | "human_judged" | "agent_judged";
 export type DecisionAction = "prescribe" | "abstain";
-export type DecisionRoute = "matched" | "no-gap" | "weak-match" | "ambiguous" | "negative-field" | "no-safe-match";
+export type DecisionRoute = "matched" | "matched-semantic" | "no-gap" | "weak-match" | "ambiguous" | "negative-field" | "no-safe-match";
 export type DifficultyTier = "routine" | "standard" | "hard" | "unknown";
 export type OutcomeResult = "helped" | "harmed" | "neutral" | "succeeded_unaided" | "failed_unaided";
 export type LifecycleAction = "learn" | "update" | "graduate" | "retire" | "restore";
@@ -127,7 +156,7 @@ export type ExclusionReason = "malformed_json" | "invalid_schema" | "unknown_enu
 export type ScoreStatus = "blocked" | "incomplete" | "early_tape" | "exploratory" | "claim_eligible";
 
 const DECISION_ACTIONS = new Set<DecisionAction>(["prescribe", "abstain"]);
-const DECISION_ROUTES = new Set<DecisionRoute>(["matched", "no-gap", "weak-match", "ambiguous", "negative-field", "no-safe-match"]);
+const DECISION_ROUTES = new Set<DecisionRoute>(["matched", "matched-semantic", "no-gap", "weak-match", "ambiguous", "negative-field", "no-safe-match"]);
 const DIFFICULTIES = new Set<DifficultyTier>(["routine", "standard", "hard", "unknown"]);
 const OUTCOMES = new Set<OutcomeResult>(["helped", "harmed", "neutral", "succeeded_unaided", "failed_unaided"]);
 const EVIDENCE_TIERS = new Set<EvidenceTier>(["verified", "human_judged", "agent_judged"]);
@@ -238,6 +267,15 @@ export type PossessionSummary = {
   goodDecisions: number;
   prescribed: number;
   abstained: number;
+  /** CLINICAL SPLIT — adherence is measured SEPARATELY from efficacy.
+   * A prescription the agent never acted on is not a failed skill; it is a failed handoff, and
+   * pooling the two makes both unreadable. Measured motivation (burst-possession, 3 models x 3
+   * reps): the FREE arm closed the prescribe->Skill->close loop 0/9 while the FORCED arm closed
+   * 9/9 — at identical task success. Adherence, not capability, was the whole difference. */
+  prescriptionsIssued: number;
+  prescriptionsAdheredTo: number;
+  prescriptionsNeverInvoked: number;
+  prescriptionsUnclosed: number;
   observedInterventions: number;
   observedHelpfulInterventions: number;
   observedHarmfulInterventions: number;
@@ -253,10 +291,14 @@ export type PossessionSummary = {
   verifiedSuccessfulAbstentions: number;
   verifiedEvaluatedAbstentions: number;
   judgedSuccessfulAbstentions: number;
+  /** Judged-tier abstention failures ONLY. Kept apart from `failedAbstentions` (which now also
+   *  carries verified-tier failures) so the share card's judged arithmetic still balances. */
+  judgedFailedAbstentions: number;
   judgedEvaluatedAbstentions: number;
   judgedOnlyAbstentions: number;
   contextsAvoided: number;
   interferenceAbstentions: number;
+  unaidedClaimsDemoted: number;
   verifiedDecisions: number;
   verifiedGoodDecisions: number;
   judgedDecisions: number;
@@ -312,7 +354,11 @@ function normalizeEvent(input: unknown, mode: "read" | "caller" | "instrument"):
     if (event.action === "prescribe" && !event.skill) throw new Error("prescribe decisions require a skill");
     if (event.action === "abstain" && event.skill) throw new Error("abstain decisions cannot inject a skill");
     const verification = event.verification === undefined ? undefined : normalizeVerificationBinding(event.verification);
-    if (verification && event.action !== "prescribe") throw new Error("verification binding supports prescribed-skill possessions only");
+    // A verification binding is now legal on BOTH decision actions. For a prescribe it asks
+    // "is the artifact right and did the prescribed skill cause it"; for an abstain it asks the
+    // mirror — "is the artifact right and did NO skill run" — which is exactly a correct
+    // abstention. Refusing the binding here is what made verifiedSuccessfulAbstentions
+    // structurally 0, leaving the only cell no benchmark scores permanently self-reported.
     if (verification && verification.task_class !== event.task_class) throw new Error("verification binding task_class must match the decision");
     return {
       schema: POSSESSION_SCHEMA,
@@ -534,8 +580,12 @@ function appendPossessionEvent(input: PossessionEvent, mode: "caller" | "instrum
       }
       // The receipt decides the result class, not the caller. A match without procedural credit
       // is neutral: the artifact is right, but the prescription did not make it so.
-      const expectedResult = !clean.verification.matched ? "harmed"
-        : clean.verification.procedural_credit ? "helped" : "neutral";
+      // The ABSTAIN lane maps through its own vocabulary. `harmed` names damage done BY a skill,
+      // and an abstention ran none, so a wrong artifact there is `failed_unaided`.
+      const expectedResult = decision.action === "abstain"
+        ? (clean.verification.matched && clean.verification.procedural_credit ? "succeeded_unaided" : "failed_unaided")
+        : !clean.verification.matched ? "harmed"
+          : clean.verification.procedural_credit ? "helped" : "neutral";
       if (clean.result !== expectedResult) {
         throw new Error("verified outcome result does not match the instrument receipt");
       }
@@ -569,12 +619,41 @@ export function recordInstrumentVerifiedOutcome(input: PossessionOutcomeEvent, c
   // signed payload must name the invocation that proves it. Silence here is how a legitimate
   // receipt got demoted and how an illegitimate one could have been signed.
   if (receipt && typeof receipt === "object" && (receipt as Record<string, unknown>).procedural_credit === true) {
-    const namedId = String(context?.invocationReceiptId ?? "").trim();
-    if (!namedId) throw new Error("procedural credit requires an observed invocation receipt id at the signing boundary");
-    // The id must resolve to a MAC-authenticated observation owned by THIS possession. An id
-    // alone is just a string; without this the signer notarizes an unverified claim.
-    const owned = loadInvocations().some((row) => row.invocation_id === namedId && row.possession_id === input.possession_id);
-    if (!owned) throw new Error("procedural credit names an invocation that is not an authenticated observation of this possession");
+    // WHICH evidence a credit needs depends on WHICH decision was made, and that comes from the
+    // ledger, never from the caller-supplied context. A caller that could nominate its own
+    // decision action would simply declare every prescription an "abstention" and skip the
+    // invocation requirement entirely — the exact bypass this boundary exists to prevent.
+    const decision = loadPossessionEvents().find((row): row is PossessionDecisionEvent =>
+      row.type === "decision" && row.possession_id === input.possession_id);
+    if (!decision) throw new Error("procedural credit requires a recorded decision for this possession");
+    if (decision.action === "abstain") {
+      // THE MIRROR PREDICATE. A prescription proves a positive — "the prescribed skill ran".
+      // An abstention proves a NEGATIVE — "no skill ran" — so demanding an invocation receipt
+      // here was not strict, it was incoherent: it made the true-negative cell unreachable by
+      // construction. The negative still has to be EVIDENCE, and it is: the instrument's own
+      // MAC-authenticated invocation log must contain nothing bound to this possession and this
+      // decision, over the widest window. Silence in a log the caller cannot write is proof.
+      const ran = anyQualifyingInvocation({
+        possessionId: input.possession_id,
+        decisionEventId: decision.event_id,
+        baselineAt: 0,
+        decisionAt: 0,
+        verifiedAt: Number.MAX_SAFE_INTEGER,
+      });
+      if (ran) throw new Error("abstention credit refused: an observed skill invocation is bound to this possession");
+      // An abstention that names an invocation is contradicting itself. Refuse rather than
+      // silently drop the id, so a confused or hostile caller never gets a quiet pass.
+      if (String(context?.invocationReceiptId ?? "").trim()) {
+        throw new Error("an abstention cannot name an invocation receipt; a named invocation is not an unaided success");
+      }
+    } else {
+      const namedId = String(context?.invocationReceiptId ?? "").trim();
+      if (!namedId) throw new Error("procedural credit requires an observed invocation receipt id at the signing boundary");
+      // The id must resolve to a MAC-authenticated observation owned by THIS possession. An id
+      // alone is just a string; without this the signer notarizes an unverified claim.
+      const owned = loadInvocations().some((row) => row.invocation_id === namedId && row.possession_id === input.possession_id);
+      if (!owned) throw new Error("procedural credit names an invocation that is not an authenticated observation of this possession");
+    }
   }
   if (key && receipt && typeof receipt === "object") {
     const r = receipt as Record<string, unknown>;
@@ -657,13 +736,30 @@ export function pendingPossessionViews(events: PossessionEvent[]): SafePossessio
  * binding is therefore diagnostic only from here on — it can never be the proof.
  */
 export function claimBearingVerdict(
-  decision: { verification?: unknown; possession_id: string; event_id: string },
+  decision: { verification?: unknown; possession_id: string; event_id: string; action?: string; skill?: string },
   outcome: { evidence_tier?: string; verification?: unknown; evidence?: { payload?: Record<string, unknown>; signature?: unknown } },
 ): { verified: boolean; proceduralCredit: boolean; downgrade?: EvidenceDowngradeReason; proceduralReason?: ProceduralDenialReason; attributedSkill?: string } {
   if (outcome.evidence_tier !== "verified") return { verified: false, proceduralCredit: false };
 
   const key = currentInstrumentKey();
-  const verdict = authenticateStoredEvidence({ evidence: outcome.evidence, key });
+  // The lane comes from the DECISION row, and the abstain lane's disqualifying fact is read
+  // fresh from the instrument's own invocation log at read time — not trusted from the moment
+  // of signing. An invocation row that lands after the receipt was signed must still be able to
+  // take the credit back; a negative claim is only as good as the latest look.
+  const abstained = decision.action === "abstain";
+  const ranAnyway = abstained && !!anyQualifyingInvocation({
+    possessionId: decision.possession_id,
+    decisionEventId: decision.event_id,
+    baselineAt: 0,
+    decisionAt: 0,
+    verifiedAt: Number.MAX_SAFE_INTEGER,
+  });
+  const verdict = authenticateStoredEvidence({
+    evidence: outcome.evidence,
+    key,
+    decisionAction: abstained ? "abstain" : "prescribe",
+    invocationObservedInPossession: ranAnyway,
+  });
   if (!verdict.authenticated) return { verified: false, proceduralCredit: false, downgrade: verdict.reason };
 
   // Structural binding still has to hold, but only as a second gate behind authenticity.
@@ -728,6 +824,10 @@ export function summarizePossessions(events: PossessionEvent[], integrity: Ledge
   let evaluatedDecisions = 0;
   let scoredDecisions = 0;
   let repeatCappedDecisions = 0;
+  let prescriptionsIssued = 0;
+  let prescriptionsAdheredTo = 0;
+  let prescriptionsNeverInvoked = 0;
+  let prescriptionsUnclosed = 0;
   let observedInterventions = 0;
   let observedHelpfulInterventions = 0;
   let observedHarmfulInterventions = 0;
@@ -743,9 +843,11 @@ export function summarizePossessions(events: PossessionEvent[], integrity: Ledge
   let verifiedSuccessfulAbstentions = 0;
   let verifiedEvaluatedAbstentions = 0;
   let judgedSuccessfulAbstentions = 0;
+  let judgedFailedAbstentions = 0;
   let judgedEvaluatedAbstentions = 0;
   let judgedOnlyAbstentions = 0;
   let interferenceAbstentions = 0;
+  let unaidedClaimsDemoted = 0;
   let verifiedDecisions = 0;
   let judgedDecisions = 0;
   let verifiedGood = 0;
@@ -756,11 +858,32 @@ export function summarizePossessions(events: PossessionEvent[], integrity: Ledge
   let verifiedNeutralDecisions = 0;
   let prescribedEvaluated = 0;
 
+  // Adherence index: which possessions actually saw their skill run. Built once from the
+  // MAC-signed invocation log — the same unforgeable record the abstention lane reads. A caller
+  // cannot write into it, so "no row" is evidence of non-adherence rather than absence of data.
+  const invocationsByPossession = new Set<string>();
+  try {
+    for (const inv of loadInvocations()) {
+      if (inv && typeof inv.possession_id === "string") invocationsByPossession.add(inv.possession_id);
+    }
+  } catch { /* an unreadable invocation log must not break scoring; adherence then reads as 0 */ }
+
   for (const decision of decisions) {
     const difficulty = decision.difficulty ?? "unknown";
     difficultyStrata[difficulty]++;
     if (excludedIds.has(decision.possession_id)) continue;
     const outcome = activeOutcomes.get(decision.possession_id);
+    // ADHERENCE IS COUNTED BEFORE THE OUTCOME FILTER, ON PURPOSE.
+    // Everything below `continue`s when a possession has no compatible outcome, which means a
+    // prescription the agent silently ignored was invisible to the scoreboard: it looked like the
+    // prescription never happened rather than like a handoff that failed. Intent-to-treat has to be
+    // counted at the moment of intent, not at the moment of outcome.
+    if (decision.action === "prescribe") {
+      prescriptionsIssued++;
+      const invoked = invocationsByPossession.has(decision.possession_id);
+      if (invoked) prescriptionsAdheredTo++; else prescriptionsNeverInvoked++;
+      if (!outcome) prescriptionsUnclosed++;
+    }
     if (!outcome || !compatible(decision.action, outcome.result)) continue;
     evaluatedDecisions++;
     if (decision.action === "prescribe") {
@@ -802,9 +925,18 @@ export function summarizePossessions(events: PossessionEvent[], integrity: Ledge
       // or a helped claim was demoted above. Both are neutral; only the bound ones are verified.
       if (outcome.result === "neutral") { neutralInterventions++; if (boundVerified) verifiedNeutralDecisions++; }
     } else {
-      if (outcome.result === "succeeded_unaided") {
+      // Symmetry with the prescribe lane: a bound abstention only earns `succeeded_unaided`
+      // when the INSTRUMENT derived it (artifact correct AND no skill ran). Without this the
+      // caller still self-awards the true negative — measured in dogfood, muscle_memory_close
+      // accepted `succeeded_unaided` for a task the agent never attempted. Unbound abstentions
+      // keep their old judged-tier behaviour; nothing regresses.
+      const abstentionCreditable = !boundVerified || verdict.proceduralCredit;
+      if (outcome.result === "succeeded_unaided" && abstentionCreditable) {
         successfulAbstentions++;
         good = true;
+      } else if (outcome.result === "succeeded_unaided") {
+        unaidedClaimsDemoted++;
+        failedAbstentions++;
       } else {
         failedAbstentions++;
       }
@@ -814,7 +946,7 @@ export function summarizePossessions(events: PossessionEvent[], integrity: Ledge
       } else {
         judgedEvaluatedAbstentions++;
         judgedOnlyAbstentions++;
-        if (good) judgedSuccessfulAbstentions++;
+        if (good) judgedSuccessfulAbstentions++; else judgedFailedAbstentions++;
       }
     }
 
@@ -878,6 +1010,10 @@ export function summarizePossessions(events: PossessionEvent[], integrity: Ledge
     goodDecisions,
     prescribed: decisions.filter((event) => event.action === "prescribe").length,
     abstained: decisions.filter((event) => event.action === "abstain").length,
+    prescriptionsIssued,
+    prescriptionsAdheredTo,
+    prescriptionsNeverInvoked,
+    prescriptionsUnclosed,
     observedInterventions,
     observedHelpfulInterventions,
     observedHarmfulInterventions,
@@ -893,10 +1029,12 @@ export function summarizePossessions(events: PossessionEvent[], integrity: Ledge
     verifiedSuccessfulAbstentions,
     verifiedEvaluatedAbstentions,
     judgedSuccessfulAbstentions,
+    judgedFailedAbstentions,
     judgedEvaluatedAbstentions,
     judgedOnlyAbstentions,
     contextsAvoided,
     interferenceAbstentions,
+    unaidedClaimsDemoted,
     verifiedDecisions,
     verifiedGoodDecisions: verifiedGood,
     judgedDecisions,
@@ -1031,12 +1169,22 @@ export function validateShareCardPayload(input: unknown): ShareCardPayloadV1 {
   if (raw.verified_good_decisions > raw.verified_evaluated_decisions || raw.judged_good_decisions > raw.judged_evaluated_decisions) throw new Error("custody arithmetic mismatch: good decisions exceed same-tier evaluated decisions");
   if (raw.verified_successful_abstentions > raw.verified_evaluated_abstentions) throw new Error("custody arithmetic mismatch: verified abstention successes exceed evaluated abstentions");
   if (raw.judged_successful_abstentions + raw.judged_failed_abstentions !== raw.judged_only_abstentions) throw new Error("custody arithmetic mismatch: judged abstention outcomes must equal judged-only abstentions");
-  // The exact-file adapter intentionally verifies prescriptions only. Any verified abstention would require a different bound instrument.
-  if (raw.verified_evaluated_abstentions !== 0 || raw.verified_successful_abstentions !== 0) throw new Error("exact-file verification cannot claim verified abstentions");
-  const verifiedHelpful = raw.verified_good_decisions;
+  // Verified abstentions are now reachable: the exact-file adapter answers the mirror question
+  // (artifact correct AND no observed invocation), so the true-negative cell has a bound
+  // instrument behind it. The old blanket refusal of any non-zero verified abstention is gone,
+  // but the arithmetic that keeps it honest is not — successes still cannot exceed evaluated
+  // (checked above) and verified abstentions still have to fit inside the verified tier totals.
+  if (raw.verified_evaluated_abstentions > raw.verified_evaluated_decisions) throw new Error("custody arithmetic mismatch: verified abstentions exceed verified evaluated decisions");
+  if (raw.verified_successful_abstentions > raw.verified_good_decisions) throw new Error("custody arithmetic mismatch: verified successful abstentions exceed verified good decisions");
+  // Verified abstentions live inside the verified tier totals but they are NOT interventions, so
+  // they have to come out before the intervention arithmetic runs. Leaving them in made a single
+  // verified successful abstention drive `judgedHelpful` negative and refuse the whole card.
+  const verifiedHelpful = raw.verified_good_decisions - raw.verified_successful_abstentions;
+  const verifiedEvaluatedInterventions = raw.verified_evaluated_decisions - raw.verified_evaluated_abstentions;
+  if (verifiedHelpful < 0 || verifiedEvaluatedInterventions < 0) throw new Error("custody arithmetic mismatch: verified abstentions exceed verified totals");
   // A verified decision is good, harmful, OR verified-with-no-procedural-credit. The third
   // state exists because artifact truth and causation are separate questions.
-  const verifiedHarmful = Math.max(0, raw.verified_evaluated_decisions - raw.verified_good_decisions - (raw.verified_neutral_decisions ?? 0));
+  const verifiedHarmful = Math.max(0, verifiedEvaluatedInterventions - verifiedHelpful - (raw.verified_neutral_decisions ?? 0));
   const judgedHelpful = raw.helpful_interventions - verifiedHelpful;
   const judgedHarmful = raw.harmful_interventions - verifiedHarmful;
   if (judgedHelpful < 0 || judgedHarmful < 0) throw new Error("custody arithmetic mismatch: verified intervention counts exceed totals");
@@ -1106,7 +1254,9 @@ export function buildShareCardPayload(summary: PossessionSummary, options: { per
     verified_successful_abstentions: summary.verifiedSuccessfulAbstentions,
     verified_evaluated_abstentions: summary.verifiedEvaluatedAbstentions,
     judged_successful_abstentions: summary.judgedSuccessfulAbstentions,
-    judged_failed_abstentions: summary.failedAbstentions,
+    // The JUDGED cell must carry judged failures only; verified abstention failures belong to
+    // the verified tier, and mixing them broke `judged_successful + judged_failed = judged_only`.
+    judged_failed_abstentions: summary.judgedFailedAbstentions,
     judged_only_abstentions: summary.judgedOnlyAbstentions,
     helpful_interventions: summary.helpfulInterventions,
     harmful_interventions: summary.harmfulInterventions,

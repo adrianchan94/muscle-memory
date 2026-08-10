@@ -38,6 +38,16 @@ export function renderAgentBoxScore(summary: PossessionSummary, options: { agent
   const lines = [
     `MUSCLE MEMORY · DECISION REPORT · ${stage}`,
     `INTERVENTIONS · ${summary.observedInterventions} served · ${summary.observedHelpfulInterventions} helped · ${summary.observedHarmfulInterventions} harmed${neutral}`,
+    // ADHERENCE is reported SEPARATELY from efficacy, and never folded into the helped/harmed line.
+    // A prescription the agent ignored is a failed handoff, not a bad skill. Measured: the FREE arm
+    // closed the loop 0/9 while FORCED closed 9/9 at identical task success (burst-possession).
+    ...(summary.prescriptionsIssued > 0
+      ? [`ADHERENCE · ${summary.prescriptionsIssued} prescribed · ${summary.prescriptionsAdheredTo} invoked · `
+         + `${summary.prescriptionsNeverInvoked} never invoked · ${summary.prescriptionsUnclosed} unclosed`
+         + (summary.prescriptionsNeverInvoked > 0
+            ? ` · the gap is handoff, not skill quality`
+            : ``)]
+      : []),
     `ABSTENTIONS · ${summary.observedAbstentions} · ${summary.observedSuccessfulAbstentions} succeeded unaided · ${summary.observedFailedAbstentions} failed`,
     `SKILLS · ${activeSkills} active · ${provenSkills} proven`,
   ];

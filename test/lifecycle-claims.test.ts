@@ -9,12 +9,35 @@
 // carrying the muscle-memory provenance tag, and it reads age from the usage store rather than
 // file mtime. Get any of those wrong and the test passes while proving nothing — which is what
 // my first three attempts did.
-import { expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync, readdirSync } from "node:fs";
+import { afterAll, expect, test } from "bun:test";
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runAutonomousPrune } from "../mods/lifecycle";
 import { STATE_DIR, USAGE_PATH } from "../mods/core";
+
+// This suite mutates and retires synthetic skills. Never inherit the caller's MEMORY_DIR: an
+// ad-hoc `bun test` from a live Letta seat otherwise writes stale-unused-skill-* fixtures into the
+// agent's real Skill shelf. Own both mutable shelves for this file and restore the process env when
+// the suite ends. The package test command is serialized, so this scoped override cannot overlap
+// another file.
+const envBefore = {
+  agentSkills: process.env.MM_AGENT_SKILLS_DIR,
+  globalSkills: process.env.MM_GLOBAL_SKILLS_DIR,
+};
+const claimsRoot = mkdtempSync(join(tmpdir(), "mm-lifecycle-claims-"));
+const claimsShelf = join(claimsRoot, "agent-skills");
+const claimsGlobal = join(claimsRoot, "global-skills");
+process.env.MM_AGENT_SKILLS_DIR = claimsShelf;
+process.env.MM_GLOBAL_SKILLS_DIR = claimsGlobal;
+
+afterAll(() => {
+  if (envBefore.agentSkills === undefined) delete process.env.MM_AGENT_SKILLS_DIR;
+  else process.env.MM_AGENT_SKILLS_DIR = envBefore.agentSkills;
+  if (envBefore.globalSkills === undefined) delete process.env.MM_GLOBAL_SKILLS_DIR;
+  else process.env.MM_GLOBAL_SKILLS_DIR = envBefore.globalSkills;
+  rmSync(claimsRoot, { recursive: true, force: true });
+});
 
 // A unique name per test. Sharing one name coupled these tests through the shelf and the
 // quarantine directory, which passed locally and failed in CI — order and timing dependent.
@@ -23,11 +46,7 @@ const nextName = () => `stale-unused-skill-${++seq}`;
 
 /** A skill that IS a genuine prune candidate: agent-local, managed, aged, zero uses. */
 function ownShelf(): string {
-  // Another suite deletes MEMORY_DIR mid-run, so this file sets its own rather than inheriting
-  // one. Same leak class that made box-score depend on whichever test ran first.
-  if (!process.env.MEMORY_DIR) process.env.MEMORY_DIR = mkdtempSync(join(tmpdir(), "mm-claims-mem-"));
-  if (!process.env.MM_GLOBAL_SKILLS_DIR) process.env.MM_GLOBAL_SKILLS_DIR = mkdtempSync(join(tmpdir(), "mm-claims-glob-"));
-  return join(process.env.MEMORY_DIR, "skills");
+  return claimsShelf;
 }
 
 function eligibleSkill(): { shelf: string; file: string; name: string; ctx: { agentId: string } } {

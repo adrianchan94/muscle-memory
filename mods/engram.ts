@@ -1,3 +1,5 @@
+import { homedir } from "node:os";
+import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 // muscle-memory · engram module (split from index.ts — behavior-preserving).
 import { join } from "node:path";
 import { NEOCORTEX_BLOCK, Row } from "./core";
@@ -291,6 +293,60 @@ export function guardDecision(toolName: string, args: Record<string, unknown>, d
 
 
 /** Render the consolidated-skills index for a core-memory block (char-bounded, head preserved). Pure. */
+/** LOCAL-BACKEND PUSH: write the consolidated skill index where letta inlines it every turn.
+ *
+ * Verified by live probe 2026-08-09 (6 runs, evidence from the agent's own messages.jsonl):
+ * writing `<memfs>/<agentId>/memory/system/<name>.md` AND GIT-COMMITTING it makes the content
+ * reach the agent with ZERO tool calls, both cross-run and MID-run (a commit at tool_end lands in
+ * the next request). An UNCOMMITTED file, or one outside `memory/system/`, is INVISIBLE.
+ *
+ * This is the local counterpart to syncNeocortexBlock, which uses the SDK blocks API and is
+ * CLOUD-ONLY (on local, letta.client throws "Missing LETTA_API_KEY" and the error is swallowed).
+ *
+ * WHY PUSH AT ALL: MM was loaded and never called — 0 tool calls across 21 real task
+ * conversations. Models know they should invoke a tool 26.5-54% of the time and still do not
+ * (arXiv 2605.14038); the belief is decodable in hidden states, so the failure is cognition->action
+ * and no amount of asking fixes it. Every production system pushes context rather than requesting
+ * a call. This surfaces WHAT IS AVAILABLE; it never invokes a skill and never grants credit.
+ */
+export function syncNeocortexMemfs(agentId: string | null, body: string, opts: { memfsRoot?: string; commit?: boolean } = {}): boolean {
+  const id = String(agentId || "").trim();
+  if (!id) return false;
+  try {
+    // PATH RESOLUTION IS THE WHOLE TRICK. letta resolves the memfs root differently per backend:
+    //   getScopedMemoryFilesystemRoot(agentId) -> LOCAL: <storage>/memfs/<agentId>/memory
+    //                                            CLOUD: ~/.letta/agents/<agentId>/memory
+    // where <storage> = LETTA_LOCAL_BACKEND_DIR ?? ~/.letta/lc-local-backend.
+    // Writing to the cloud path while running local produces a file NOTHING READS — verified: the
+    // agent ignored it entirely. Prefer whichever root already exists, local first.
+    const localRoot = join(process.env.LETTA_LOCAL_BACKEND_DIR || join(homedir(), ".letta", "lc-local-backend"),
+                           "memfs", id, "memory");
+    const cloudRoot = join(homedir(), ".letta", "agents", id, "memory");
+    const root = opts.memfsRoot || (existsSync(localRoot) ? localRoot : (existsSync(cloudRoot) ? cloudRoot : localRoot));
+    const dir = join(root, "system");
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, "muscle-memory.md");
+    // memfs enforces a FRONTMATTER CONTRACT via a pre-commit hook: every system/*.md must start
+    // with a --- block carrying a description. Without it `git commit` FAILS and the file stays
+    // staged-but-uncommitted — and the projection reads `git ls-tree HEAD`, so an uncommitted file
+    // is INVISIBLE. That is a silent no-op: the write "succeeds", the agent never sees it.
+    const withFm = body.startsWith("---")
+      ? body
+      : `---\ndescription: Skills muscle-memory has indexed for this agent; invoke by name with the Skill tool.\n---\n\n${body}`;
+    const prev = existsSync(file) ? readFileSync(file, "utf8") : "";
+    if (prev === withFm) return true;              // idempotent: no churn, no needless commit
+    writeFileSync(file, withFm);
+    if (opts.commit === false) return true;
+    // The COMMIT is load-bearing: an uncommitted memfs file is not inlined.
+    const { spawnSync } = require("node:child_process") as typeof import("node:child_process");
+    const run = (args: string[]) => spawnSync("git", args, { cwd: root, encoding: "utf8", timeout: 10000 });
+    if (!existsSync(join(root, ".git"))) run(["init", "-q"]);
+    run(["add", "system/muscle-memory.md"]);
+    run(["-c", "user.email=mm@local", "-c", "user.name=muscle-memory", "commit", "-q", "-m", "mm: sync skill index"]);
+    return true;
+  } catch { return false; }   // push is best-effort; a failure must never break the turn
+}
+
 export function buildNeocortexBlock(managed: Array<{ name: string; description: string }>, opts: { limit?: number } = {}): string {
   const limit = opts.limit ?? 4000;
   const head = `# muscle-memory · consolidated skills (neocortex)\n# ${managed.length} learned skill(s); invoke by name with the Skill tool.\n`;
@@ -322,7 +378,13 @@ export function reachFn(root: unknown, path: readonly string[]): ((...args: unkn
   let cur: unknown = root;
   let receiver: unknown = null;
   for (const key of path) {
-    if (!cur || typeof cur !== "object") return null;
+    // letta-code hands mods a CALLABLE LAZY PROXY as `letta.client` (typeof "function"), so a
+    // guard of `typeof !== "object"` nulls at step 0 and every native sync becomes a silent
+    // no-op — swallowed by the caller's catch. MM_NATIVE=blocks therefore NEVER worked in ANY
+    // environment; verified by live probe 2026-08-09 (reachFn(lazyProxy, ...) = null vs a plain
+    // object = function). Functions are legitimate property carriers; accept them.
+    if (cur === null || cur === undefined) return null;
+    if (typeof cur !== "object" && typeof cur !== "function") return null;
     receiver = cur;
     cur = Reflect.get(cur, key); // unknown-assignable; no shape assertion
   }

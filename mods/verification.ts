@@ -13,7 +13,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { qualifyingInvocation } from "./invocation";
+import { anyQualifyingInvocation, qualifyingInvocation } from "./invocation";
 import { loadPossessionEvents } from "./possessions";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -290,7 +290,11 @@ export function isStoredVerificationReceiptBound(bindingInput: unknown, receiptI
 }
 
 export function verifyExactFilePossession(decision: PossessionDecisionEvent): InstrumentVerifiedResult {
-  if (decision.action !== "prescribe") throw new Error("exact-file verification supports prescribed-skill possessions only");
+  // Both actions are verifiable. PRESCRIBE asks "is the artifact right and did the prescribed
+  // skill cause it". ABSTAIN asks the mirror: "is the artifact right and did NO skill run" —
+  // an instrument-derived correct abstention. Refusing abstains here was the second of two
+  // guards that made the true-negative cell permanently self-reported.
+  if (decision.action !== "prescribe" && decision.action !== "abstain") throw new Error("unknown decision action");
   const binding = decision.verification;
   if (!binding) throw new Error("possession has no pre-work verification binding");
   if (binding.schema !== VERIFICATION_BINDING_SCHEMA || binding.adapter_id !== EXACT_FILE_ADAPTER_ID || binding.adapter_version !== ADAPTER_VERSION) {
@@ -354,7 +358,37 @@ export function verifyExactFilePossession(decision: PossessionDecisionEvent): In
         verifiedAt,
       })
     : null;
-  const proceduralCredit = matched && !preExisting && invocation !== null;
+  // ABSTENTION IS A DECISION, NOT A GAP — and until now it could not be VERIFIED.
+  // A verification binding was refused on abstain possessions, so `verifiedSuccessfulAbstentions`
+  // was structurally always 0: the true-negative cell — the one cell no public benchmark scores —
+  // could only ever be self-reported by the agent that made the call.
+  // The instrument already holds both facts needed to derive it. For a PRESCRIBE, credit means
+  // the artifact is right AND the prescribed skill was observed inside the window. For an ABSTAIN
+  // the mirror question is: is the artifact right AND was NO skill invoked? That is an
+  // instrument-derived correct abstention — the agent genuinely succeeded unaided.
+  //
+  // WINDOW CHOICE, deliberately: the mirror predicate uses the WIDEST possible window, not the
+  // baseline..verified window the prescribe lane uses. A prescription must prove a POSITIVE
+  // ("this skill ran, inside the window"), so a tight window is conservative there. An abstention
+  // proves a NEGATIVE ("nothing ran"), and for a negative a tight window is the LOOSE direction —
+  // it lets a skill that ran just outside the edges pass as "unaided". Any authenticated
+  // invocation bound to this possession and this decision disqualifies, whenever it happened.
+  // The same widest window is used again at the signing boundary and again at read time, so all
+  // three layers ask the identical question and can never disagree into an accidental award.
+  const abstained = decision.action === "abstain";
+  const anyInvocation = abstained
+    ? anyQualifyingInvocation({
+        possessionId: decision.possession_id,
+        decisionEventId: decision.event_id,
+        baselineAt: 0,
+        decisionAt: 0,
+        verifiedAt: Number.MAX_SAFE_INTEGER,
+      })
+    : null;
+  const abstentionCredit = abstained && matched && !preExisting && anyInvocation === null;
+  const proceduralCredit = abstained
+    ? abstentionCredit
+    : matched && !preExisting && invocation !== null;
   const verification: InstrumentVerificationReceipt = {
     schema: VERIFICATION_RECEIPT_SCHEMA,
     adapter_id: EXACT_FILE_ADAPTER_ID,
@@ -373,14 +407,28 @@ export function verifyExactFilePossession(decision: PossessionDecisionEvent): In
   // Artifact truth and causation are separate questions, and the ANSWER STRING has to say so.
   // A match on a target that was already correct at registration is not help - reporting it as
   // "helped" mis-trains the agent reading it, even though the scoreboard would demote it later.
-  const result: OutcomeResult = !matched ? "harmed" : proceduralCredit ? "helped" : "neutral";
-  const reason = !matched
-    ? "exact-file SHA-256 did not match the bound manifest"
-    : proceduralCredit
-      ? "exact-file SHA-256 was wrong at registration and matches the bound manifest now"
-      : preExisting
-        ? "exact-file SHA-256 matched the bound manifest, but the target already matched before the prescription — artifact verified, no procedural credit"
-        : "exact-file SHA-256 matches now, but no invocation of the prescribed skill was observed — artifact verified, no procedural credit";
+  // The ABSTAIN lane has its own result vocabulary, and it is not the prescribe vocabulary with
+  // different labels. `harmed` is a claim about a skill that ran; an abstention has no skill, so
+  // a wrong artifact is `failed_unaided` — the agent tried alone and did not get there. Mapping
+  // it to `harmed` would both be false and be rejected downstream by compatible().
+  const result: OutcomeResult = abstained
+    ? (proceduralCredit ? "succeeded_unaided" : "failed_unaided")
+    : (!matched ? "harmed" : proceduralCredit ? "helped" : "neutral");
+  const reason = abstained
+    ? (!matched
+      ? "exact-file SHA-256 did not match the bound manifest — the unaided attempt did not land"
+      : proceduralCredit
+        ? "exact-file SHA-256 was wrong at registration, matches the bound manifest now, and NO skill invocation was observed — instrument-derived successful abstention"
+        : preExisting
+          ? "exact-file SHA-256 matched the bound manifest, but the target already matched before the decision — nothing was accomplished unaided"
+          : "exact-file SHA-256 matches now, but a skill invocation WAS observed inside this possession — this was not an unaided success")
+    : (!matched
+      ? "exact-file SHA-256 did not match the bound manifest"
+      : proceduralCredit
+        ? "exact-file SHA-256 was wrong at registration and matches the bound manifest now"
+        : preExisting
+          ? "exact-file SHA-256 matched the bound manifest, but the target already matched before the prescription — artifact verified, no procedural credit"
+          : "exact-file SHA-256 matches now, but no invocation of the prescribed skill was observed — artifact verified, no procedural credit");
   return {
     result,
     evidence_tier: "verified",

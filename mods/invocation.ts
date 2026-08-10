@@ -90,6 +90,28 @@ export function loadInvocations(): SkillInvocationEvent[] {
  * and finished inside the window between the baseline capture and the verification. More than one
  * match is ambiguity, and ambiguity earns nothing.
  */
+/** Was ANY skill invoked inside this possession's window? The mirror of qualifyingInvocation.
+ * A correct ABSTENTION means the agent genuinely worked unaided: the artifact is right AND no
+ * skill ran. Matching on a null skill name would return null by accident; this asks the real
+ * question, so the true-negative cell is derived by the instrument rather than self-reported. */
+export function anyQualifyingInvocation(opts: {
+  possessionId: string;
+  decisionEventId: string;
+  baselineAt: number;
+  decisionAt: number;
+  verifiedAt: number;
+  invocations?: SkillInvocationEvent[];
+}): SkillInvocationEvent | null {
+  const rows = (opts.invocations ?? loadInvocations()).filter((row) =>
+    row.possession_id === opts.possessionId
+    && row.decision_event_id === opts.decisionEventId
+    && row.started_at >= opts.decisionAt
+    && row.started_at >= opts.baselineAt
+    && row.ended_at >= row.started_at
+    && row.ended_at <= opts.verifiedAt);
+  return rows.length ? rows[0]! : null;
+}
+
 export function qualifyingInvocation(opts: {
   possessionId: string;
   decisionEventId: string;

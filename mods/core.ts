@@ -171,7 +171,35 @@ export function agentSkillsDir(ctx?: any): string {
 }
 
 /** Dirs to scan for list/dedup/AUDIT: agent-scoped + global (deduped). Read-only visibility across both. */
-export function scanDirs(ctx?: any): string[] { return [...new Set([agentSkillsDir(ctx), globalSkillsDir()])]; }
+function projectSkillsDir(): string | null {
+  // Letta resolves skills from THREE roots (letta.js packageSkills):
+  //   getAgentSkillsDir(agentId) · resolve(cwd, ".skills") · resolve(HOME, ".letta/skills")
+  // MM previously scanned only the first and third, so a skill installed the documented way
+  // (`--skill-sources project`, cwd/.skills) was SERVED to the agent but INVISIBLE to the router:
+  // measured 0/5 prescribe on near-verbatim description matches, reported as "Closest: none".
+  try { const d = join(process.cwd(), ".skills"); return existsSync(d) ? d : null; } catch { return null; }
+}
+/** Letta 0.30.9+ (PR #3722, LET-10735) added a FOURTH skill root: an explicit environment
+ * directory supplied by managed/remote listeners via `--skills <path>` or LETTA_SKILLS_DIRECTORY.
+ * Letta's own PR #3728 (LET-10789) shows the failure mode this creates: those skills were
+ * installed and INVOCABLE through the Skill tool while being ABSENT from the agent's
+ * available-skills prompt. A shelf MM cannot see is a shelf MM will abstain against while the
+ * skill sits right there — the same class of miss as the cwd/.skills gap above. */
+function environmentSkillsDir(): string | null {
+  try {
+    const d = process.env.LETTA_SKILLS_DIRECTORY;
+    return d && existsSync(d) ? d : null;
+  } catch { return null; }
+}
+export function scanDirs(ctx?: any): string[] {
+  // NOTE ON ORDER: Letta's documented precedence is project > environment > agent > global >
+  // bundled. MM has historically scanned agent-first. That divergence is REAL but is a separate,
+  // evidence-requiring change (it moves which copy of a mirrored skill wins a routing vote and
+  // which shelf a write targets), so it is deliberately NOT altered here. This change only makes
+  // the environment shelf VISIBLE; it is inserted at Letta's relative position among the roots
+  // MM already scans so that adding it cannot reorder the pre-existing three.
+  return [...new Set([agentSkillsDir(ctx), projectSkillsDir(), environmentSkillsDir(), globalSkillsDir()].filter((d): d is string => !!d))];
+}
 
 // ── NATIVE-FIT SHELF RESOLVER (Block N) — name each shelf + its permissions. An autonomous (unattended)
 // loop may READ agent + global (audit/dedup visibility) but may only MUTATE the agent-local shelf: it must
@@ -501,7 +529,8 @@ export const SECRET_TOKEN_RE = /\b(?:(?:sk|pk|ghp|gho|ghu|ghs|xox[baprs])[-_][A-
  */
 export const SECRET_LABEL_RE = /(?:^|[^A-Za-z0-9])[A-Za-z0-9_.-]*(?:secret|passwd|password|token|api[_-]?key)[A-Za-z0-9_.-]*\s*[:=]\s*["']?[^\s"'<>]{6,}/i;
 
-export function scanSkillContent(content: string): { ok: boolean; issues: string[] } {
+export function scanSkillContent(content: string): { ok: boolean; issues: string[];
+  severity: { score: number; tier: "none" | "low" | "medium" | "high"; provenance: readonly string[] } } {
   const c = String(content || "");
   const issues: string[] = [];
   if (SECRET_TOKEN_RE.test(c) || /\b(?:authorization|api[_-]?key|secret|password)\s*[:=]\s*["']?[^\s"'<>]{6,}/i.test(c) || SECRET_LABEL_RE.test(c) || /-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(c)) issues.push("secret-looking credential");
@@ -527,7 +556,19 @@ export function scanSkillContent(content: string): { ok: boolean; issues: string
   if (/\$\([^)]*(?:cat|head|tail|less)[^)]*(?:\.ssh|id_rsa|\.env|\.aws|credentials|\.netrc|passwd|secret|token)/i.test(c) || /(?:curl|wget|nc|ncat)\b[^\n]*(?:\$\(|`)[^\n]*(?:cat|\.ssh|\.env|credentials|secret)/i.test(c)) issues.push("credential exfiltration pattern");
   // obfuscated code execution
   if (/\beval\s*\(\s*(?:atob|Buffer\.from|decodeURIComponent|unescape)\s*\(/i.test(c) || /\bbase64\s+-d\b[^\n]*\|\s*(?:ba)?sh\b/i.test(c) || /\b(?:python3?|node|ruby|perl)\b[^\n]*\s-[ec]\b[^\n]*(?:atob|base64|exec\(|eval)/i.test(c)) issues.push("obfuscated code execution");
-  return { ok: issues.length === 0, issues };
+  // SEVERITY DOSE (2026-08-09). `issues` was already a graded signal and we discarded it into a
+  // boolean. Measured on SkillTrustBench (5,520 real agent-skill packages, Tencent x CUHK): the
+  // count of distinct triggered rules is MONOTONE in ground-truth severity -- median 7 for
+  // malicious, 2 for suspicious, 1 for normal. A single `ok` flag cannot express "risky but not
+  // proven hostile", which is exactly the class a governance layer must be able to name.
+  // `ok` is unchanged byte-for-byte; `severity` is purely additive.
+  const distinct = Array.from(new Set(issues));
+  const severity = {
+    score: distinct.length,
+    tier: distinct.length >= 4 ? "high" : distinct.length >= 2 ? "medium" : distinct.length === 1 ? "low" : "none",
+    provenance: distinct,
+  } as const;
+  return { ok: issues.length === 0, issues, severity };
 }
 
 export function scanSupportFile(path: string, content: string): { ok: boolean; issues: string[] } {
