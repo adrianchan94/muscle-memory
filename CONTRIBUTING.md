@@ -7,7 +7,7 @@ Thanks for caring about Muscle Memory.
 1. **Truth over theater.** No claim without a receipt. Nulls ship at the weight of wins.
 2. **Feature branches only.** Do not push `main`. Open a PR against `main`.
 3. **No npm publish** from contributor workflows unless Adrian explicitly authorizes a separate publish possession.
-4. **Identity.** Public commits for this repo use `Adrian Chan <adrianchanuk@gmail.com>` / GitHub `adrianchan94` for maintainer pushes. Do not introduce work / Prenetics / IM8 identity into commits, paths, docs, or receipts.
+4. **Identity.** Public commits for this repo use the configured maintainer identity. Do not introduce employer, client, or work identity into commits, paths, docs, or receipts.
 5. **Keep the package lean.** Do not stuff controlled research kits, private absolute paths, or demo seats into the npm tarball surface (`files` in `package.json`).
 
 ## Local loop

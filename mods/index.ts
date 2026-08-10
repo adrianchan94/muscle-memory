@@ -43,7 +43,7 @@ import { CURATOR, aggregateTelemetry, buildRegistry, bumpUsage, churnSignal, cov
 import { AUTOPILOT_DEFAULT, AutopilotMode, REVIEW_PROMPT, SemanticFn, applySemanticEvidence, autopilotPlan, buildEvidenceManifest, executeAutopilotPlan, forkAuthor, graduateStagedSkill, isHighConfidenceCreate, loadHandledReflects, managedView, normalizePrescriptionQuery, RERANK_CONF_FLOOR, RERANK_SYSTEM_PROMPT, rerankUserPrompt, PRESCRIBE_SYSTEM_PROMPT, prescribeUserPrompt, parseJudgement, wideCandidates, RerankJudgement, composeEnabled, composePrescription, composeAroundPrimary, selectCompanions, searchSkillsWithContext, flattenContextText, contextCharCap, pickUpdateTarget, reflectSignature, retrievePreferences, reviewAndAuthor, routeSkill, runAutopilot, runReflectiveReview, searchSkills, streamChunkText } from "./autopilot";
 import { friendlyRouteLabel, renderAgentBoxScore, renderMuscleMemoryPanel, summarizeReflectActions } from "./ui";
 import { observeToolStart, observeToolEnd } from "./invocation";
-import { closeNudgeEnabled, closeoutNudge, prescribeNudgeEnabled, prescribeNudge } from "./nudge";
+import { closeNudgeEnabled, closeoutNudge, prescribeNudgeEnabled, prescribeNudge, applyNudgeEnabled, applyNudge } from "./nudge";
 import { initInstrumentKey, instrumentSessionNotice } from "./instrument";
 import { claimBearingVerdict, buildShareCardPayload, loadPossessionEvents, pendingPossessionViews, recordInstrumentVerifiedOutcome, recordPossessionEvent, summarizePossessionLedger, type DecisionRoute, type DifficultyTier, type OutcomeResult, type EvidenceTier, type LifecycleAction, type PossessionDecisionEvent } from "./possessions";
 import { bindExactFileVerificationTask, createExactFileVerificationTask, verifyExactFilePossession } from "./verification";
@@ -545,6 +545,9 @@ async function judgePrescription(dirs: string[], query: string, ctx: any): Promi
     // suppressed forever once the agent goes to the shelf on its own (Skill / muscle_memory_*).
     const consultNudged = new Set<string>();   // conversations whose advisory already fired
     const shelfConsulted = new Set<string>();  // conversations that already consulted MM or a Skill
+    // Re-inject the apply contract once per (conversation, skill) after a Skill invocation or SKILL.md read.
+    const applyNudged = new Set<string>();
+    const pendingApply = new Map<string, string>(); // toolCallId -> skill name, set in tool_start
     disposers.push(letta.events.on("tool_start", (event: any) => {
       try {
         const tool = String(event?.toolName ?? "");
@@ -552,6 +555,23 @@ async function judgePrescription(dirs: string[], query: string, ctx: any): Promi
         // G3: a self-started shelf visit (Skill) or any MM consult permanently silences the advisory.
         if (tool === "Skill" || tool.startsWith("muscle_memory") || tool === "rate_skill" || tool.startsWith("record_agent") || tool.startsWith("verify_agent") || tool.startsWith("register_exact_file")) {
           shelfConsulted.add(String(event?.conversationId ?? "?"));
+        }
+        if (applyNudgeEnabled()) {
+          try {
+            const args: any = event?.args ?? {};
+            if (tool === "Skill") {
+              const skill = String(args.skill ?? args.name ?? args.skill_name ?? "").trim();
+              const callId = String(event?.toolCallId ?? "");
+              if (skill && callId) pendingApply.set(callId, skill);
+            }
+            const probe = String(args.file_path ?? args.path ?? args.command ?? "");
+            const match = /(?:^|[\/])skills[\/]([^\/]+)[\/]SKILL\.md/i.exec(probe) || /(?:^|[\/])([^\/]+)[\/]SKILL\.md/i.exec(probe);
+            const callId = String(event?.toolCallId ?? "");
+            if (match && /SKILL\.md/i.test(probe) && callId) {
+              shelfConsulted.add(String(event?.conversationId ?? "?"));
+              pendingApply.set(callId, match[1]);
+            }
+          } catch { /* apply nudge is advisory; never break tool_start */ }
         }
         const { fp, tmpl } = fingerprint(tool, event?.args ?? {});
         const callId = String(event?.toolCallId ?? "");
@@ -645,6 +665,25 @@ async function judgePrescription(dirs: string[], query: string, ctx: any): Promi
             }
           }
         } catch { /* best-effort */ }
+        // Apply nudge: append the procedural contract to a successful skill body, once per skill/conversation.
+        let applyMsg: { status: string; output: string } | null = null;
+        try {
+          if (applyNudgeEnabled()) {
+            const callId = String(event?.toolCallId ?? "");
+            const skillName = callId ? pendingApply.get(callId) : undefined;
+            if (callId) pendingApply.delete(callId);
+            const status = String(event?.status ?? "");
+            const okRead = status ? status === "success" : (event?.ok ?? !(event?.isError || event?.error));
+            const conversation = String(event?.conversationId ?? "?");
+            const key = conversation + "\u0000" + String(skillName ?? "");
+            if (skillName && okRead && !applyNudged.has(key)) {
+              applyNudged.add(key);
+              const output = String(event?.output ?? event?.resultText ?? "");
+              applyMsg = { status: status || "success", output: output + "\n\n" + applyNudge(skillName, loadPlusMinus()[skillName]) };
+            }
+          }
+        } catch { /* apply nudge is advisory; never break tool_end */ }
+
         // G3 SHELF-CONSULT nudge — opt-in advisory on the FIRST successful ordinary tool result of
         // a conversation with a non-empty shelf and no shelf visit yet. Lowest priority: it must
         // never displace reflex coaching or a close ask, and a thrown error must change nothing.
@@ -670,7 +709,7 @@ async function judgePrescription(dirs: string[], query: string, ctx: any): Promi
         } catch { /* advisory is best-effort; never break the tool stream */ }
         // reflex coaching (failure lane) and the close nudge (success lane) are mutually
         // exclusive by construction: an invocation only exists for a successful call.
-        return coached ? { result: coached } : closePrompt ? { result: closePrompt } : shelfNudge ? { result: shelfNudge } : undefined;
+        return coached ? { result: coached } : closePrompt ? { result: closePrompt } : applyMsg ? { result: applyMsg } : shelfNudge ? { result: shelfNudge } : undefined;
       }));
     } catch { /* tool_end not available on this surface */ }
   }
